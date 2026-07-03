@@ -218,7 +218,10 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
     items_rows = await pool.fetch(
         """
         SELECT ci.*, q.max_score AS quiz_max_score, q.weight_pct AS quiz_weight,
-               h.deadline_at, h.open_at, h.close_at, h.max_score AS hw_max_score, h.weight_pct AS hw_weight
+               q.open_at AS quiz_open_at, q.deadline_at AS quiz_deadline_at, q.close_at AS quiz_close_at,
+               q.time_limit_minutes,
+               h.deadline_at AS hw_deadline_at, h.open_at AS hw_open_at, h.close_at AS hw_close_at,
+               h.max_score AS hw_max_score, h.weight_pct AS hw_weight
         FROM course_items ci
         LEFT JOIN quizzes q ON q.item_id = ci.id
         LEFT JOIN homework h ON h.item_id = ci.id
@@ -239,7 +242,10 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
             "is_visible": r["is_visible"],
             "sequential_unlock": r["sequential_unlock"],
             "note": r["note"],
-            "deadline_at": str(r["deadline_at"]) if r["deadline_at"] else None,
+            "open_at": str(r["quiz_open_at"] or r["hw_open_at"]) if (r["quiz_open_at"] or r["hw_open_at"]) else None,
+            "deadline_at": str(r["quiz_deadline_at"] or r["hw_deadline_at"]) if (r["quiz_deadline_at"] or r["hw_deadline_at"]) else None,
+            "close_at": str(r["quiz_close_at"] or r["hw_close_at"]) if (r["quiz_close_at"] or r["hw_close_at"]) else None,
+            "time_limit_minutes": r["time_limit_minutes"],
             "weight_pct": float(r["quiz_weight"] or r["hw_weight"] or 0),
             "max_score": r["quiz_max_score"] or r["hw_max_score"],
         }
@@ -376,6 +382,8 @@ async def get_lesson(item_id: int, user: dict = Depends(get_current_user)):
         item_id,
     )
     return {
+        "type": "lesson",
+        "is_owner": user["role"] == "admin" or (user["role"] == "teacher" and _course["teacher_id"] == user["id"]),
         "item": {"id": item["id"], "title": item["title"], "note": item["note"], "course_id": item["course_id"]},
         "content": lesson["content"],
         "youtube_url": lesson["youtube_url"],

@@ -41,6 +41,8 @@ async def get_homework(item_id: int, user: dict = Depends(get_current_user)):
     pool = await get_pool()
     hw = await pool.fetchrow("SELECT * FROM homework WHERE item_id = $1", item_id)
     result = {
+        "type": "homework",
+        "is_owner": user["role"] == "admin" or (user["role"] == "teacher" and course["teacher_id"] == user["id"]),
         "item": {"id": item["id"], "title": item["title"], "note": item["note"], "course_id": item["course_id"]},
         "description": hw["description"],
         "open_at": str(hw["open_at"]) if hw["open_at"] else None,

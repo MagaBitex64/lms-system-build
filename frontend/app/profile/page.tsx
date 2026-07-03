@@ -1,62 +1,78 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { UserRound, Mail, ShieldCheck } from 'lucide-react'
+import useSWR from 'swr'
+import { UserRound, Mail, ShieldCheck, CalendarDays } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
-import { useI18n, I18nProvider } from '@/lib/i18n'
+import { useI18n } from '@/lib/i18n'
 import { api } from '@/lib/api'
-import { Badge, Card, PageHeader } from '../components/ui'
+import { Badge, Card, PageHeader, Spinner, ErrorState, Avatar, FadeIn } from '../components/ui'
 
-function ProfilePageContent() {
-  const { t } = useI18n()
-  const { user } = useAuth()
-  const [profile, setProfile] = useState<{ email: string; full_name: string; role: string } | null>(null)
-  const [loading, setLoading] = useState(true)
+type Profile = {
+  email: string
+  full_name: string
+  role: string
+  created_at?: string
+}
 
-  useEffect(() => {
-    api('/auth/me')
-      .then((data) => setProfile(data as any))
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
-
-  if (loading) return <div className="rounded-[28px] border border-slate-200 bg-white/80 p-8 text-sm text-slate-500">{t('loading')}</div>
-  if (!profile) return <div className="rounded-[28px] border border-rose-200 bg-rose-50 p-8 text-sm text-rose-600">{t('errorOccurred')}</div>
-
-  return (
-    <div className="space-y-6">
-      <PageHeader eyebrow="Profile" title={profile.full_name} description="Keep your profile details and account context close at hand." />
-      <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
-        <Card className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-2xl bg-slate-100 p-3 text-slate-700"><UserRound size={18} /></div>
-            <div>
-              <p className="text-sm font-semibold text-slate-500">Account</p>
-              <h2 className="text-xl font-semibold text-slate-950">{profile.full_name}</h2>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {user?.role === 'student' ? <Badge>{t('student')}</Badge> : null}
-            {user?.role === 'teacher' ? <Badge>{t('teacher')}</Badge> : null}
-            {user?.role === 'admin' ? <Badge>{t('admin')}</Badge> : null}
-            <Badge>{profile.role}</Badge>
-          </div>
-        </Card>
-        <Card className="space-y-4">
-          <div className="space-y-3 text-sm text-slate-600">
-            <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3"><Mail size={16} /><span>{profile.email}</span></div>
-            <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3"><ShieldCheck size={16} /><span>{t('role')}: {profile.role}</span></div>
-          </div>
-        </Card>
-      </div>
-    </div>
-  )
+const roleTone: Record<string, 'primary' | 'success' | 'warning' | 'neutral' | 'danger'> = {
+  admin: 'danger',
+  teacher: 'primary',
+  student: 'success',
 }
 
 export default function ProfilePage() {
+  const { t } = useI18n()
+  const { user } = useAuth()
+  const { data, error, isLoading } = useSWR<Profile>('/auth/me', (url: string) => api(url) as Promise<Profile>)
+
+  if (isLoading) return <Spinner />
+  if (error || !data) return <ErrorState message={t('errorOccurred')} />
+
+  const role = data.role || user?.role || 'student'
+  const joined = data.created_at ? new Date(data.created_at).toLocaleDateString() : '—'
+
+  const details = [
+    { icon: <Mail size={16} />, label: t('email'), value: data.email },
+    { icon: <ShieldCheck size={16} />, label: t('role'), value: t(role as never) || role },
+    { icon: <CalendarDays size={16} />, label: t('memberSince'), value: joined },
+  ]
+
   return (
-    <I18nProvider>
-      <ProfilePageContent />
-    </I18nProvider>
+    <div className="space-y-6">
+      <PageHeader eyebrow={t('profile')} title={data.full_name} description={data.email} />
+
+      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.4fr]">
+        <FadeIn>
+          <Card className="flex flex-col items-center gap-4 py-8 text-center">
+            <Avatar name={data.full_name} className="size-20 text-2xl" />
+            <div className="space-y-1">
+              <h2 className="text-xl font-semibold text-foreground">{data.full_name}</h2>
+              <p className="text-sm text-muted">{data.email}</p>
+            </div>
+            <Badge tone={roleTone[role] ?? 'neutral'}>{t(role as never) || role}</Badge>
+          </Card>
+        </FadeIn>
+
+        <FadeIn delay={60}>
+          <Card className="space-y-5">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <UserRound size={16} className="text-primary" />
+              {t('accountDetails')}
+            </div>
+            <dl className="divide-y divide-border">
+              {details.map((d) => (
+                <div key={d.label} className="flex items-center justify-between gap-4 py-3.5">
+                  <dt className="flex items-center gap-2.5 text-sm text-muted">
+                    <span className="text-muted">{d.icon}</span>
+                    {d.label}
+                  </dt>
+                  <dd className="text-sm font-medium text-foreground">{d.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </Card>
+        </FadeIn>
+      </div>
+    </div>
   )
 }

@@ -79,7 +79,11 @@ CREATE INDEX IF NOT EXISTS idx_materials_lesson ON lesson_materials(lesson_id);
 CREATE TABLE IF NOT EXISTS quizzes (
     item_id BIGINT PRIMARY KEY REFERENCES course_items(id) ON DELETE CASCADE,
     max_score INTEGER NOT NULL DEFAULT 100,
-    weight_pct NUMERIC(5,2) NOT NULL DEFAULT 0
+    weight_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+    open_at TIMESTAMPTZ,
+    deadline_at TIMESTAMPTZ,
+    close_at TIMESTAMPTZ,
+    time_limit_minutes INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS quiz_questions (
@@ -167,11 +171,20 @@ CREATE INDEX IF NOT EXISTS idx_enrollments_status ON enrollments(status);
 CREATE INDEX IF NOT EXISTS idx_enrollments_student ON enrollments(student_id);
 """
 
+MIGRATIONS = [
+    "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS open_at TIMESTAMPTZ",
+    "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ",
+    "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS close_at TIMESTAMPTZ",
+    "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS time_limit_minutes INTEGER",
+]
+
 
 async def main() -> None:
     conn = await asyncpg.connect(dsn=DATABASE_URL)
     try:
         await conn.execute(SCHEMA)
+        for migration in MIGRATIONS:
+            await conn.execute(migration)
         print("Schema initialized successfully.")
     finally:
         await conn.close()

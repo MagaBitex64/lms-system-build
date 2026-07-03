@@ -1,134 +1,399 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowRight, BookOpen, CheckCircle2, Lock, MessageSquareText, Sparkles } from 'lucide-react'
-import { useI18n, I18nProvider } from '@/lib/i18n'
-import { api } from '@/lib/api'
-import { Badge, Button, Card, FadeIn, PageHeader } from '../../components/ui'
+import useSWR from 'swr'
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  CalendarClock,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  FileText,
+  ListChecks,
+  Lock,
+  Megaphone,
+  PlusCircle,
+  Settings2,
+  UserRound,
+} from 'lucide-react'
+import { useAuth } from '@/lib/auth'
+import { useI18n, type TKey } from '@/lib/i18n'
+import { api, fetcher } from '@/lib/api'
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  FadeIn,
+  Field,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+  Spinner,
+  Textarea,
+} from '@/components/ui'
+
+type ItemType = 'lesson' | 'quiz' | 'homework'
 
 type Item = {
   id: number
-  type: string
+  type: ItemType
   title: string
   position: number
   is_visible: boolean
   sequential_unlock: boolean
-  note: string
+  note?: string
   locked?: boolean
   completed?: boolean
-  score?: number
+  score?: number | null
   max_score?: number | null
   weight_pct?: number
+  open_at?: string | null
+  deadline_at?: string | null
+  close_at?: string | null
+  time_limit_minutes?: number | null
 }
 
 type Course = {
   id: number
   title: string
   description: string
-  announcement: string
+  announcement?: string
   teacher_name: string
   is_published: boolean
-  is_owner: boolean
+  is_owner?: boolean
   enrollment_status?: string | null
   items: Item[] | null
 }
 
-function CoursePageContent() {
-  const { t } = useI18n()
-  const params = useParams()
-  const courseId = params.id
-  const [course, setCourse] = useState<Course | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+const TYPE_ICON: Record<ItemType, ReactNode> = {
+  lesson: <FileText size={18} />,
+  quiz: <ListChecks size={18} />,
+  homework: <BookOpen size={18} />,
+}
 
-  useEffect(() => {
-    if (!courseId) return
-    api(`/courses/${courseId}`)
-      .then(setCourse)
-      .catch((err) => setError((err as Error).message || t('errorOccurred')))
-      .finally(() => setLoading(false))
-  }, [courseId, t])
-
-  if (loading) return <div className="rounded-[28px] border border-slate-200 bg-white/80 p-8 text-sm text-slate-500">{t('loading')}</div>
-  if (error || !course) return <div className="rounded-[28px] border border-rose-200 bg-rose-50 p-8 text-sm text-rose-600">{error || t('errorOccurred')}</div>
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        eyebrow="Course overview"
-        title={course.title}
-        description={course.description}
-        actions={course.enrollment_status ? <Badge>{t(course.enrollment_status as keyof typeof t)}</Badge> : null}
-      />
-
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        <Card className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-2xl bg-sky-100 p-3 text-sky-700"><Sparkles size={18} /></div>
-            <div>
-              <p className="text-sm font-semibold text-slate-500">Instructor</p>
-              <h2 className="text-xl font-semibold text-slate-950">{course.teacher_name}</h2>
-            </div>
-          </div>
-          <p className="text-sm leading-7 text-slate-600">{course.announcement || 'This course is ready for learners to explore at their own pace.'}</p>
-          <div className="flex flex-wrap gap-2">
-            <Badge>{t('teacher')}: {course.teacher_name}</Badge>
-            <Badge>{course.items?.length ?? 0} items</Badge>
-          </div>
-        </Card>
-        <Card className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-2xl bg-slate-100 p-3 text-slate-700"><BookOpen size={18} /></div>
-            <div>
-              <p className="text-sm font-semibold text-slate-500">What’s inside</p>
-              <h2 className="text-xl font-semibold text-slate-950">Structured learning</h2>
-            </div>
-          </div>
-          <p className="text-sm leading-7 text-slate-600">Every lesson, quiz, and assignment is organized to support a premium, distraction-free experience.</p>
-        </Card>
-      </div>
-
-      {course.items ? (
-        <div className="grid gap-4">
-          {course.items.map((item, index) => (
-            <FadeIn key={item.id} transition={{ delay: index * 0.04 }}>
-              <Card className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-start gap-3">
-                  <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
-                    {item.type === 'quiz' ? <MessageSquareText size={18} /> : item.type === 'homework' ? <BookOpen size={18} /> : <Sparkles size={18} />}
-                  </div>
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-semibold text-slate-950">{item.title}</h3>
-                      {item.locked ? <Badge className="border-amber-200 bg-amber-50 text-amber-700">{t('locked')}</Badge> : null}
-                      {item.completed ? <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">{t('completed')}</Badge> : null}
-                    </div>
-                    <p className="mt-2 text-sm leading-7 text-slate-600">{item.note || `${t(item.type === 'lesson' ? 'lesson' : item.type === 'quiz' ? 'quiz' : 'homework')} included in this course.`}</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  {item.max_score !== undefined && item.max_score !== null ? <Badge>{t('maxScore')}: {item.max_score}</Badge> : null}
-                  <Button asChild>
-                    <Link href={`/items/${item.id}`}>Open item <ArrowRight size={16} /></Link>
-                  </Button>
-                </div>
-              </Card>
-            </FadeIn>
-          ))}
-        </div>
-      ) : (
-        <Card>{t('noData')}</Card>
-      )}
-    </div>
-  )
+function fmtDate(value?: string | null) {
+  if (!value) return null
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleString()
 }
 
 export default function CoursePage() {
+  const { t } = useI18n()
+  const { user } = useAuth()
+  const params = useParams()
+  const id = params.id as string
+  const { data: course, error, isLoading, mutate } = useSWR<Course>(id ? `/courses/${id}` : null, fetcher)
+
+  const [addOpen, setAddOpen] = useState(false)
+  const [itemType, setItemType] = useState<ItemType>('lesson')
+  const [itemTitle, setItemTitle] = useState('')
+  const [itemNote, setItemNote] = useState('')
+  const [itemVisible, setItemVisible] = useState(true)
+  const [itemSequential, setItemSequential] = useState(false)
+  const [working, setWorking] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  if (isLoading) return <Spinner className="mt-20" />
+  if (error || !course) return <ErrorState message={t('errorOccurred')} />
+
+  const items = course.items ?? []
+  const completed = items.filter((i) => i.completed).length
+  const isOwner = !!course.is_owner
+  const courseId = course.id
+
+  async function createItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!itemTitle.trim()) return
+    setWorking(true)
+    setActionError(null)
+    try {
+      await api(`/courses/${id}/items`, {
+        body: {
+          type: itemType,
+          title: itemTitle,
+          note: itemNote,
+          is_visible: itemVisible,
+          sequential_unlock: itemSequential,
+        },
+      })
+      setItemTitle('')
+      setItemNote('')
+      setItemType('lesson')
+      setItemVisible(true)
+      setItemSequential(false)
+      setAddOpen(false)
+      await mutate()
+    } catch (err) {
+      setActionError((err as Error).message || t('errorOccurred'))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  async function patchItem(itemId: number, body: Record<string, unknown>) {
+    setActionError(null)
+    try {
+      await api(`/courses/items/${itemId}`, { method: 'PATCH', body })
+      await mutate()
+    } catch (err) {
+      setActionError((err as Error).message || t('errorOccurred'))
+    }
+  }
+
+  async function requestEnrollment() {
+    setWorking(true)
+    setActionError(null)
+    try {
+      await api(`/enrollments/request/${courseId}`, { method: 'POST' })
+      await mutate()
+    } catch (err) {
+      setActionError((err as Error).message || t('errorOccurred'))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  const enrollmentAction =
+    !isOwner && user?.role === 'student' && course.enrollment_status !== 'approved' ? (
+      <Button onClick={requestEnrollment} disabled={working || course.enrollment_status === 'pending'}>
+        {course.enrollment_status === 'pending' ? t('enrollPending') : t('enroll')}
+      </Button>
+    ) : null
+
   return (
-    <I18nProvider>
-      <CoursePageContent />
-    </I18nProvider>
+    <div className="space-y-8">
+      <Link href="/courses" className="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground">
+        <ArrowLeft size={16} />
+        {t('catalog')}
+      </Link>
+
+      <PageHeader
+        eyebrow={t('courses')}
+        title={course.title}
+        description={course.description}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {course.enrollment_status && (
+              <Badge tone={course.enrollment_status === 'approved' ? 'success' : 'warning'}>
+                {t(course.enrollment_status as TKey)}
+              </Badge>
+            )}
+            <Badge tone={course.is_published ? 'primary' : 'neutral'}>
+              {course.is_published ? t('published') : t('draft')}
+            </Badge>
+            {isOwner && (
+              <>
+                <Button asChild variant="outline">
+                <Link href={`/teacher/courses/${courseId}/gradebook`}>{t('gradebook')}</Link>
+                </Button>
+                <Button onClick={() => setAddOpen(true)}>
+                  <PlusCircle size={16} />
+                  {t('addItem')}
+                </Button>
+              </>
+            )}
+            {enrollmentAction}
+          </div>
+        }
+      />
+
+      {actionError && <ErrorState message={actionError} />}
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="flex items-center gap-4">
+          <div className="flex size-11 items-center justify-center rounded-xl bg-primary-soft text-primary">
+            <UserRound size={20} />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted">{t('instructor')}</p>
+            <p className="font-semibold text-foreground">{course.teacher_name}</p>
+          </div>
+        </Card>
+        <Card className="flex items-center gap-4">
+          <div className="flex size-11 items-center justify-center rounded-xl bg-success-soft text-success">
+            <BookOpen size={20} />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted">{t('lessons')}</p>
+            <p className="font-semibold text-foreground">{items.length} {t('itemsCount')}</p>
+          </div>
+        </Card>
+        <Card className="flex items-center gap-4">
+          <div className="flex size-11 items-center justify-center rounded-xl bg-warning-soft text-warning">
+            <CheckCircle2 size={20} />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted">{t('completed')}</p>
+            <p className="font-semibold text-foreground">{completed} {t('of')} {items.length}</p>
+          </div>
+        </Card>
+      </div>
+
+      {course.announcement && (
+        <Card className="flex gap-3 border-primary/20 bg-primary-soft/50">
+          <Megaphone size={20} className="mt-0.5 shrink-0 text-primary" />
+          <div>
+            <p className="text-sm font-semibold text-foreground">{t('announcement')}</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted">{course.announcement}</p>
+          </div>
+        </Card>
+      )}
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-lg font-semibold">{t('courseContent')}</h2>
+          {isOwner && (
+            <Button variant="secondary" size="sm" onClick={() => setAddOpen(true)}>
+              <PlusCircle size={15} />
+              {t('addItem')}
+            </Button>
+          )}
+        </div>
+
+        {course.items === null ? (
+          <EmptyState
+            icon={<Lock size={22} />}
+            title={course.enrollment_status === 'pending' ? t('enrollPending') : t('locked')}
+            hint={t('lockedHint')}
+            action={enrollmentAction}
+          />
+        ) : items.length ? (
+          <div className="space-y-3">
+            {items.map((item, i) => {
+              const locked = item.locked
+              const deadline = fmtDate(item.deadline_at)
+              const content = (
+                <Card interactive={!locked} className={`flex flex-col gap-4 sm:flex-row sm:items-center ${locked ? 'opacity-70' : ''}`}>
+                  <div
+                    className={`flex size-11 shrink-0 items-center justify-center rounded-xl ${
+                      item.completed ? 'bg-success-soft text-success' : 'bg-surface-muted text-muted'
+                    }`}
+                  >
+                    {locked ? <Lock size={18} /> : TYPE_ICON[item.type]}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-foreground">{item.title}</p>
+                      <Badge tone="neutral">{t(item.type)}</Badge>
+                      {item.completed && <Badge tone="success">{t('completed')}</Badge>}
+                      {locked && <Badge tone="warning">{t('locked')}</Badge>}
+                      {isOwner && (
+                        <Badge tone={item.is_visible ? 'success' : 'neutral'}>
+                          {item.is_visible ? t('visible') : t('hidden')}
+                        </Badge>
+                      )}
+                      {item.sequential_unlock && <Badge tone="warning">{t('locked')}</Badge>}
+                    </div>
+                    {item.note && <p className="mt-1 line-clamp-1 text-sm text-muted">{item.note}</p>}
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+                      {deadline && (
+                        <span className="inline-flex items-center gap-1">
+                          <CalendarClock size={13} />
+                          {t('deadline')}: {deadline}
+                        </span>
+                      )}
+                      {item.time_limit_minutes ? (
+                        <span className="inline-flex items-center gap-1">
+                          <Settings2 size={13} />
+                          {item.time_limit_minutes} min
+                        </span>
+                      ) : null}
+                      {item.max_score != null && <span>{t('maxScore')}: {item.max_score}</span>}
+                      {item.weight_pct ? <span>{t('weight')}: {item.weight_pct}%</span> : null}
+                    </div>
+                  </div>
+                  {isOwner ? (
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                      <Button asChild size="sm">
+                        <Link href={`/items/${item.id}`}>{t('openItem')}</Link>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => patchItem(item.id, { is_visible: !item.is_visible })}
+                      >
+                        {item.is_visible ? <EyeOff size={14} /> : <Eye size={14} />}
+                        {item.is_visible ? t('hidden') : t('visible')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => patchItem(item.id, { sequential_unlock: !item.sequential_unlock })}
+                      >
+                        <Lock size={14} />
+                        {item.sequential_unlock ? t('open') : t('locked')}
+                      </Button>
+                    </div>
+                  ) : (
+                    !locked && <ArrowRight size={18} className="shrink-0 text-muted" />
+                  )}
+                </Card>
+              )
+              return (
+                <FadeIn key={item.id} delay={i * 30}>
+                  {locked || isOwner ? (
+                    <div title={locked ? t('lockedHint') : undefined}>{content}</div>
+                  ) : (
+                    <Link href={`/items/${item.id}`} className="block">
+                      {content}
+                    </Link>
+                  )}
+                </FadeIn>
+              )
+            })}
+          </div>
+        ) : (
+          <EmptyState
+            icon={<BookOpen size={22} />}
+            title={t('noData')}
+            action={isOwner ? <Button onClick={() => setAddOpen(true)}>{t('addItem')}</Button> : undefined}
+          />
+        )}
+      </section>
+
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title={t('addItem')}>
+        <form onSubmit={createItem} className="space-y-4">
+          <Field label={t('title')}>
+            <Input value={itemTitle} onChange={(e) => setItemTitle(e.target.value)} required />
+          </Field>
+          <Field label={t('content')}>
+            <Select value={itemType} onChange={(e) => setItemType(e.target.value as ItemType)}>
+              <option value="lesson">{t('lesson')}</option>
+              <option value="quiz">{t('quiz')}</option>
+              <option value="homework">{t('homework')}</option>
+            </Select>
+          </Field>
+          <Field label={t('note')}>
+            <Textarea value={itemNote} onChange={(e) => setItemNote(e.target.value)} rows={3} />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted p-3 text-sm">
+              <input type="checkbox" checked={itemVisible} onChange={(e) => setItemVisible(e.target.checked)} />
+              {t('visible')}
+            </label>
+            <label className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted p-3 text-sm">
+              <input type="checkbox" checked={itemSequential} onChange={(e) => setItemSequential(e.target.checked)} />
+              {t('locked')}
+            </label>
+          </div>
+          {actionError && <ErrorState message={actionError} />}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>
+              {t('cancel')}
+            </Button>
+            <Button type="submit" disabled={working}>
+              {working ? t('loading') : t('create')}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </div>
   )
 }

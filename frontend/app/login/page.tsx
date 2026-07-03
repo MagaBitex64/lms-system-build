@@ -2,18 +2,19 @@
 
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { Mail, LockKeyhole, GraduationCap } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useI18n } from '@/lib/i18n'
-import { Button, Input, Field, Card } from '@/components/ui'
+import { Button, Field, Input, ErrorState } from '@/components/ui'
+import { AuthBrand } from '@/components/auth-brand'
 
 export default function LoginPage() {
   const router = useRouter()
-  const { login, register } = useAuth()
+  const { login } = useAuth()
   const { t, lang, setLang } = useI18n()
-  const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [fullName, setFullName] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -22,8 +23,7 @@ export default function LoginPage() {
     setError('')
     setBusy(true)
     try {
-      if (mode === 'login') await login(email, password)
-      else await register(email, password, fullName)
+      await login(email, password)
       router.replace('/dashboard')
     } catch (err) {
       setError(err instanceof Error ? err.message : t('errorOccurred'))
@@ -33,63 +33,81 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 flex flex-col items-center gap-2">
-          <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground text-lg font-bold">
-            P
+    <main className="min-h-screen p-4 sm:p-6 lg:p-8">
+      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-center gap-8 lg:grid-cols-2">
+        <AuthBrand />
+
+        <div className="mx-auto w-full max-w-md">
+          <div className="mb-8 flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-2.5 lg:hidden">
+              <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                <GraduationCap size={20} />
+              </div>
+              <span className="text-base font-semibold">Fenomen School</span>
+            </Link>
+            <div className="ml-auto flex gap-1 rounded-lg border border-border bg-surface p-1">
+              {(['ru', 'kz'] as const).map((l) => (
+                <button
+                  key={l}
+                  onClick={() => setLang(l)}
+                  className={`rounded-md px-2.5 py-1 text-xs font-semibold uppercase transition-colors ${
+                    lang === l ? 'bg-primary text-primary-foreground' : 'text-muted hover:text-foreground'
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
           </div>
-          <h1 className="text-xl font-semibold text-balance">Phenomenon School</h1>
-          <div className="flex gap-1 text-xs">
-            {(['ru', 'kz'] as const).map((l) => (
-              <button
-                key={l}
-                onClick={() => setLang(l)}
-                className={`rounded px-2 py-1 uppercase cursor-pointer ${lang === l ? 'bg-primary-soft text-primary font-semibold' : 'text-muted hover:text-foreground'}`}
-              >
-                {l}
-              </button>
-            ))}
+
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{t('login')}</h1>
+            <p className="text-sm text-muted">{t('welcomeBack')} — {t('continueLearning')}</p>
           </div>
-        </div>
-        <Card className="p-6">
-          <form onSubmit={onSubmit} className="flex flex-col gap-4">
-            {mode === 'register' && (
-              <Field label={t('fullName')}>
-                <Input value={fullName} onChange={(e) => setFullName(e.target.value)} required minLength={2} autoComplete="name" />
-              </Field>
-            )}
+
+          <form onSubmit={onSubmit} className="mt-8 space-y-5">
             <Field label={t('email')}>
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
+                <Input
+                  type="email"
+                  className="pl-9"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                />
+              </div>
             </Field>
             <Field label={t('password')}>
-              <Input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={8}
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              />
+              <div className="relative">
+                <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
+                <Input
+                  type="password"
+                  className="pl-9"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={8}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                />
+              </div>
             </Field>
-            {error && <p className="text-sm text-danger">{error}</p>}
-            <Button type="submit" disabled={busy}>
-              {mode === 'login' ? t('login') : t('createAccount')}
+            {error && <ErrorState message={error} />}
+            <Button type="submit" size="lg" className="w-full" disabled={busy}>
+              {busy ? t('loading') : t('login')}
             </Button>
           </form>
-        </Card>
-        <p className="mt-4 text-center text-sm text-muted">
-          {mode === 'login' ? t('noAccount') : t('haveAccount')}{' '}
-          <button
-            className="font-medium text-primary hover:underline cursor-pointer"
-            onClick={() => {
-              setMode(mode === 'login' ? 'register' : 'login')
-              setError('')
-            }}
-          >
-            {mode === 'login' ? t('register') : t('login')}
-          </button>
-        </p>
+
+          <p className="mt-6 text-center text-sm text-muted">
+            {t('noAccount')}{' '}
+            <Link href="/register" className="font-semibold text-primary hover:underline">
+              {t('register')}
+            </Link>
+          </p>
+        </div>
       </div>
     </main>
   )

@@ -1,3 +1,5 @@
+import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -11,6 +13,10 @@ router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 class QuizSettingsIn(BaseModel):
     max_score: int = Field(ge=1, le=1000)
     weight_pct: float = Field(ge=0, le=100)
+    open_at: datetime.datetime | None = None
+    deadline_at: datetime.datetime | None = None
+    close_at: datetime.datetime | None = None
+    time_limit_minutes: int | None = Field(default=None, ge=1, le=1440)
 
 
 class OptionIn(BaseModel):
@@ -49,9 +55,18 @@ async def update_quiz_settings(item_id: int, data: QuizSettingsIn, user: dict = 
     await ensure_course_owner(user, item["course_id"])
     pool = await get_pool()
     await pool.execute(
-        "UPDATE quizzes SET max_score = $1, weight_pct = $2 WHERE item_id = $3",
+        """
+        UPDATE quizzes
+        SET max_score = $1, weight_pct = $2, open_at = $3, deadline_at = $4,
+            close_at = $5, time_limit_minutes = $6
+        WHERE item_id = $7
+        """,
         data.max_score,
         data.weight_pct,
+        data.open_at,
+        data.deadline_at,
+        data.close_at,
+        data.time_limit_minutes,
         item_id,
     )
     return {"ok": True}
@@ -155,9 +170,15 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
         out_questions.append(qd)
 
     result = {
+        "type": "quiz",
+        "is_owner": is_owner,
         "item": {"id": item["id"], "title": item["title"], "note": item["note"], "course_id": item["course_id"]},
         "max_score": quiz["max_score"],
         "weight_pct": float(quiz["weight_pct"]),
+        "open_at": str(quiz["open_at"]) if quiz["open_at"] else None,
+        "deadline_at": str(quiz["deadline_at"]) if quiz["deadline_at"] else None,
+        "close_at": str(quiz["close_at"]) if quiz["close_at"] else None,
+        "time_limit_minutes": quiz["time_limit_minutes"],
         "total_points": sum(q["points"] for q in questions),
         "questions": out_questions,
         "attempt": None,
@@ -198,6 +219,12 @@ async def submit_attempt(item_id: int, data: SubmitAttemptIn, user: dict = Depen
         raise HTTPException(status_code=409, detail="You have already completed this quiz")
 
     quiz = await pool.fetchrow("SELECT * FROM quizzes WHERE item_id = $1", item_id)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if quiz["open_at"] and now < quiz["open_at"]:
+        raise HTTPException(status_code=403, detail="Quiz is not open yet")
+    if quiz["close_at"] and now > quiz["close_at"]:
+        raise HTTPException(status_code=403, detail="Quiz is closed")
+
     questions = await pool.fetch("SELECT * FROM quiz_questions WHERE quiz_id = $1", item_id)
     q_by_id = {q["id"]: q for q in questions}
     answers_by_q = {a.question_id: a for a in data.answers}
@@ -265,8 +292,9 @@ async def list_attempts(item_id: int, user: dict = Depends(require_teacher)):
     pool = await get_pool()
     rows = await pool.fetch(
         """
-        SELECT qa.*, u.full_name AS student_name, u.email AS student_email
+        SELECT qa.*, u.full_name AS student_name, u.email AS student_email, q.deadline_at
         FROM quiz_attempts qa JOIN users u ON u.id = qa.student_id
+        JOIN quizzes q ON q.item_id = qa.quiz_id
         WHERE qa.quiz_id = $1 ORDER BY qa.submitted_at DESC
         """,
         item_id,
@@ -281,6 +309,7 @@ async def list_attempts(item_id: int, user: dict = Depends(require_teacher)):
             "auto_score": float(r["auto_score"]),
             "manual_score": float(r["manual_score"]) if r["manual_score"] is not None else None,
             "status": r["status"],
+            "late": bool(r["deadline_at"] and r["submitted_at"] > r["deadline_at"]),
         }
         for r in rows
     ]
@@ -312,6 +341,7 @@ async def attempt_detail(attempt_id: int, user: dict = Depends(require_teacher))
         "id": attempt["id"],
         "student_name": attempt["student_name"],
         "quiz_title": item["title"],
+        "submitted_at": str(attempt["submitted_at"]),
         "auto_score": float(attempt["auto_score"]),
         "manual_score": float(attempt["manual_score"]) if attempt["manual_score"] is not None else None,
         "status": attempt["status"],

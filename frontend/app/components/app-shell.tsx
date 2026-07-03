@@ -3,46 +3,34 @@
 import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import {
+  LayoutDashboard,
+  BookOpen,
+  GraduationCap,
+  BarChart3,
+  Users,
+  Search,
+  Menu,
+  LogOut,
+  X,
+} from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
-import { Spinner } from './ui'
+import { Spinner, Avatar, cx } from './ui'
 
-const icons: Record<string, ReactNode> = {
-  dashboard: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-      <rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" />
-      <rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" />
-    </svg>
-  ),
-  courses: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4a1 1 0 0 0-1-1H6.5A2.5 2.5 0 0 0 4 5.5v14z" />
-      <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
-    </svg>
-  ),
-  catalog: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-      <circle cx="11" cy="11" r="7" /><path d="m21 21-4.35-4.35" />
-    </svg>
-  ),
-  grades: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-      <path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 5-6" />
-    </svg>
-  ),
-  teach: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-      <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-    </svg>
-  ),
-  admin: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-      <path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10z" />
-    </svg>
-  ),
-}
+const PUBLIC_ROUTES = ['/', '/login', '/register']
+
+type NavItem = { href: string; label: TKey; icon: ReactNode }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname()
+  const isPublic = PUBLIC_ROUTES.includes(pathname)
+
+  if (isPublic) return <>{children}</>
+  return <AuthedShell>{children}</AuthedShell>
+}
+
+function AuthedShell({ children }: { children: ReactNode }) {
   const { user, isLoading, logout } = useAuth()
   const { t, lang, setLang } = useI18n()
   const pathname = usePathname()
@@ -50,45 +38,50 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [q, setQ] = useState('')
 
-  if (isLoading) return <Spinner />
+  if (isLoading) return <Spinner className="mt-40" />
   if (!user) {
     if (typeof window !== 'undefined') window.location.href = '/login'
-    return <Spinner />
+    return <Spinner className="mt-40" />
   }
 
-  const nav: { href: string; label: TKey; icon: ReactNode }[] = [
-    { href: '/dashboard', label: 'dashboard', icon: icons.dashboard },
-  ]
+  const nav: NavItem[] = [{ href: '/dashboard', label: 'dashboard', icon: <LayoutDashboard size={18} /> }]
   if (user.role === 'student') {
-    nav.push({ href: '/my-courses', label: 'myCourses', icon: icons.courses })
-    nav.push({ href: '/courses', label: 'catalog', icon: icons.catalog })
-    nav.push({ href: '/grades', label: 'grades', icon: icons.grades })
+    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={18} /> })
   }
   if (user.role === 'teacher') {
-    nav.push({ href: '/teach', label: 'courseManagement', icon: icons.teach })
-    nav.push({ href: '/courses', label: 'catalog', icon: icons.catalog })
+    nav.push({ href: '/teacher', label: 'courseManagement', icon: <GraduationCap size={18} /> })
+    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={18} /> })
   }
   if (user.role === 'admin') {
-    nav.push({ href: '/teach', label: 'courseManagement', icon: icons.teach })
-    nav.push({ href: '/courses', label: 'catalog', icon: icons.catalog })
-    nav.push({ href: '/admin', label: 'statistics', icon: icons.admin })
+    nav.push({ href: '/teacher', label: 'courseManagement', icon: <GraduationCap size={18} /> })
+    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={18} /> })
+    nav.push({ href: '/admin', label: 'statistics', icon: <BarChart3 size={18} /> })
+    nav.push({ href: '/admin/users', label: 'users', icon: <Users size={18} /> })
   }
   if (user.role === 'guest') {
-    nav.push({ href: '/courses', label: 'catalog', icon: icons.catalog })
+    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={18} /> })
   }
 
   const roleLabel: TKey =
     user.role === 'admin' ? 'admin' : user.role === 'teacher' ? 'teacher' : user.role === 'student' ? 'student' : 'guest'
 
   const sidebar = (
-    <div className="flex h-full flex-col">
-      <Link href="/dashboard" className="flex items-center gap-2.5 px-5 py-5">
-        <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-bold">
-          P
+    <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
+      <Link
+        href="/dashboard"
+        className="flex items-center gap-2.5 px-5 py-5"
+        onClick={() => setMenuOpen(false)}
+      >
+        <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+          <GraduationCap size={20} />
         </div>
-        <span className="text-sm font-semibold">Phenomenon School</span>
+        <div className="leading-tight">
+          <p className="text-sm font-semibold text-white">Fenomen School</p>
+          <p className="text-xs text-sidebar-muted">Learning Platform</p>
+        </div>
       </Link>
-      <nav className="flex flex-1 flex-col gap-0.5 px-3" aria-label="Main">
+
+      <nav className="flex flex-1 flex-col gap-1 px-3 py-2" aria-label="Main navigation">
         {nav.map((n) => {
           const active = pathname === n.href || pathname.startsWith(n.href + '/')
           return (
@@ -96,57 +89,89 @@ export function AppShell({ children }: { children: ReactNode }) {
               key={n.href}
               href={n.href}
               onClick={() => setMenuOpen(false)}
-              className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors ${
-                active ? 'bg-primary-soft text-primary' : 'text-muted hover:bg-background hover:text-foreground'
-              }`}
+              className={cx(
+                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                active
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-white',
+              )}
             >
-              {n.icon}
+              <span className={cx('shrink-0', active ? 'text-primary-foreground' : '')}>{n.icon}</span>
               {t(n.label)}
             </Link>
           )
         })}
       </nav>
-      <div className="border-t border-border p-4">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{user.full_name}</p>
-            <p className="truncate text-xs text-muted">{t(roleLabel)}</p>
+
+      <div className="border-t border-sidebar-border p-3">
+        <Link
+          href="/profile"
+          onClick={() => setMenuOpen(false)}
+          className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-sidebar-hover"
+        >
+          <Avatar name={user.full_name} className="bg-sidebar-hover text-white" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-white">{user.full_name}</p>
+            <p className="truncate text-xs text-sidebar-muted">{t(roleLabel)}</p>
           </div>
-          <div className="flex gap-0.5 text-xs">
+        </Link>
+        <div className="mt-2 flex items-center justify-between gap-2 px-1">
+          <div className="flex gap-1">
             {(['ru', 'kz'] as const).map((l) => (
               <button
                 key={l}
                 onClick={() => setLang(l)}
-                className={`rounded px-1.5 py-1 uppercase cursor-pointer ${lang === l ? 'bg-primary-soft text-primary font-semibold' : 'text-muted hover:text-foreground'}`}
+                className={cx(
+                  'rounded-md px-2 py-1 text-xs font-semibold uppercase transition-colors',
+                  lang === l ? 'bg-primary text-primary-foreground' : 'text-sidebar-muted hover:text-white',
+                )}
               >
                 {l}
               </button>
             ))}
           </div>
+          <button
+            onClick={logout}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-sidebar-muted transition-colors hover:text-white"
+          >
+            <LogOut size={14} />
+            {t('logout')}
+          </button>
         </div>
-        <button onClick={logout} className="text-sm text-muted hover:text-danger cursor-pointer">
-          {t('logout')}
-        </button>
       </div>
     </div>
   )
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-border bg-surface lg:block">{sidebar}</aside>
+    <div className="min-h-screen">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 lg:block">{sidebar}</aside>
+
       {menuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-foreground/40" onClick={() => setMenuOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-60 border-r border-border bg-surface">{sidebar}</aside>
+          <div className="absolute inset-0 bg-foreground/50 backdrop-blur-sm" onClick={() => setMenuOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 w-64 shadow-2xl">
+            <button
+              onClick={() => setMenuOpen(false)}
+              className="absolute right-3 top-4 z-10 text-sidebar-muted hover:text-white"
+              aria-label="Close menu"
+            >
+              <X size={20} />
+            </button>
+            {sidebar}
+          </aside>
         </div>
       )}
-      <div className="flex min-w-0 flex-1 flex-col lg:pl-60">
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border bg-surface px-4 sm:px-6">
-          <button className="lg:hidden text-muted cursor-pointer" onClick={() => setMenuOpen(true)} aria-label="Menu">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <path d="M3 6h18M3 12h18M3 18h18" strokeLinecap="round" />
-            </svg>
+
+      <div className="flex min-h-screen flex-col lg:pl-64">
+        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-surface/80 px-4 backdrop-blur-md sm:px-6">
+          <button
+            className="text-muted transition-colors hover:text-foreground lg:hidden"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+          >
+            <Menu size={22} />
           </button>
+
           {user.role !== 'guest' && (
             <form
               className="flex max-w-md flex-1 items-center"
@@ -155,17 +180,28 @@ export function AppShell({ children }: { children: ReactNode }) {
                 if (q.trim()) router.push(`/search?q=${encodeURIComponent(q.trim())}`)
               }}
             >
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder={t('searchPlaceholder')}
-                className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                aria-label={t('search')}
-              />
+              <div className="relative w-full">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder={t('searchPlaceholder')}
+                  className="h-10 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm placeholder:text-muted/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
+                  aria-label={t('search')}
+                />
+              </div>
             </form>
           )}
+
+          <div className="ml-auto flex items-center gap-3">
+            <div className="hidden items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 sm:flex">
+              <Avatar name={user.full_name} className="size-7 text-xs" />
+              <span className="text-sm font-medium text-foreground">{user.full_name.split(' ')[0]}</span>
+            </div>
+          </div>
         </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 p-4 sm:p-6">{children}</main>
+
+        <main className="mx-auto w-full max-w-6xl flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   )

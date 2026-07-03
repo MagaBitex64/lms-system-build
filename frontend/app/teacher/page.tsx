@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
-import { BookOpen, PlusCircle, Sparkles } from 'lucide-react'
-import { useI18n, I18nProvider } from '@/lib/i18n'
+import { BookOpen, PlusCircle, Users, Clock, ArrowRight } from 'lucide-react'
+import { useI18n } from '@/lib/i18n'
 import { useAuth } from '@/lib/auth'
-import { api } from '@/lib/api'
-import { Badge, Button, Card, FadeIn, PageHeader, StatCard } from '../components/ui'
+import { fetcher } from '@/lib/api'
+import { Badge, Button, Card, FadeIn, PageHeader, StatCard, Spinner, ErrorState, EmptyState } from '../components/ui'
 
 type TeacherCourse = {
   id: number
@@ -18,58 +18,77 @@ type TeacherCourse = {
   is_published: boolean
 }
 
-function TeacherDashboardContent() {
+export default function TeacherDashboard() {
   const { t } = useI18n()
   const { user } = useAuth()
-  const [courses, setCourses] = useState<TeacherCourse[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data: courses, error, isLoading } = useSWR<TeacherCourse[]>('/courses/mine', fetcher)
 
-  useEffect(() => {
-    api('/courses/mine')
-      .then((data) => setCourses(data as TeacherCourse[]))
-      .catch((err) => setError((err as Error).message || t('errorOccurred')))
-      .finally(() => setLoading(false))
-  }, [t])
+  const totalStudents = courses?.reduce((s, c) => s + c.student_count, 0) ?? 0
+  const totalPending = courses?.reduce((s, c) => s + (c.pending_count ?? 0), 0) ?? 0
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Teacher workspace"
-        title={user ? `Welcome back, ${user.full_name}` : t('courseManagement')}
-        description="Build engaging learning journeys and keep review cycles calm, fast, and consistent."
+        eyebrow={t('teacher')}
+        title={user ? `${t('welcomeBack')}, ${user.full_name}` : t('courseManagement')}
+        description={t('manageCourses')}
         actions={
-          <>
-            <Button asChild variant="secondary"><Link href="/teacher/courses">Manage courses</Link></Button>
-            <Button asChild><Link href="/teacher/courses/new"><span className="flex items-center gap-2"><PlusCircle size={16} />{t('newCourse')}</span></Link></Button>
-          </>
+          <Button asChild>
+            <Link href="/teacher/courses/new">
+              <span className="flex items-center gap-2"><PlusCircle size={16} />{t('newCourse')}</span>
+            </Link>
+          </Button>
         }
       />
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatCard label="Courses" value={String(courses.length)} hint="Owned or managed" icon={<BookOpen size={18} />} />
-        <StatCard label="Students" value={String(courses.reduce((sum, course) => sum + course.student_count, 0))} hint="Enrolled across tracks" icon={<Sparkles size={18} />} />
-        <StatCard label="Pending" value={String(courses.reduce((sum, course) => sum + (course.pending_count ?? 0), 0))} hint="Needs attention" icon={<PlusCircle size={18} />} />
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label={t('courses')} value={courses?.length ?? 0} icon={<BookOpen size={18} />} tone="primary" />
+        <StatCard label={t('totalStudents')} value={totalStudents} icon={<Users size={18} />} tone="success" />
+        <StatCard label={t('pending')} value={totalPending} icon={<Clock size={18} />} tone="warning" />
       </div>
-      {loading ? <div className="rounded-[28px] border border-slate-200 bg-white/80 p-8 text-sm text-slate-500">{t('loading')}</div> : error ? <div className="rounded-[28px] border border-rose-200 bg-rose-50 p-8 text-sm text-rose-600">{error}</div> : (
+
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-foreground">{t('myCourses')}</h2>
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/teacher/courses"><span className="flex items-center gap-1">{t('seeAll')}<ArrowRight size={14} /></span></Link>
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <Spinner />
+      ) : error ? (
+        <ErrorState message={(error as Error).message || t('errorOccurred')} />
+      ) : !courses?.length ? (
+        <EmptyState
+          icon={<BookOpen size={22} />}
+          title={t('noCoursesYet')}
+          hint={t('manageCourses')}
+          action={<Button asChild><Link href="/teacher/courses/new">{t('newCourse')}</Link></Button>}
+        />
+      ) : (
         <div className="grid gap-4 xl:grid-cols-2">
-          {courses.map((course, index) => (
-            <FadeIn key={course.id} transition={{ delay: index * 0.04 }}>
-              <Card className="space-y-4">
+          {courses.map((course, i) => (
+            <FadeIn key={course.id} delay={i * 40}>
+              <Card interactive className="flex h-full flex-col gap-4">
                 <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2 className="text-xl font-semibold text-slate-950">{course.title}</h2>
-                    <p className="mt-2 text-sm leading-7 text-slate-600">{course.description}</p>
+                  <div className="space-y-1.5">
+                    <h3 className="font-semibold text-foreground">{course.title}</h3>
+                    <p className="line-clamp-2 text-sm leading-relaxed text-muted">{course.description}</p>
                   </div>
-                  <Badge>{course.is_published ? 'Published' : 'Draft'}</Badge>
+                  <Badge tone={course.is_published ? 'success' : 'neutral'}>
+                    {course.is_published ? t('published') : t('draft')}
+                  </Badge>
                 </div>
-                <div className="flex flex-wrap gap-4 text-sm text-slate-500">
-                  <span>{course.item_count} {t('itemsCount')}</span>
-                  <span>{course.student_count} {t('studentsCount')}</span>
-                  {course.pending_count ? <span>{course.pending_count} pending</span> : null}
+                <div className="flex flex-wrap gap-4 text-sm text-muted">
+                  <span className="flex items-center gap-1.5"><BookOpen size={14} />{course.item_count} {t('itemsCount')}</span>
+                  <span className="flex items-center gap-1.5"><Users size={14} />{course.student_count} {t('studentsCount')}</span>
+                  {course.pending_count ? (
+                    <span className="flex items-center gap-1.5 text-warning"><Clock size={14} />{course.pending_count} {t('pending')}</span>
+                  ) : null}
                 </div>
-                <div className="flex flex-wrap gap-3">
-                  <Button asChild variant="outline"><Link href={`/courses/${course.id}`}>{t('viewCourse')}</Link></Button>
-                  <Button asChild><Link href={`/teacher/courses/${course.id}/gradebook`}>{t('gradebook')}</Link></Button>
+                <div className="mt-auto flex flex-wrap gap-2 pt-1">
+                  <Button asChild variant="outline" size="sm"><Link href={`/courses/${course.id}`}>{t('viewCourse')}</Link></Button>
+                  <Button asChild size="sm"><Link href={`/teacher/courses/${course.id}/gradebook`}>{t('gradebook')}</Link></Button>
                 </div>
               </Card>
             </FadeIn>
@@ -77,13 +96,5 @@ function TeacherDashboardContent() {
         </div>
       )}
     </div>
-  )
-}
-
-export default function TeacherDashboard() {
-  return (
-    <I18nProvider>
-      <TeacherDashboardContent />
-    </I18nProvider>
   )
 }
