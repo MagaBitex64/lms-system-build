@@ -1,75 +1,96 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
+import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth'
-import { useI18n, I18nProvider } from '@/lib/i18n'
+import { useI18n } from '@/lib/i18n'
+import { Button, Input, Field, Card } from '@/components/ui'
 
-function LoginForm() {
-  const { t } = useI18n()
-  const { login } = useAuth()
+export default function LoginPage() {
   const router = useRouter()
+  const { login, register } = useAuth()
+  const { t, lang, setLang } = useI18n()
+  const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [fullName, setFullName] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setLoading(true)
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError('')
+    setBusy(true)
     try {
-      await login(email, password)
-      router.push('/')
+      if (mode === 'login') await login(email, password)
+      else await register(email, password, fullName)
+      router.replace('/dashboard')
     } catch (err) {
-      setError((err as Error).message || t('errorOccurred'))
+      setError(err instanceof Error ? err.message : t('errorOccurred'))
     } finally {
-      setLoading(false)
+      setBusy(false)
     }
   }
 
   return (
-    <main className="container">
-      <div className="card" style={{ maxWidth: 480, margin: '0 auto' }}>
-        <h1 className="page-title">{t('login')}</h1>
-        <form onSubmit={handleSubmit} className="grid" style={{ gap: '1rem' }}>
-          <label>
-            {t('email')}
-            <input
-              className="input"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            {t('password')}
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          {error && <div className="text-muted">{error}</div>}
-          <button className="button" type="submit" disabled={loading}>
-            {loading ? t('loading') : t('login')}
+    <main className="flex min-h-screen flex-col items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex flex-col items-center gap-2">
+          <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground text-lg font-bold">
+            P
+          </div>
+          <h1 className="text-xl font-semibold text-balance">Phenomenon School</h1>
+          <div className="flex gap-1 text-xs">
+            {(['ru', 'kz'] as const).map((l) => (
+              <button
+                key={l}
+                onClick={() => setLang(l)}
+                className={`rounded px-2 py-1 uppercase cursor-pointer ${lang === l ? 'bg-primary-soft text-primary font-semibold' : 'text-muted hover:text-foreground'}`}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Card className="p-6">
+          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            {mode === 'register' && (
+              <Field label={t('fullName')}>
+                <Input value={fullName} onChange={(e) => setFullName(e.target.value)} required minLength={2} autoComplete="name" />
+              </Field>
+            )}
+            <Field label={t('email')}>
+              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+            </Field>
+            <Field label={t('password')}>
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              />
+            </Field>
+            {error && <p className="text-sm text-danger">{error}</p>}
+            <Button type="submit" disabled={busy}>
+              {mode === 'login' ? t('login') : t('createAccount')}
+            </Button>
+          </form>
+        </Card>
+        <p className="mt-4 text-center text-sm text-muted">
+          {mode === 'login' ? t('noAccount') : t('haveAccount')}{' '}
+          <button
+            className="font-medium text-primary hover:underline cursor-pointer"
+            onClick={() => {
+              setMode(mode === 'login' ? 'register' : 'login')
+              setError('')
+            }}
+          >
+            {mode === 'login' ? t('register') : t('login')}
           </button>
-        </form>
-        <p className="text-muted" style={{ marginTop: '1rem' }}>
-          {t('noAccount')} <Link href="/register">{t('createAccount')}</Link>
         </p>
       </div>
     </main>
-  )
-}
-
-export default function LoginPage() {
-  return (
-    <I18nProvider>
-      <LoginForm />
-    </I18nProvider>
   )
 }
