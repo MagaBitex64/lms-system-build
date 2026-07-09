@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   BookOpen,
   GraduationCap,
-  BarChart3,
   Users,
   Search,
   Menu,
@@ -18,7 +17,7 @@ import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
 import { Spinner, Avatar, cx } from './ui'
 
-const PUBLIC_ROUTES = ['/', '/login', '/register']
+const PUBLIC_ROUTES = ['/', '/login']
 
 type NavItem = { href: string; label: TKey; icon: ReactNode }
 
@@ -32,7 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function AuthedShell({ children }: { children: ReactNode }) {
   const { user, isLoading, logout } = useAuth()
-  const { t, lang, setLang } = useI18n()
+  const { t } = useI18n()
   const pathname = usePathname()
   const router = useRouter()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -55,15 +54,11 @@ function AuthedShell({ children }: { children: ReactNode }) {
   if (user.role === 'admin') {
     nav.push({ href: '/teacher', label: 'courseManagement', icon: <GraduationCap size={18} /> })
     nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={18} /> })
-    nav.push({ href: '/admin', label: 'statistics', icon: <BarChart3 size={18} /> })
-    nav.push({ href: '/admin/users', label: 'users', icon: <Users size={18} /> })
-  }
-  if (user.role === 'guest') {
-    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={18} /> })
+    nav.push({ href: '/admin', label: 'adminPanel', icon: <Users size={18} /> })
   }
 
   const roleLabel: TKey =
-    user.role === 'admin' ? 'admin' : user.role === 'teacher' ? 'teacher' : user.role === 'student' ? 'student' : 'guest'
+    user.role === 'admin' ? 'admin' : user.role === 'teacher' ? 'teacher' : 'student'
 
   const sidebar = (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -77,11 +72,11 @@ function AuthedShell({ children }: { children: ReactNode }) {
         </div>
         <div className="leading-tight">
           <p className="text-sm font-semibold text-white">Fenomen School</p>
-          <p className="text-xs text-sidebar-muted">Learning Platform</p>
+          <p className="text-xs text-sidebar-muted">{t('platformLabel')}</p>
         </div>
       </Link>
 
-      <nav className="flex flex-1 flex-col gap-1 px-3 py-2" aria-label="Main navigation">
+      <nav className="flex flex-1 flex-col gap-1 px-3 py-2" aria-label="Негізгі навигация">
         {nav.map((n) => {
           const active = pathname === n.href || pathname.startsWith(n.href + '/')
           return (
@@ -115,21 +110,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
             <p className="truncate text-xs text-sidebar-muted">{t(roleLabel)}</p>
           </div>
         </Link>
-        <div className="mt-2 flex items-center justify-between gap-2 px-1">
-          <div className="flex gap-1">
-            {(['ru', 'kz'] as const).map((l) => (
-              <button
-                key={l}
-                onClick={() => setLang(l)}
-                className={cx(
-                  'rounded-md px-2 py-1 text-xs font-semibold uppercase transition-colors',
-                  lang === l ? 'bg-primary text-primary-foreground' : 'text-sidebar-muted hover:text-white',
-                )}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
+        <div className="mt-2 flex items-center justify-end gap-2 px-1">
           <button
             onClick={logout}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-sidebar-muted transition-colors hover:text-white"
@@ -153,7 +134,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
             <button
               onClick={() => setMenuOpen(false)}
               className="absolute right-3 top-4 z-10 text-sidebar-muted hover:text-white"
-              aria-label="Close menu"
+              aria-label="Мәзірді жабу"
             >
               <X size={20} />
             </button>
@@ -167,31 +148,29 @@ function AuthedShell({ children }: { children: ReactNode }) {
           <button
             className="text-muted transition-colors hover:text-foreground lg:hidden"
             onClick={() => setMenuOpen(true)}
-            aria-label="Open menu"
+            aria-label="Мәзірді ашу"
           >
             <Menu size={22} />
           </button>
 
-          {user.role !== 'guest' && (
-            <form
-              className="flex max-w-md flex-1 items-center"
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (q.trim()) router.push(`/search?q=${encodeURIComponent(q.trim())}`)
-              }}
-            >
-              <div className="relative w-full">
-                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder={t('searchPlaceholder')}
-                  className="h-10 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm placeholder:text-muted/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
-                  aria-label={t('search')}
-                />
-              </div>
-            </form>
-          )}
+          <form
+            className="flex max-w-md flex-1 items-center"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (q.trim()) router.push(`/search?q=${encodeURIComponent(q.trim())}`)
+            }}
+          >
+            <div className="relative w-full">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder={t('searchPlaceholder')}
+                className="h-10 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm placeholder:text-muted/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
+                aria-label={t('search')}
+              />
+            </div>
+          </form>
 
           <div className="ml-auto flex items-center gap-3">
             <div className="hidden items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 sm:flex">

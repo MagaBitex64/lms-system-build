@@ -41,7 +41,6 @@ async def seed() -> None:
         s1 = await user("student1@phenomenon.school", "Данияр Ахметов", "student")
         s2 = await user("student2@phenomenon.school", "Алия Нурланова", "student")
         s3 = await user("student3@phenomenon.school", "Иван Петров", "student")
-        await user("guest@phenomenon.school", "Гость Новенький", "guest")
 
         async def course(teacher, title, desc, ann):
             return await conn.fetchval(
@@ -98,8 +97,39 @@ async def seed() -> None:
         async def enroll(cid, sid, status="approved"):
             await conn.execute(
                 """INSERT INTO enrollments (course_id, student_id, status, decided_at)
-                   VALUES ($1,$2,$3, CASE WHEN $3='pending' THEN NULL ELSE now() END)""",
+                   VALUES ($1,$2,$3, now())
+                   ON CONFLICT (course_id, student_id)
+                   DO UPDATE SET status = EXCLUDED.status, decided_at = now()""",
                 cid, sid, status,
+            )
+
+        async def group(code, title, direction, stream, students):
+            gid = await conn.fetchval(
+                """INSERT INTO groups (code, title, direction, stream, capacity)
+                   VALUES ($1,$2,$3,$4,20) RETURNING id""",
+                code, title, direction, stream,
+            )
+            for sid in students:
+                await conn.execute(
+                    "INSERT INTO group_students (group_id, student_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+                    gid, sid,
+                )
+            return gid
+
+        async def course_group(cid, gid):
+            await conn.execute(
+                "INSERT INTO course_groups (course_id, group_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+                cid, gid,
+            )
+            await conn.execute(
+                """
+                INSERT INTO enrollments (course_id, student_id, status, decided_at)
+                SELECT $1, student_id, 'approved', now()
+                FROM group_students WHERE group_id = $2
+                ON CONFLICT (course_id, student_id)
+                DO UPDATE SET status = 'approved', decided_at = now()
+                """,
+                cid, gid,
             )
 
         # ---------- Course 1: Algebra ----------
@@ -204,15 +234,15 @@ async def seed() -> None:
         await hw_cfg(h4, "Напишите программу-калькулятор и загрузите файл с кодом (или скриншот).", 100, 100,
                      days_open=-3, days_deadline=10, days_close=20)
 
-        # ---------- Enrollments ----------
-        await enroll(c1, s1)
-        await enroll(c1, s2)
-        await enroll(c2, s1)
-        await enroll(c3, s2)
-        await enroll(c4, s1)
-        await enroll(c4, s3, "pending")
-        await enroll(c2, s2, "pending")
-        await enroll(c3, s3)
+        # ---------- Groups and course access ----------
+        im1 = await group("ИМ1", "ИМ1 - информатика-математика", "Информатика-математика", "1", [s1, s2])
+        im2 = await group("ИМ2", "ИМ2 - информатика-математика", "Информатика-математика", "2", [s3])
+        fm1 = await group("ФМ1", "ФМ1 - физика-математика", "Физика-математика", "1", [s1, s3])
+        await group("БГ1", "БГ1 - биология-география", "Биология-география", "1", [])
+        await course_group(c1, im1)
+        await course_group(c2, fm1)
+        await course_group(c3, im2)
+        await course_group(c4, im1)
 
         # ---------- Activity: quiz attempts ----------
         # s1 takes algebra quiz: correct single + correct multiple, text pending manual review
@@ -273,7 +303,7 @@ async def seed() -> None:
 
         print("Seed complete.")
         print(f"All accounts use password: {PASSWORD}")
-        print("admin@phenomenon.school / teacher1..2@phenomenon.school / student1..3@phenomenon.school / guest@phenomenon.school")
+        print("admin@phenomenon.school / teacher1..2@phenomenon.school / student1..3@phenomenon.school")
     finally:
         await conn.close()
 

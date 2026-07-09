@@ -2,7 +2,7 @@
 
 import useSWR from 'swr'
 import Link from 'next/link'
-import { BookOpen, PlusCircle, Users, Clock, ArrowRight } from 'lucide-react'
+import { BookOpen, PlusCircle, Users, GraduationCap, ArrowRight } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { useAuth } from '@/lib/auth'
 import { fetcher } from '@/lib/api'
@@ -14,7 +14,6 @@ type TeacherCourse = {
   description: string
   item_count: number
   student_count: number
-  pending_count?: number
   is_published: boolean
 }
 
@@ -24,7 +23,6 @@ export default function TeacherDashboard() {
   const { data: courses, error, isLoading } = useSWR<TeacherCourse[]>('/courses/mine', fetcher)
 
   const totalStudents = courses?.reduce((s, c) => s + c.student_count, 0) ?? 0
-  const totalPending = courses?.reduce((s, c) => s + (c.pending_count ?? 0), 0) ?? 0
 
   return (
     <div className="space-y-6">
@@ -44,7 +42,7 @@ export default function TeacherDashboard() {
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label={t('courses')} value={courses?.length ?? 0} icon={<BookOpen size={18} />} tone="primary" />
         <StatCard label={t('totalStudents')} value={totalStudents} icon={<Users size={18} />} tone="success" />
-        <StatCard label={t('pending')} value={totalPending} icon={<Clock size={18} />} tone="warning" />
+        <StatCard label={t('groups')} value={courses?.length ?? 0} icon={<GraduationCap size={18} />} tone="primary" />
       </div>
 
       <div className="flex items-center justify-between">
@@ -82,9 +80,6 @@ export default function TeacherDashboard() {
                 <div className="flex flex-wrap gap-4 text-sm text-muted">
                   <span className="flex items-center gap-1.5"><BookOpen size={14} />{course.item_count} {t('itemsCount')}</span>
                   <span className="flex items-center gap-1.5"><Users size={14} />{course.student_count} {t('studentsCount')}</span>
-                  {course.pending_count ? (
-                    <span className="flex items-center gap-1.5 text-warning"><Clock size={14} />{course.pending_count} {t('pending')}</span>
-                  ) : null}
                 </div>
                 <div className="mt-auto flex flex-wrap gap-2 pt-1">
                   <Button asChild variant="outline" size="sm"><Link href={`/courses/${course.id}`}>{t('viewCourse')}</Link></Button>

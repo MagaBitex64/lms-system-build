@@ -20,7 +20,6 @@ import {
   Settings2,
   UserRound,
 } from 'lucide-react'
-import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
 import { api, fetcher } from '@/lib/api'
 import {
@@ -86,7 +85,6 @@ function fmtDate(value?: string | null) {
 
 export default function CoursePage() {
   const { t } = useI18n()
-  const { user } = useAuth()
   const params = useParams()
   const id = params.id as string
   const { data: course, error, isLoading, mutate } = useSWR<Course>(id ? `/courses/${id}` : null, fetcher)
@@ -147,26 +145,6 @@ export default function CoursePage() {
     }
   }
 
-  async function requestEnrollment() {
-    setWorking(true)
-    setActionError(null)
-    try {
-      await api(`/enrollments/request/${courseId}`, { method: 'POST' })
-      await mutate()
-    } catch (err) {
-      setActionError((err as Error).message || t('errorOccurred'))
-    } finally {
-      setWorking(false)
-    }
-  }
-
-  const enrollmentAction =
-    !isOwner && user?.role === 'student' && course.enrollment_status !== 'approved' ? (
-      <Button onClick={requestEnrollment} disabled={working || course.enrollment_status === 'pending'}>
-        {course.enrollment_status === 'pending' ? t('enrollPending') : t('enroll')}
-      </Button>
-    ) : null
-
   return (
     <div className="space-y-8">
       <Link href="/courses" className="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground">
@@ -199,7 +177,6 @@ export default function CoursePage() {
                 </Button>
               </>
             )}
-            {enrollmentAction}
           </div>
         }
       />
@@ -260,9 +237,8 @@ export default function CoursePage() {
         {course.items === null ? (
           <EmptyState
             icon={<Lock size={22} />}
-            title={course.enrollment_status === 'pending' ? t('enrollPending') : t('locked')}
+            title={t('locked')}
             hint={t('lockedHint')}
-            action={enrollmentAction}
           />
         ) : items.length ? (
           <div className="space-y-3">

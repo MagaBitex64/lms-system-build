@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { Mail, LockKeyhole, GraduationCap } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useI18n } from '@/lib/i18n'
@@ -12,7 +11,7 @@ import { AuthBrand } from '@/components/auth-brand'
 export default function LoginPage() {
   const router = useRouter()
   const { login } = useAuth()
-  const { t, lang, setLang } = useI18n()
+  const { t } = useI18n()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -38,31 +37,18 @@ export default function LoginPage() {
         <AuthBrand />
 
         <div className="mx-auto w-full max-w-md">
-          <div className="mb-8 flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2.5 lg:hidden">
+          <div className="mb-8 flex items-center">
+            <div className="flex items-center gap-2.5 lg:hidden">
               <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
                 <GraduationCap size={20} />
               </div>
               <span className="text-base font-semibold">Fenomen School</span>
-            </Link>
-            <div className="ml-auto flex gap-1 rounded-lg border border-border bg-surface p-1">
-              {(['ru', 'kz'] as const).map((l) => (
-                <button
-                  key={l}
-                  onClick={() => setLang(l)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-semibold uppercase transition-colors ${
-                    lang === l ? 'bg-primary text-primary-foreground' : 'text-muted hover:text-foreground'
-                  }`}
-                >
-                  {l}
-                </button>
-              ))}
             </div>
           </div>
 
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{t('login')}</h1>
-            <p className="text-sm text-muted">{t('welcomeBack')} — {t('continueLearning')}</p>
+            <p className="text-sm text-muted">{t('welcomeBack')}. {t('continueLearning')}</p>
           </div>
 
           <form onSubmit={onSubmit} className="mt-8 space-y-5">
@@ -76,7 +62,7 @@ export default function LoginPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   autoComplete="email"
-                  placeholder="you@example.com"
+                  placeholder="email@example.com"
                 />
               </div>
             </Field>
@@ -91,7 +77,7 @@ export default function LoginPage() {
                   required
                   minLength={8}
                   autoComplete="current-password"
-                  placeholder="••••••••"
+                  placeholder="********"
                 />
               </div>
             </Field>
@@ -100,13 +86,6 @@ export default function LoginPage() {
               {busy ? t('loading') : t('login')}
             </Button>
           </form>
-
-          <p className="mt-6 text-center text-sm text-muted">
-            {t('noAccount')}{' '}
-            <Link href="/register" className="font-semibold text-primary hover:underline">
-              {t('register')}
-            </Link>
-          </p>
         </div>
       </div>
     </main>

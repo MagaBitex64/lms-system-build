@@ -106,8 +106,7 @@ async def my_courses(user: dict = Depends(get_current_user)):
             """
             SELECT c.*, u.full_name AS teacher_name,
                    (SELECT COUNT(*) FROM course_items ci WHERE ci.course_id = c.id) AS item_count,
-                   (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id AND e.status = 'approved') AS student_count,
-                   (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id AND e.status = 'pending') AS pending_count
+                   (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id AND e.status = 'approved') AS student_count
             FROM courses c JOIN users u ON u.id = c.teacher_id
             WHERE ($1 = 'admin' OR c.teacher_id = $2)
             ORDER BY c.created_at DESC

@@ -3,7 +3,7 @@
 import useSWR from 'swr'
 import { api, fetcher, getToken, setToken, ApiError } from './api'
 
-export type Role = 'guest' | 'student' | 'teacher' | 'admin'
+export type Role = 'student' | 'teacher' | 'admin'
 
 export interface User {
   id: number
@@ -29,20 +29,11 @@ export function useAuth() {
     return res.user
   }
 
-  async function register(email: string, password: string, fullName: string) {
-    const res = await api<{ token: string; user: User }>('/auth/register', {
-      body: { email, password, full_name: fullName },
-    })
-    setToken(res.token)
-    await mutate(res.user, { revalidate: false })
-    return res.user
-  }
-
   function logout() {
     setToken(null)
     mutate(undefined, { revalidate: false })
     window.location.href = '/login'
   }
 
-  return { user, isLoading: hasToken && isLoading, isAuthed: !!user, login, register, logout }
+  return { user, isLoading: hasToken && isLoading, isAuthed: !!user, login, logout }
 }

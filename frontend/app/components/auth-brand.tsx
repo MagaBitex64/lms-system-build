@@ -29,14 +29,14 @@ export function AuthBrand() {
           </div>
           <div>
             <p className="text-lg font-semibold text-white">Fenomen School</p>
-            <p className="text-sm text-sidebar-muted">Learning Platform</p>
+            <p className="text-sm text-sidebar-muted">{t('platformLabel')}</p>
           </div>
         </div>
         <h2 className="mt-10 max-w-sm text-3xl font-bold leading-tight text-balance text-white">
-          Everything you need to teach and learn, in one place.
+          {t('authHeroTitle')}
         </h2>
         <p className="mt-3 max-w-md text-sm leading-relaxed text-sidebar-muted">
-          Structured courses, quizzes, assignments, and grading — designed for a focused, premium learning experience.
+          {t('authHeroText')}
         </p>
       </div>
 
@@ -56,7 +56,7 @@ export function AuthBrand() {
 
       <div className="relative mt-10 flex items-center gap-2 text-xs text-sidebar-muted">
         <CheckCircle2 size={14} className="text-primary" />
-        Trusted by students and educators
+        {t('authTrust')}
       </div>
     </div>
   )

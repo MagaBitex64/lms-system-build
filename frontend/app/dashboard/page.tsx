@@ -7,7 +7,6 @@ import {
   GraduationCap,
   Users,
   BarChart3,
-  Clock,
   ArrowRight,
   PlusCircle,
   Compass,
@@ -34,7 +33,7 @@ type Stat = {
   total_students: number
   total_courses: number
   active_enrollments: number
-  pending_enrollments: number
+  total_groups: number
   completed_courses: number
 }
 
@@ -45,7 +44,6 @@ export default function DashboardPage() {
   const isStudent = user?.role === 'student'
   const isTeacher = user?.role === 'teacher'
   const isAdmin = user?.role === 'admin'
-  const isGuest = user?.role === 'guest'
 
   const catalog = useSWR<{ items: CourseSummary[] }>(isStudent ? '/courses' : null, fetcher)
   const mine = useSWR<CourseSummary[]>(isTeacher || isAdmin ? '/courses/mine' : null, fetcher)
@@ -54,30 +52,6 @@ export default function DashboardPage() {
   const firstName = user?.full_name?.split(' ')[0] ?? ''
 
   if (!user) return <Spinner className="mt-20" />
-
-  /* ---------------------------------------------------------------- Guest */
-  if (isGuest) {
-    return (
-      <div className="space-y-6">
-        <PageHeader eyebrow={t('overview')} title={`${t('welcomeBack')}, ${firstName}`} />
-        <Card className="flex flex-col items-center gap-4 py-16 text-center">
-          <div className="flex size-14 items-center justify-center rounded-2xl bg-warning-soft text-warning">
-            <Clock size={26} />
-          </div>
-          <div className="space-y-1.5">
-            <h2 className="text-lg font-semibold">{t('guestWaitingTitle')}</h2>
-            <p className="mx-auto max-w-md text-sm leading-relaxed text-muted">{t('guestWaiting')}</p>
-          </div>
-          <Button asChild variant="secondary">
-            <Link href="/courses">
-              <Compass size={16} />
-              {t('browseCatalog')}
-            </Link>
-          </Button>
-        </Card>
-      </div>
-    )
-  }
 
   /* -------------------------------------------------------------- Student */
   if (isStudent) {
@@ -104,12 +78,7 @@ export default function DashboardPage() {
         <div className="grid gap-4 sm:grid-cols-3">
           <StatCard label={t('enrolledCourses')} value={enrolled.length} icon={<BookOpen size={20} />} />
           <StatCard label={t('allCourses')} value={items.length} icon={<Compass size={20} />} tone="success" />
-          <StatCard
-            label={t('pending')}
-            value={items.filter((c) => c.enrollment_status === 'pending').length}
-            icon={<Clock size={20} />}
-            tone="warning"
-          />
+          <StatCard label={t('groups')} value={items.filter((c) => c.enrollment_status === 'approved').length} icon={<Users size={20} />} />
         </div>
 
         <section className="space-y-4">
@@ -184,18 +153,13 @@ export default function DashboardPage() {
             <StatCard label={t('totalUsers')} value={stats.data.total_users} icon={<Users size={20} />} />
             <StatCard label={t('totalCourses')} value={stats.data.total_courses} icon={<BookOpen size={20} />} tone="success" />
             <StatCard label={t('activeEnrollments')} value={stats.data.active_enrollments} icon={<GraduationCap size={20} />} />
-            <StatCard label={t('pending')} value={stats.data.pending_enrollments} icon={<Clock size={20} />} tone="warning" />
+            <StatCard label={t('groups')} value={stats.data.total_groups} icon={<Users size={20} />} />
           </>
         ) : (
           <>
             <StatCard label={t('createdCourses')} value={courses.length} icon={<BookOpen size={20} />} />
             <StatCard label={t('activeStudents')} value={totalStudents} icon={<Users size={20} />} tone="success" />
-            <StatCard
-              label={t('pending')}
-              value={courses.reduce((s, c) => s + ((c as CourseSummary & { pending_count?: number }).pending_count ?? 0), 0)}
-              icon={<Clock size={20} />}
-              tone="warning"
-            />
+            <StatCard label={t('groups')} value={courses.length} icon={<GraduationCap size={20} />} />
           </>
         )}
       </div>
@@ -203,7 +167,7 @@ export default function DashboardPage() {
       {isAdmin && (
         <div className="grid gap-4 sm:grid-cols-3">
           <QuickLink href="/admin" icon={<BarChart3 size={18} />} title={t('analytics')} desc={t('statistics')} />
-          <QuickLink href="/admin/users" icon={<UserRound size={18} />} title={t('users')} desc={t('totalUsers')} />
+          <QuickLink href="/admin" icon={<UserRound size={18} />} title={t('students')} desc={t('groups')} />
           <QuickLink href="/teacher" icon={<GraduationCap size={18} />} title={t('courseManagement')} desc={t('manageCourses')} />
         </div>
       )}

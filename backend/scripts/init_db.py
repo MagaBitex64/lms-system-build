@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'guest' CHECK (role IN ('guest','student','teacher','admin')),
+    role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student','teacher','admin')),
     is_blocked BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -169,13 +169,44 @@ CREATE TABLE IF NOT EXISTS enrollments (
 );
 CREATE INDEX IF NOT EXISTS idx_enrollments_status ON enrollments(status);
 CREATE INDEX IF NOT EXISTS idx_enrollments_student ON enrollments(student_id);
+
+CREATE TABLE IF NOT EXISTS groups (
+    id BIGSERIAL PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    stream TEXT NOT NULL,
+    capacity INTEGER NOT NULL DEFAULT 20,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS group_students (
+    group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    student_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (group_id, student_id)
+);
+CREATE INDEX IF NOT EXISTS idx_group_students_student ON group_students(student_id);
+
+CREATE TABLE IF NOT EXISTS course_groups (
+    course_id BIGINT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (course_id, group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_course_groups_group ON course_groups(group_id);
 """
 
 MIGRATIONS = [
+    "UPDATE users SET role = 'student' WHERE role = 'guest'",
+    "ALTER TABLE users ALTER COLUMN role SET DEFAULT 'student'",
+    "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check",
+    "ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('student','teacher','admin'))",
     "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS open_at TIMESTAMPTZ",
     "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ",
     "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS close_at TIMESTAMPTZ",
     "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS time_limit_minutes INTEGER",
+    "ALTER TABLE groups ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 20",
 ]
 
 

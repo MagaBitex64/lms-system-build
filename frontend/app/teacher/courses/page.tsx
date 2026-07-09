@@ -2,7 +2,7 @@
 
 import useSWR from 'swr'
 import Link from 'next/link'
-import { BookOpen, PlusCircle, Users, Clock } from 'lucide-react'
+import { BookOpen, PlusCircle, Users } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { fetcher } from '@/lib/api'
 import { Badge, Button, Card, FadeIn, PageHeader, Spinner, ErrorState, EmptyState } from '../../components/ui'
@@ -13,7 +13,6 @@ type CourseSummary = {
   description: string
   item_count: number
   student_count: number
-  pending_count?: number
   is_published: boolean
 }
 
@@ -67,9 +66,6 @@ export default function TeacherCoursesPage() {
                 <div className="flex flex-wrap gap-4 text-sm text-muted">
                   <span className="flex items-center gap-1.5"><BookOpen size={14} />{course.item_count}</span>
                   <span className="flex items-center gap-1.5"><Users size={14} />{course.student_count}</span>
-                  {course.pending_count ? (
-                    <span className="flex items-center gap-1.5 text-warning"><Clock size={14} />{course.pending_count}</span>
-                  ) : null}
                 </div>
                 <div className="mt-auto flex flex-wrap gap-2 pt-1">
                   <Button asChild variant="outline" size="sm"><Link href={`/courses/${course.id}`}>{t('viewCourse')}</Link></Button>

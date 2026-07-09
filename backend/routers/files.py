@@ -10,8 +10,6 @@ router = APIRouter(prefix="/files", tags=["files"])
 
 @router.post("/upload")
 async def upload_file(file: UploadFile, user: dict = Depends(get_current_user)):
-    if user["role"] == "guest":
-        raise HTTPException(status_code=403, detail="Guests cannot upload files")
     content = await file.read()
     try:
         stored_name, mime = storage.save(file.filename or "file", content)
