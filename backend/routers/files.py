@@ -48,11 +48,39 @@ async def download_file(file_id: int, user: dict = Depends(get_current_user)):
             JOIN course_items ci ON ci.id = lm.lesson_id
             JOIN enrollments e ON e.course_id = ci.course_id
             WHERE lm.file_id = $1 AND e.student_id = $2 AND e.status = 'approved'
+              AND ci.is_visible
+              AND (
+                EXISTS (
+                  SELECT 1 FROM item_student_access isa
+                  WHERE isa.item_id = ci.id AND isa.student_id = $2
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM item_group_access iga
+                  JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
+                  JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
+                  WHERE iga.item_id = ci.id
+                )
+              )
             UNION
             SELECT 1 FROM quiz_questions qq
             JOIN course_items ci ON ci.id = qq.quiz_id
             JOIN enrollments e ON e.course_id = ci.course_id
             WHERE qq.image_file_id = $1 AND e.student_id = $2 AND e.status = 'approved'
+              AND ci.is_visible
+              AND (
+                EXISTS (
+                  SELECT 1 FROM item_student_access isa
+                  WHERE isa.item_id = ci.id AND isa.student_id = $2
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM item_group_access iga
+                  JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
+                  JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
+                  WHERE iga.item_id = ci.id
+                )
+              )
             """,
             file_id,
             user["id"],

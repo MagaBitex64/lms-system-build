@@ -188,7 +188,7 @@ function TeachersTab() {
                 <div
                   key={teacher.id}
                   onClick={() => setSelectedId(teacher.id)}
-                  className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                  className={`w-full rounded-lg border text-left transition-colors ${
                     selectedId === teacher.id ? 'border-primary bg-primary-soft' : 'border-border hover:bg-surface-muted'
                   }`}
                 >
@@ -596,7 +596,7 @@ function UserRow({
 
   if (editing) {
     return (
-      <form onSubmit={update} className="space-y-3 px-3 py-3" onClick={(e) => e.stopPropagation()}>
+      <form onSubmit={update} className="w-full space-y-3 px-3 py-3" onClick={(e) => e.stopPropagation()}>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t('fullName')}><Input name="full_name" defaultValue={user.full_name} required /></Field>
           <Field label={t('email')}><Input name="email" type="email" defaultValue={user.email} required /></Field>
@@ -618,7 +618,7 @@ function UserRow({
   }
 
   return (
-    <div className="flex items-center gap-3 px-3 py-3">
+    <div className="flex w-full items-center gap-3 px-3 py-3">
       <Avatar name={user.full_name} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{user.full_name}</p>
@@ -627,11 +627,11 @@ function UserRow({
       <Badge tone={user.is_blocked ? 'danger' : 'success'}>{user.is_blocked ? t('blocked') : t('active')}</Badge>
       <div className="flex shrink-0 gap-1">
         {onRemove ? (
-          <Button size="sm" variant="outline" onClick={() => onRemove(user)} disabled={working}><UserMinus size={14} /></Button>
+          <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); onRemove(user) }} disabled={working}><UserMinus size={14} /></Button>
         ) : (
           <>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={working}><Pencil size={14} /></Button>
-            <Button size="sm" variant="danger" onClick={deleteUser} disabled={working}><Trash2 size={14} /></Button>
+            <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); setEditing(true) }} disabled={working}><Pencil size={14} /></Button>
+            <Button size="sm" variant="danger" onClick={(event) => { event.stopPropagation(); deleteUser() }} disabled={working}><Trash2 size={14} /></Button>
           </>
         )}
       </div>

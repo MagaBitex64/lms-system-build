@@ -524,6 +524,15 @@ async def remove_group_from_course(course_id: int, group_id: int, user: dict = D
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute("DELETE FROM course_groups WHERE course_id = $1 AND group_id = $2", course_id, group_id)
+            await conn.execute(
+                """
+                DELETE FROM item_group_access iga
+                USING course_items ci
+                WHERE iga.item_id = ci.id AND ci.course_id = $1 AND iga.group_id = $2
+                """,
+                course_id,
+                group_id,
+            )
             await cleanup_orphan_group_enrollments(conn)
     return {"ok": True}
 

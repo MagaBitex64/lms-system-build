@@ -54,28 +54,69 @@ async def get_item_or_404(item_id: int) -> dict:
 
 
 async def ensure_item_access(user: dict, item_id: int) -> tuple[dict, dict]:
-    """Returns (item, course). Students also need the item visible + unlocked."""
+    """Returns (item, course). Students also need the item visible + opened."""
     item = await get_item_or_404(item_id)
     course = await ensure_course_access(user, item["course_id"])
     if user["role"] == "student":
         if not item["is_visible"]:
             raise HTTPException(status_code=403, detail="This item is not available")
+        if not await has_item_topic_access(user["id"], item):
+            raise HTTPException(status_code=403, detail="This topic is not open yet")
         if item["sequential_unlock"] and not await is_item_unlocked(user["id"], item):
             raise HTTPException(status_code=403, detail="Complete the previous items first")
     return item, course
 
 
+async def has_item_topic_access(student_id: int, item: dict) -> bool:
+    """Manual topic access: direct student access or access through a linked course group."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT 1
+        WHERE EXISTS (
+            SELECT 1 FROM item_student_access isa
+            WHERE isa.item_id = $1 AND isa.student_id = $2
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM item_group_access iga
+            JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
+            JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = $3
+            WHERE iga.item_id = $1
+        )
+        """,
+        item["id"],
+        student_id,
+        item["course_id"],
+    )
+    return row is not None
+
+
 async def is_item_unlocked(student_id: int, item: dict) -> bool:
-    """Sequential unlock: all previous visible gradable items must be completed."""
+    """Sequential unlock: all previous visible and opened gradable items must be completed."""
     pool = await get_pool()
     prior = await pool.fetch(
         """
         SELECT ci.id, ci.type FROM course_items ci
         WHERE ci.course_id = $1 AND ci.position < $2 AND ci.is_visible
           AND ci.type IN ('quiz','homework')
+          AND (
+            EXISTS (
+              SELECT 1 FROM item_student_access isa
+              WHERE isa.item_id = ci.id AND isa.student_id = $3
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM item_group_access iga
+              JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $3
+              JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
+              WHERE iga.item_id = ci.id
+            )
+          )
         """,
         item["course_id"],
         item["position"],
+        student_id,
     )
     for p in prior:
         if p["type"] == "quiz":

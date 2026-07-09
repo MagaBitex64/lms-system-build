@@ -19,9 +19,23 @@ async def compute_student_course_grade(pool, course_id: int, student_id: int) ->
         LEFT JOIN quizzes q ON q.item_id = ci.id
         LEFT JOIN homework h ON h.item_id = ci.id
         WHERE ci.course_id = $1 AND ci.type IN ('quiz','homework') AND ci.is_visible
+          AND (
+            EXISTS (
+              SELECT 1 FROM item_student_access isa
+              WHERE isa.item_id = ci.id AND isa.student_id = $2
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM item_group_access iga
+              JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
+              JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
+              WHERE iga.item_id = ci.id
+            )
+          )
         ORDER BY ci.position
         """,
         course_id,
+        student_id,
     )
     entries = []
     final_grade = 0.0

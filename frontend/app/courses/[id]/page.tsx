@@ -10,6 +10,8 @@ import {
   BookOpen,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Eye,
   EyeOff,
   FileText,
@@ -19,6 +21,7 @@ import {
   PlusCircle,
   Settings2,
   UserRound,
+  Users,
 } from 'lucide-react'
 import { useI18n, type TKey } from '@/lib/i18n'
 import { api, fetcher } from '@/lib/api'
@@ -57,6 +60,26 @@ type Item = {
   deadline_at?: string | null
   close_at?: string | null
   time_limit_minutes?: number | null
+  topic_open?: boolean
+  access_group_ids?: number[]
+  access_student_ids?: number[]
+}
+
+type CourseGroup = {
+  id: number
+  code: string
+  title: string
+  direction: string
+  stream: string
+  capacity: number
+  student_count: number
+}
+
+type CourseStudent = {
+  id: number
+  full_name: string
+  email: string
+  groups: Array<{ id: number; code: string }>
 }
 
 type Course = {
@@ -69,6 +92,8 @@ type Course = {
   is_owner?: boolean
   enrollment_status?: string | null
   items: Item[] | null
+  groups?: CourseGroup[] | null
+  students?: CourseStudent[] | null
 }
 
 const TYPE_ICON: Record<ItemType, ReactNode> = {
@@ -97,6 +122,10 @@ export default function CoursePage() {
   const [itemSequential, setItemSequential] = useState(false)
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [accessItem, setAccessItem] = useState<Item | null>(null)
+  const [accessGroupIds, setAccessGroupIds] = useState<number[]>([])
+  const [accessStudentIds, setAccessStudentIds] = useState<number[]>([])
+  const [expandedGroupIds, setExpandedGroupIds] = useState<number[]>([])
 
   if (isLoading) return <Spinner className="mt-20" />
   if (error || !course) return <ErrorState message={t('errorOccurred')} />
@@ -142,6 +171,48 @@ export default function CoursePage() {
       await mutate()
     } catch (err) {
       setActionError((err as Error).message || t('errorOccurred'))
+    }
+  }
+
+  function openAccessModal(item: Item) {
+    setAccessItem(item)
+    setAccessGroupIds(item.access_group_ids ?? [])
+    setAccessStudentIds(item.access_student_ids ?? [])
+    setExpandedGroupIds(item.access_group_ids ?? [])
+  }
+
+  function toggleNumber(list: number[], value: number) {
+    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value]
+  }
+
+  function studentsInGroup(groupId: number) {
+    return (course?.students ?? []).filter((student) => student.groups.some((group) => group.id === groupId))
+  }
+
+  function setGroupAccess(groupId: number, checked: boolean) {
+    setAccessGroupIds((current) => checked ? [...new Set([...current, groupId])] : current.filter((id) => id !== groupId))
+    if (checked) {
+      const groupStudentIds = studentsInGroup(groupId).map((student) => student.id)
+      setAccessStudentIds((current) => current.filter((id) => !groupStudentIds.includes(id)))
+    }
+  }
+
+  async function saveAccess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!accessItem) return
+    setWorking(true)
+    setActionError(null)
+    try {
+      await api(`/courses/items/${accessItem.id}/access`, {
+        method: 'PUT',
+        body: { group_ids: accessGroupIds, student_ids: accessStudentIds },
+      })
+      setAccessItem(null)
+      await mutate()
+    } catch (err) {
+      setActionError((err as Error).message || t('errorOccurred'))
+    } finally {
+      setWorking(false)
     }
   }
 
@@ -223,6 +294,27 @@ export default function CoursePage() {
         </Card>
       )}
 
+      {isOwner && (
+        <Card className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Users size={18} className="text-primary" />
+            <h2 className="text-base font-semibold">{t('courseGroups')}</h2>
+          </div>
+          {course.groups?.length ? (
+            <div className="flex flex-wrap gap-2">
+              {course.groups.map((group) => (
+                <span key={group.id} className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2 text-sm">
+                  <span className="font-semibold">{group.code}</span>
+                  <span className="text-muted">{group.student_count}/{group.capacity}</span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted">{t('noGroups')}</p>
+          )}
+        </Card>
+      )}
+
       <section className="space-y-4">
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-lg font-semibold">{t('courseContent')}</h2>
@@ -263,6 +355,11 @@ export default function CoursePage() {
                       {isOwner && (
                         <Badge tone={item.is_visible ? 'success' : 'neutral'}>
                           {item.is_visible ? t('visible') : t('hidden')}
+                        </Badge>
+                      )}
+                      {isOwner && (
+                        <Badge tone={(item.access_group_ids?.length || item.access_student_ids?.length) ? 'primary' : 'neutral'}>
+                          {t('topicAccess')}: {(item.access_group_ids?.length ?? 0) + (item.access_student_ids?.length ?? 0)}
                         </Badge>
                       )}
                       {item.sequential_unlock && <Badge tone="warning">{t('locked')}</Badge>}
@@ -306,6 +403,10 @@ export default function CoursePage() {
                         <Lock size={14} />
                         {item.sequential_unlock ? t('open') : t('locked')}
                       </Button>
+                      <Button variant="outline" size="sm" onClick={() => openAccessModal(item)}>
+                        <Users size={14} />
+                        {t('topicAccess')}
+                      </Button>
                     </div>
                   ) : (
                     !locked && <ArrowRight size={18} className="shrink-0 text-muted" />
@@ -315,7 +416,7 @@ export default function CoursePage() {
               return (
                 <FadeIn key={item.id} delay={i * 30}>
                   {locked || isOwner ? (
-                    <div title={locked ? t('lockedHint') : undefined}>{content}</div>
+                    <div title={locked ? (item.topic_open === false ? t('topicClosedHint') : t('lockedHint')) : undefined}>{content}</div>
                   ) : (
                     <Link href={`/items/${item.id}`} className="block">
                       {content}
@@ -367,6 +468,88 @@ export default function CoursePage() {
             <Button type="submit" disabled={working}>
               {working ? t('loading') : t('create')}
             </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={!!accessItem} onClose={() => setAccessItem(null)} title={t('topicAccess')}>
+        <form onSubmit={saveAccess} className="space-y-5">
+          <div>
+            <p className="text-sm font-semibold text-foreground">{accessItem?.title}</p>
+            <p className="mt-1 text-sm text-muted">{t('topicAccessHint')}</p>
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold">{t('openToGroups')}</h3>
+            {course.groups?.length ? (
+              <div className="max-h-96 space-y-2 overflow-y-auto rounded-lg border border-border p-2">
+                {course.groups.map((group) => {
+                  const expanded = expandedGroupIds.includes(group.id)
+                  const wholeGroup = accessGroupIds.includes(group.id)
+                  const groupStudents = studentsInGroup(group.id)
+                  return (
+                    <div key={group.id} className="rounded-lg border border-border bg-surface-muted">
+                      <div className="flex items-center gap-3 p-3">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedGroupIds((current) => toggleNumber(current, group.id))}
+                          className="flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-surface"
+                          aria-label={expanded ? t('collapse') : t('expand')}
+                        >
+                          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        </button>
+                        <label className="flex min-w-0 flex-1 items-center gap-3 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={wholeGroup}
+                            onChange={(event) => setGroupAccess(group.id, event.target.checked)}
+                          />
+                          <span className="min-w-0">
+                            <span className="block truncate font-semibold">{group.code} - {group.title}</span>
+                            <span className="block text-xs text-muted">{group.student_count}/{group.capacity} {t('studentsCount')}</span>
+                          </span>
+                        </label>
+                        <Badge tone={wholeGroup ? 'primary' : 'neutral'}>{wholeGroup ? t('wholeGroup') : t('selectGroup')}</Badge>
+                      </div>
+
+                      {expanded && (
+                        <div className="border-t border-border bg-surface px-3 py-2">
+                          {wholeGroup && <p className="mb-2 text-xs text-muted">{t('wholeGroupSelected')}</p>}
+                          {groupStudents.length ? (
+                            <div className="space-y-1">
+                              {groupStudents.map((student) => (
+                                <label key={student.id} className="flex items-start gap-3 rounded-md p-2 text-sm hover:bg-surface-muted">
+                                  <input
+                                    className="mt-1"
+                                    type="checkbox"
+                                    disabled={wholeGroup}
+                                    checked={wholeGroup || accessStudentIds.includes(student.id)}
+                                    onChange={() => setAccessStudentIds((current) => toggleNumber(current, student.id))}
+                                  />
+                                  <span className="min-w-0">
+                                    <span className="block truncate font-medium">{student.full_name}</span>
+                                    <span className="block truncate text-xs text-muted">{student.email}</span>
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="py-2 text-sm text-muted">{t('noData')}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted">{t('noGroups')}</p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setAccessItem(null)}>{t('cancel')}</Button>
+            <Button type="submit" disabled={working}>{working ? t('loading') : t('save')}</Button>
           </div>
         </form>
       </Modal>

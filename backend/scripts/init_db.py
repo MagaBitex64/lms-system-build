@@ -195,6 +195,22 @@ CREATE TABLE IF NOT EXISTS course_groups (
     PRIMARY KEY (course_id, group_id)
 );
 CREATE INDEX IF NOT EXISTS idx_course_groups_group ON course_groups(group_id);
+
+CREATE TABLE IF NOT EXISTS item_group_access (
+    item_id BIGINT NOT NULL REFERENCES course_items(id) ON DELETE CASCADE,
+    group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (item_id, group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_item_group_access_group ON item_group_access(group_id);
+
+CREATE TABLE IF NOT EXISTS item_student_access (
+    item_id BIGINT NOT NULL REFERENCES course_items(id) ON DELETE CASCADE,
+    student_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (item_id, student_id)
+);
+CREATE INDEX IF NOT EXISTS idx_item_student_access_student ON item_student_access(student_id);
 """
 
 MIGRATIONS = [

@@ -6,6 +6,7 @@ from core.access import (
     ensure_course_owner,
     ensure_item_access,
     get_item_or_404,
+    has_item_topic_access,
     is_enrolled,
     is_item_unlocked,
 )
@@ -39,6 +40,11 @@ class ItemUpdate(BaseModel):
 
 class ReorderIn(BaseModel):
     item_ids: list[int]
+
+
+class ItemAccessIn(BaseModel):
+    group_ids: list[int] = []
+    student_ids: list[int] = []
 
 
 class LessonIn(BaseModel):
@@ -229,10 +235,32 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         """,
         course_id,
     )
+    item_ids = [r["id"] for r in items_rows]
+    access_group_map: dict[int, list[int]] = {item_id: [] for item_id in item_ids}
+    access_student_map: dict[int, list[int]] = {item_id: [] for item_id in item_ids}
+    if is_owner and item_ids:
+        access_group_rows = await pool.fetch(
+            "SELECT item_id, group_id FROM item_group_access WHERE item_id = ANY($1::bigint[])",
+            item_ids,
+        )
+        access_student_rows = await pool.fetch(
+            "SELECT item_id, student_id FROM item_student_access WHERE item_id = ANY($1::bigint[])",
+            item_ids,
+        )
+        for row in access_group_rows:
+            access_group_map.setdefault(row["item_id"], []).append(row["group_id"])
+        for row in access_student_rows:
+            access_student_map.setdefault(row["item_id"], []).append(row["student_id"])
+
     items = []
     for r in items_rows:
         if user["role"] == "student" and not r["is_visible"]:
             continue
+        topic_open = True
+        sequential_locked = False
+        if user["role"] == "student":
+            topic_open = await has_item_topic_access(user["id"], dict(r))
+            sequential_locked = r["sequential_unlock"] and not await is_item_unlocked(user["id"], dict(r))
         d = {
             "id": r["id"],
             "type": r["type"],
@@ -249,7 +277,8 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
             "max_score": r["quiz_max_score"] or r["hw_max_score"],
         }
         if user["role"] == "student":
-            d["locked"] = r["sequential_unlock"] and not await is_item_unlocked(user["id"], dict(r))
+            d["topic_open"] = topic_open
+            d["locked"] = (not topic_open) or sequential_locked
             if r["type"] == "quiz":
                 a = await pool.fetchrow(
                     "SELECT auto_score, manual_score, status FROM quiz_attempts WHERE quiz_id = $1 AND student_id = $2",
@@ -266,7 +295,51 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
                 )
                 d["completed"] = s is not None
                 d["score"] = float(s["grade"]) if s and s["grade"] is not None else None
+        if is_owner:
+            d["access_group_ids"] = access_group_map.get(r["id"], [])
+            d["access_student_ids"] = access_student_map.get(r["id"], [])
         items.append(d)
+
+    groups = None
+    students = None
+    if is_owner:
+        group_rows = await pool.fetch(
+            """
+            SELECT g.id, g.code, g.title, g.direction, g.stream, g.capacity,
+                   (SELECT COUNT(*) FROM group_students gs WHERE gs.group_id = g.id) AS student_count
+            FROM course_groups cg
+            JOIN groups g ON g.id = cg.group_id
+            WHERE cg.course_id = $1
+            ORDER BY g.code
+            """,
+            course_id,
+        )
+        groups = [dict(g) for g in group_rows]
+        student_rows = await pool.fetch(
+            """
+            SELECT DISTINCT u.id, u.full_name, u.email
+            FROM enrollments e
+            JOIN users u ON u.id = e.student_id
+            WHERE e.course_id = $1 AND e.status = 'approved'
+            ORDER BY u.full_name
+            """,
+            course_id,
+        )
+        students = []
+        for student in student_rows:
+            student_groups = await pool.fetch(
+                """
+                SELECT g.id, g.code
+                FROM group_students gs
+                JOIN groups g ON g.id = gs.group_id
+                JOIN course_groups cg ON cg.group_id = g.id AND cg.course_id = $1
+                WHERE gs.student_id = $2
+                ORDER BY g.code
+                """,
+                course_id,
+                student["id"],
+            )
+            students.append(dict(student) | {"groups": [dict(g) for g in student_groups]})
 
     return {
         "id": course["id"],
@@ -279,6 +352,8 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         "is_owner": is_owner,
         "enrollment_status": "approved" if enrolled else None,
         "items": items,
+        "groups": groups,
+        "students": students,
     }
 
 
@@ -336,6 +411,54 @@ async def update_item(item_id: int, data: ItemUpdate, user: dict = Depends(requi
         item_id,
     )
     return dict(row) | {"created_at": str(row["created_at"])}
+
+
+@router.put("/items/{item_id}/access")
+async def update_item_access(item_id: int, data: ItemAccessIn, user: dict = Depends(require_teacher)):
+    item = await get_item_or_404(item_id)
+    await ensure_course_owner(user, item["course_id"])
+    group_ids = sorted(set(data.group_ids))
+    student_ids = sorted(set(data.student_ids))
+    pool = await get_pool()
+    if group_ids:
+        valid_group_count = await pool.fetchval(
+            """
+            SELECT COUNT(*) FROM course_groups
+            WHERE course_id = $1 AND group_id = ANY($2::bigint[])
+            """,
+            item["course_id"],
+            group_ids,
+        )
+        if valid_group_count != len(group_ids):
+            raise HTTPException(status_code=422, detail="Some groups are not linked to this course")
+    if student_ids:
+        valid_student_count = await pool.fetchval(
+            """
+            SELECT COUNT(*) FROM enrollments
+            WHERE course_id = $1 AND student_id = ANY($2::bigint[]) AND status = 'approved'
+            """,
+            item["course_id"],
+            student_ids,
+        )
+        if valid_student_count != len(student_ids):
+            raise HTTPException(status_code=422, detail="Some students are not enrolled in this course")
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM item_group_access WHERE item_id = $1", item_id)
+            await conn.execute("DELETE FROM item_student_access WHERE item_id = $1", item_id)
+            for group_id in group_ids:
+                await conn.execute(
+                    "INSERT INTO item_group_access (item_id, group_id) VALUES ($1, $2)",
+                    item_id,
+                    group_id,
+                )
+            for student_id in student_ids:
+                await conn.execute(
+                    "INSERT INTO item_student_access (item_id, student_id) VALUES ($1, $2)",
+                    item_id,
+                    student_id,
+                )
+    return {"ok": True, "group_ids": group_ids, "student_ids": student_ids}
 
 
 @router.delete("/items/{item_id}")

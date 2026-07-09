@@ -43,6 +43,19 @@ async def search(
             JOIN enrollments e ON e.course_id = c.id AND e.student_id = $2 AND e.status = 'approved'
             LEFT JOIN lessons l ON l.item_id = ci.id
             WHERE ci.is_visible AND (ci.title ILIKE $1 OR l.content ILIKE $1)
+              AND (
+                EXISTS (
+                  SELECT 1 FROM item_student_access isa
+                  WHERE isa.item_id = ci.id AND isa.student_id = $2
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM item_group_access iga
+                  JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
+                  JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
+                  WHERE iga.item_id = ci.id
+                )
+              )
             ORDER BY ci.title LIMIT $3 OFFSET $4
             """,
             like,
@@ -58,7 +71,20 @@ async def search(
             JOIN course_items ci ON ci.id = lm.lesson_id
             JOIN courses c ON c.id = ci.course_id
             JOIN enrollments e ON e.course_id = c.id AND e.student_id = $2 AND e.status = 'approved'
-            WHERE lm.label ILIKE $1
+            WHERE ci.is_visible AND lm.label ILIKE $1
+              AND (
+                EXISTS (
+                  SELECT 1 FROM item_student_access isa
+                  WHERE isa.item_id = ci.id AND isa.student_id = $2
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM item_group_access iga
+                  JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
+                  JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
+                  WHERE iga.item_id = ci.id
+                )
+              )
             ORDER BY lm.label LIMIT $3 OFFSET $4
             """,
             like,
