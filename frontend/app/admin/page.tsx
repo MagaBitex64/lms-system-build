@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from 'react'
 import useSWR from 'swr'
-import { BookOpen, GraduationCap, PlusCircle, Search, Users, UserPlus } from 'lucide-react'
+import { BookOpen, Check, GraduationCap, Pencil, PlusCircle, Search, Trash2, UserMinus, Users, UserPlus, X } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { api, fetcher } from '@/lib/api'
 import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Field, Input, PageHeader, Select, Spinner } from '../components/ui'
@@ -122,7 +122,9 @@ function StudentsTab() {
 
       <Card className="space-y-4">
         <ListHeader title={t('students')} query={query} setQuery={setQuery} />
-        {isLoading ? <Spinner /> : loadError ? <ErrorState message={t('errorOccurred')} /> : <UserList users={students} />}
+        {isLoading ? <Spinner /> : loadError ? <ErrorState message={t('errorOccurred')} /> : (
+          <UserList users={students} fixedRole="student" onChanged={mutate} />
+        )}
       </Card>
     </div>
   )
@@ -183,19 +185,25 @@ function TeachersTab() {
           {teachersReq.isLoading ? <Spinner /> : teachersReq.error ? <ErrorState message={t('errorOccurred')} /> : (
             <div className="space-y-2">
               {teachers.map((teacher) => (
-                <button
+                <div
                   key={teacher.id}
                   onClick={() => setSelectedId(teacher.id)}
                   className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
                     selectedId === teacher.id ? 'border-primary bg-primary-soft' : 'border-border hover:bg-surface-muted'
                   }`}
                 >
-                  <Avatar name={teacher.full_name} />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">{teacher.full_name}</p>
-                    <p className="truncate text-xs text-muted">{teacher.email}</p>
-                  </div>
-                </button>
+                  <UserRow
+                    user={teacher}
+                    fixedRole="teacher"
+                    onChanged={async () => {
+                      await teachersReq.mutate()
+                      await detailReq.mutate()
+                    }}
+                    onDeleted={() => {
+                      if (selectedId === teacher.id) setSelectedId(null)
+                    }}
+                  />
+                </div>
               ))}
             </div>
           )}
@@ -243,7 +251,19 @@ function TeachersTab() {
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {course.groups.length ? course.groups.map((group) => (
-                        <Badge key={group.id} tone="primary">{group.code} · {group.student_count}/{group.capacity}</Badge>
+                        <span key={group.id} className="inline-flex items-center gap-1 rounded-full bg-primary-soft px-2.5 py-0.5 text-xs font-semibold text-primary">
+                          {group.code} - {group.student_count}/{group.capacity}
+                          <button
+                            onClick={async () => {
+                              await api(`/admin/courses/${course.id}/groups/${group.id}`, { method: 'DELETE' })
+                              await detailReq.mutate()
+                            }}
+                            className="rounded-full p-0.5 hover:bg-primary/10"
+                            aria-label={t('remove')}
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
                       )) : <span className="text-sm text-muted">{t('noGroups')}</span>}
                     </div>
                   </div>
@@ -263,6 +283,7 @@ function GroupsTab() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [studentQuery, setStudentQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [editingGroup, setEditingGroup] = useState(false)
   const groupsReq = useSWR<{ items: Group[] }>('/admin/groups?per_page=100', fetcher)
   const detailReq = useSWR<GroupDetail>(selectedId ? `/admin/groups/${selectedId}` : null, fetcher)
   const searchReq = useSWR<{ items: User[] }>(
@@ -303,6 +324,32 @@ function GroupsTab() {
     setStudentQuery('')
     await detailReq.mutate()
     await searchReq.mutate()
+    await groupsReq.mutate()
+  }
+
+  async function deleteGroup(groupId: number) {
+    if (!window.confirm(t('confirmDelete'))) return
+    await api(`/admin/groups/${groupId}`, { method: 'DELETE' })
+    setSelectedId(null)
+    await groupsReq.mutate()
+  }
+
+  async function updateGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedId) return
+    const form = new FormData(event.currentTarget)
+    await api(`/admin/groups/${selectedId}`, {
+      method: 'PATCH',
+      body: {
+        code: String(form.get('code') ?? ''),
+        title: String(form.get('title') ?? ''),
+        direction: String(form.get('direction') ?? ''),
+        stream: String(form.get('stream') ?? ''),
+        capacity: Number(form.get('capacity') || 20),
+      },
+    })
+    setEditingGroup(false)
+    await detailReq.mutate()
     await groupsReq.mutate()
   }
 
@@ -357,13 +404,33 @@ function GroupsTab() {
           <ErrorState message={t('errorOccurred')} />
         ) : (
           <>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">{detailReq.data.code} · {detailReq.data.title}</h2>
-                <p className="text-sm text-muted">{detailReq.data.direction}</p>
+            {editingGroup ? (
+              <form onSubmit={updateGroup} className="space-y-3 rounded-lg border border-border bg-surface-muted p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label={t('groupCode')}><Input name="code" defaultValue={detailReq.data.code} required /></Field>
+                  <Field label={t('title')}><Input name="title" defaultValue={detailReq.data.title} required /></Field>
+                  <Field label={t('direction')}><Input name="direction" defaultValue={detailReq.data.direction} required /></Field>
+                  <Field label={t('stream')}><Input name="stream" defaultValue={detailReq.data.stream} required /></Field>
+                  <Field label={t('capacity')}><Input name="capacity" type="number" defaultValue={detailReq.data.capacity} min={1} max={40} required /></Field>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => setEditingGroup(false)}><X size={15} />{t('cancel')}</Button>
+                  <Button type="submit"><Check size={15} />{t('save')}</Button>
+                </div>
+              </form>
+            ) : (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">{detailReq.data.code} - {detailReq.data.title}</h2>
+                  <p className="text-sm text-muted">{detailReq.data.direction}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone="primary">{detailReq.data.students.length}/{detailReq.data.capacity}</Badge>
+                  <Button size="sm" variant="outline" onClick={() => setEditingGroup(true)}><Pencil size={14} />{t('edit')}</Button>
+                  <Button size="sm" variant="danger" onClick={() => deleteGroup(detailReq.data!.id)}><Trash2 size={14} />{t('delete')}</Button>
+                </div>
               </div>
-              <Badge tone="primary">{detailReq.data.students.length}/{detailReq.data.capacity}</Badge>
-            </div>
+            )}
 
             <div className="space-y-3">
               <h3 className="text-sm font-semibold">{t('addStudent')}</h3>
@@ -393,7 +460,18 @@ function GroupsTab() {
 
             <div className="space-y-3">
               <h3 className="text-sm font-semibold">{t('students')}</h3>
-              {detailReq.data.students.length ? <UserList users={detailReq.data.students} /> : <EmptyState title={t('noData')} />}
+              {detailReq.data.students.length ? (
+                <UserList
+                  users={detailReq.data.students}
+                  fixedRole="student"
+                  onRemove={async (student) => {
+                    await api(`/admin/groups/${detailReq.data!.id}/students/${student.id}`, { method: 'DELETE' })
+                    await detailReq.mutate()
+                    await groupsReq.mutate()
+                    await searchReq.mutate()
+                  }}
+                />
+              ) : <EmptyState title={t('noData')} />}
             </div>
 
             <div className="space-y-3">
@@ -435,21 +513,128 @@ function ListHeader({ title, query, setQuery }: { title: string; query: string; 
   )
 }
 
-function UserList({ users }: { users: User[] }) {
+function UserList({
+  users,
+  fixedRole,
+  onChanged,
+  onRemove,
+}: {
+  users: User[]
+  fixedRole?: 'student' | 'teacher' | 'admin'
+  onChanged?: () => Promise<unknown>
+  onRemove?: (user: User) => Promise<void>
+}) {
   const { t } = useI18n()
   if (!users.length) return <EmptyState icon={<Users size={22} />} title={t('noData')} />
   return (
     <div className="divide-y divide-border rounded-lg border border-border">
       {users.map((user) => (
-        <div key={user.id} className="flex items-center gap-3 px-3 py-3">
-          <Avatar name={user.full_name} />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{user.full_name}</p>
-            <p className="truncate text-xs text-muted">{user.email}</p>
-          </div>
-          <Badge tone={user.is_blocked ? 'danger' : 'success'}>{user.is_blocked ? t('blocked') : t('active')}</Badge>
-        </div>
+        <UserRow key={user.id} user={user} fixedRole={fixedRole} onChanged={onChanged} onRemove={onRemove} />
       ))}
+    </div>
+  )
+}
+
+function UserRow({
+  user,
+  fixedRole,
+  onChanged,
+  onDeleted,
+  onRemove,
+}: {
+  user: User
+  fixedRole?: 'student' | 'teacher' | 'admin'
+  onChanged?: () => Promise<unknown>
+  onDeleted?: () => void
+  onRemove?: (user: User) => Promise<void>
+}) {
+  const { t } = useI18n()
+  const [editing, setEditing] = useState(false)
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function update(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    setWorking(true)
+    setError(null)
+    try {
+      const password = String(form.get('password') ?? '')
+      await api(`/admin/users/${user.id}`, {
+        method: 'PATCH',
+        body: {
+          full_name: String(form.get('full_name') ?? ''),
+          email: String(form.get('email') ?? ''),
+          password: password || undefined,
+          role: fixedRole ?? String(form.get('role') ?? user.role),
+          is_blocked: String(form.get('is_blocked')) === 'true',
+        },
+      })
+      setEditing(false)
+      await onChanged?.()
+    } catch (err) {
+      setError((err as Error).message || t('errorOccurred'))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  async function deleteUser() {
+    if (!window.confirm(t('confirmDelete'))) return
+    setWorking(true)
+    setError(null)
+    try {
+      await api(`/admin/users/${user.id}`, { method: 'DELETE' })
+      onDeleted?.()
+      await onChanged?.()
+    } catch (err) {
+      setError((err as Error).message || t('errorOccurred'))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <form onSubmit={update} className="space-y-3 px-3 py-3" onClick={(e) => e.stopPropagation()}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label={t('fullName')}><Input name="full_name" defaultValue={user.full_name} required /></Field>
+          <Field label={t('email')}><Input name="email" type="email" defaultValue={user.email} required /></Field>
+          <Field label={t('password')} hint={t('optionalPassword')}><Input name="password" type="password" minLength={8} /></Field>
+          <Field label={t('status')}>
+            <Select name="is_blocked" defaultValue={String(user.is_blocked)}>
+              <option value="false">{t('active')}</option>
+              <option value="true">{t('blocked')}</option>
+            </Select>
+          </Field>
+        </div>
+        {error && <ErrorState message={error} />}
+        <div className="flex justify-end gap-2">
+          <Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)} disabled={working}><X size={14} />{t('cancel')}</Button>
+          <Button type="submit" size="sm" disabled={working}><Check size={14} />{t('save')}</Button>
+        </div>
+      </form>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-3 py-3">
+      <Avatar name={user.full_name} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{user.full_name}</p>
+        <p className="truncate text-xs text-muted">{user.email}</p>
+      </div>
+      <Badge tone={user.is_blocked ? 'danger' : 'success'}>{user.is_blocked ? t('blocked') : t('active')}</Badge>
+      <div className="flex shrink-0 gap-1">
+        {onRemove ? (
+          <Button size="sm" variant="outline" onClick={() => onRemove(user)} disabled={working}><UserMinus size={14} /></Button>
+        ) : (
+          <>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={working}><Pencil size={14} /></Button>
+            <Button size="sm" variant="danger" onClick={deleteUser} disabled={working}><Trash2 size={14} /></Button>
+          </>
+        )}
+      </div>
     </div>
   )
 }

@@ -16,6 +16,14 @@ class UserCreateIn(BaseModel):
     role: str = Field(pattern="^(student|teacher|admin)$")
 
 
+class UserUpdateIn(BaseModel):
+    email: EmailStr | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+    full_name: str | None = Field(default=None, min_length=2, max_length=120)
+    role: str | None = Field(default=None, pattern="^(student|teacher|admin)$")
+    is_blocked: bool | None = None
+
+
 class RoleIn(BaseModel):
     role: str = Field(pattern="^(student|teacher|admin)$")
 
@@ -30,6 +38,14 @@ class GroupIn(BaseModel):
     direction: str = Field(min_length=2, max_length=120)
     stream: str = Field(min_length=1, max_length=20)
     capacity: int = Field(default=20, ge=1, le=40)
+
+
+class GroupUpdateIn(BaseModel):
+    code: str | None = Field(default=None, min_length=2, max_length=20)
+    title: str | None = Field(default=None, min_length=2, max_length=120)
+    direction: str | None = Field(default=None, min_length=2, max_length=120)
+    stream: str | None = Field(default=None, min_length=1, max_length=20)
+    capacity: int | None = Field(default=None, ge=1, le=40)
 
 
 class GroupStudentIn(BaseModel):
@@ -82,6 +98,22 @@ async def enroll_student_in_group_courses(conn, group_id: int, student_id: int) 
     )
 
 
+async def cleanup_orphan_group_enrollments(conn) -> None:
+    await conn.execute(
+        """
+        DELETE FROM enrollments e
+        WHERE e.status = 'approved'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM course_groups cg
+            JOIN group_students gs ON gs.group_id = cg.group_id
+            WHERE cg.course_id = e.course_id
+              AND gs.student_id = e.student_id
+          )
+        """
+    )
+
+
 @router.get("/users")
 async def list_users(
     page: int = Query(1, ge=1),
@@ -130,6 +162,50 @@ async def create_user(data: UserCreateIn, user: dict = Depends(require_admin)):
         data.role,
     )
     return public_user(row)
+
+
+@router.patch("/users/{user_id}")
+async def update_user(user_id: int, data: UserUpdateIn, user: dict = Depends(require_admin)):
+    if user_id == user["id"] and (data.role is not None or data.is_blocked is True):
+        raise HTTPException(status_code=422, detail="You cannot restrict your own admin account")
+    pool = await get_pool()
+    existing = await pool.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    password_hash = hash_password(data.password) if data.password else existing["password_hash"]
+    try:
+        row = await pool.fetchrow(
+            """
+            UPDATE users SET
+              email = $1,
+              password_hash = $2,
+              full_name = $3,
+              role = $4,
+              is_blocked = $5
+            WHERE id = $6
+            RETURNING id, email, full_name, role, is_blocked, created_at
+            """,
+            data.email.lower() if data.email else existing["email"],
+            password_hash,
+            data.full_name.strip() if data.full_name else existing["full_name"],
+            data.role or existing["role"],
+            existing["is_blocked"] if data.is_blocked is None else data.is_blocked,
+            user_id,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="Email is already registered") from exc
+    return public_user(row)
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: int, user: dict = Depends(require_admin)):
+    if user_id == user["id"]:
+        raise HTTPException(status_code=422, detail="You cannot delete your own account")
+    pool = await get_pool()
+    row = await pool.fetchrow("DELETE FROM users WHERE id = $1 RETURNING id", user_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"ok": True}
 
 
 @router.post("/users/{user_id}/role")
@@ -229,6 +305,48 @@ async def create_group(data: GroupIn, user: dict = Depends(require_admin)):
     return dict(row) | {"created_at": str(row["created_at"])}
 
 
+@router.patch("/groups/{group_id}")
+async def update_group(group_id: int, data: GroupUpdateIn, user: dict = Depends(require_admin)):
+    pool = await get_pool()
+    existing = await pool.fetchrow("SELECT * FROM groups WHERE id = $1", group_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    try:
+        row = await pool.fetchrow(
+            """
+            UPDATE groups SET
+              code = $1,
+              title = $2,
+              direction = $3,
+              stream = $4,
+              capacity = $5
+            WHERE id = $6
+            RETURNING *
+            """,
+            data.code.strip().upper() if data.code else existing["code"],
+            data.title.strip() if data.title else existing["title"],
+            data.direction.strip() if data.direction else existing["direction"],
+            data.stream.strip() if data.stream else existing["stream"],
+            data.capacity if data.capacity is not None else existing["capacity"],
+            group_id,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="Group code already exists") from exc
+    return dict(row) | {"created_at": str(row["created_at"])}
+
+
+@router.delete("/groups/{group_id}")
+async def delete_group(group_id: int, user: dict = Depends(require_admin)):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("DELETE FROM groups WHERE id = $1 RETURNING id", group_id)
+            if row is None:
+                raise HTTPException(status_code=404, detail="Group not found")
+            await cleanup_orphan_group_enrollments(conn)
+    return {"ok": True}
+
+
 @router.get("/groups/{group_id}")
 async def group_detail(group_id: int, user: dict = Depends(require_admin)):
     pool = await get_pool()
@@ -321,7 +439,10 @@ async def add_student_to_group(group_id: int, data: GroupStudentIn, user: dict =
 @router.delete("/groups/{group_id}/students/{student_id}")
 async def remove_student_from_group(group_id: int, student_id: int, user: dict = Depends(require_admin)):
     pool = await get_pool()
-    await pool.execute("DELETE FROM group_students WHERE group_id = $1 AND student_id = $2", group_id, student_id)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM group_students WHERE group_id = $1 AND student_id = $2", group_id, student_id)
+            await cleanup_orphan_group_enrollments(conn)
     return {"ok": True}
 
 
@@ -400,7 +521,10 @@ async def add_group_to_course(course_id: int, data: CourseGroupIn, user: dict = 
 @router.delete("/courses/{course_id}/groups/{group_id}")
 async def remove_group_from_course(course_id: int, group_id: int, user: dict = Depends(require_admin)):
     pool = await get_pool()
-    await pool.execute("DELETE FROM course_groups WHERE course_id = $1 AND group_id = $2", course_id, group_id)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM course_groups WHERE course_id = $1 AND group_id = $2", course_id, group_id)
+            await cleanup_orphan_group_enrollments(conn)
     return {"ok": True}
 
 
