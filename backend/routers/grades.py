@@ -18,7 +18,7 @@ async def compute_student_course_grade(pool, course_id: int, student_id: int) ->
         FROM course_items ci
         LEFT JOIN quizzes q ON q.item_id = ci.id
         LEFT JOIN homework h ON h.item_id = ci.id
-        WHERE ci.course_id = $1 AND ci.type IN ('quiz','homework') AND ci.is_visible
+        WHERE ci.course_id = $1 AND (ci.type IN ('quiz','homework') OR q.item_id IS NOT NULL) AND ci.is_visible
           AND (
             EXISTS (
               SELECT 1 FROM item_student_access isa
@@ -44,7 +44,7 @@ async def compute_student_course_grade(pool, course_id: int, student_id: int) ->
     for g in gradables:
         score = None
         status = "not_started"
-        if g["type"] == "quiz":
+        if g["max_score"] is not None and g["type"] != "homework":
             a = await pool.fetchrow(
                 "SELECT auto_score, manual_score, status FROM quiz_attempts WHERE quiz_id = $1 AND student_id = $2",
                 g["id"],

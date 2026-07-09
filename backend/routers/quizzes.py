@@ -47,13 +47,39 @@ class GradeAnswerIn(BaseModel):
     awarded_points: float = Field(ge=0)
 
 
+async def get_quiz_or_404(pool, item_id: int):
+    quiz = await pool.fetchrow("SELECT * FROM quizzes WHERE item_id = $1", item_id)
+    if quiz is None:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    return quiz
+
+
+async def ensure_quiz_row(pool, item_id: int):
+    return await pool.fetchrow(
+        """
+        INSERT INTO quizzes (item_id)
+        VALUES ($1)
+        ON CONFLICT (item_id) DO UPDATE SET item_id = EXCLUDED.item_id
+        RETURNING *
+        """,
+        item_id,
+    )
+
+
+def item_can_have_quiz(item: dict) -> bool:
+    return item["type"] in ("lesson", "quiz")
+
+
 # ---------- Teacher: quiz building ----------
 
 @router.put("/{item_id}/settings")
 async def update_quiz_settings(item_id: int, data: QuizSettingsIn, user: dict = Depends(require_teacher)):
     item = await get_item_or_404(item_id)
     await ensure_course_owner(user, item["course_id"])
+    if not item_can_have_quiz(item):
+        raise HTTPException(status_code=404, detail="This item cannot have a quiz")
     pool = await get_pool()
+    await ensure_quiz_row(pool, item_id)
     await pool.execute(
         """
         UPDATE quizzes
@@ -76,6 +102,8 @@ async def update_quiz_settings(item_id: int, data: QuizSettingsIn, user: dict = 
 async def add_question(item_id: int, data: QuestionIn, user: dict = Depends(require_teacher)):
     item = await get_item_or_404(item_id)
     await ensure_course_owner(user, item["course_id"])
+    if not item_can_have_quiz(item):
+        raise HTTPException(status_code=404, detail="This item cannot have a quiz")
     if data.type in ("single", "multiple"):
         if len(data.options) < 2:
             raise HTTPException(status_code=422, detail="Choice questions need at least 2 options")
@@ -85,6 +113,7 @@ async def add_question(item_id: int, data: QuestionIn, user: dict = Depends(requ
         if data.type == "multiple" and correct < 1:
             raise HTTPException(status_code=422, detail="Multiple-choice questions need at least 1 correct option")
     pool = await get_pool()
+    await ensure_quiz_row(pool, item_id)
     async with pool.acquire() as conn:
         async with conn.transaction():
             pos = await conn.fetchval(
@@ -131,10 +160,10 @@ async def delete_question(question_id: int, user: dict = Depends(require_teacher
 @router.get("/{item_id}")
 async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
     item, course = await ensure_item_access(user, item_id)
-    if item["type"] != "quiz":
+    if not item_can_have_quiz(item):
         raise HTTPException(status_code=404, detail="Not a quiz")
     pool = await get_pool()
-    quiz = await pool.fetchrow("SELECT * FROM quizzes WHERE item_id = $1", item_id)
+    quiz = await get_quiz_or_404(pool, item_id)
     questions = await pool.fetch(
         "SELECT * FROM quiz_questions WHERE quiz_id = $1 ORDER BY position", item_id
     )
@@ -206,10 +235,34 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
 
 # ---------- Student: attempt ----------
 
+@router.post("/{item_id}/start")
+async def start_quiz(item_id: int, user: dict = Depends(require_student)):
+    item, _course = await ensure_item_access(user, item_id)
+    if not item_can_have_quiz(item):
+        raise HTTPException(status_code=404, detail="Not a quiz")
+    pool = await get_pool()
+    quiz = await get_quiz_or_404(pool, item_id)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if quiz["open_at"] and now < quiz["open_at"]:
+        raise HTTPException(status_code=403, detail="Quiz is not open yet")
+    if quiz["close_at"] and now > quiz["close_at"]:
+        raise HTTPException(status_code=403, detail="Quiz is closed")
+    await pool.execute(
+        """
+        INSERT INTO quiz_starts (quiz_id, student_id)
+        VALUES ($1, $2)
+        ON CONFLICT (quiz_id, student_id) DO NOTHING
+        """,
+        item_id,
+        user["id"],
+    )
+    return {"ok": True}
+
+
 @router.post("/{item_id}/attempt")
 async def submit_attempt(item_id: int, data: SubmitAttemptIn, user: dict = Depends(require_student)):
     item, _course = await ensure_item_access(user, item_id)
-    if item["type"] != "quiz":
+    if not item_can_have_quiz(item):
         raise HTTPException(status_code=404, detail="Not a quiz")
     pool = await get_pool()
     existing = await pool.fetchrow(
@@ -218,12 +271,19 @@ async def submit_attempt(item_id: int, data: SubmitAttemptIn, user: dict = Depen
     if existing:
         raise HTTPException(status_code=409, detail="You have already completed this quiz")
 
-    quiz = await pool.fetchrow("SELECT * FROM quizzes WHERE item_id = $1", item_id)
+    quiz = await get_quiz_or_404(pool, item_id)
     now = datetime.datetime.now(datetime.timezone.utc)
     if quiz["open_at"] and now < quiz["open_at"]:
         raise HTTPException(status_code=403, detail="Quiz is not open yet")
     if quiz["close_at"] and now > quiz["close_at"]:
         raise HTTPException(status_code=403, detail="Quiz is closed")
+    started = await pool.fetchrow(
+        "SELECT 1 FROM quiz_starts WHERE quiz_id = $1 AND student_id = $2",
+        item_id,
+        user["id"],
+    )
+    if started is None:
+        raise HTTPException(status_code=403, detail="Start the quiz first")
 
     questions = await pool.fetch("SELECT * FROM quiz_questions WHERE quiz_id = $1", item_id)
     q_by_id = {q["id"]: q for q in questions}

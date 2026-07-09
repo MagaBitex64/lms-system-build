@@ -81,7 +81,17 @@ async def seed() -> None:
             await conn.execute("UPDATE lessons SET content=$1, youtube_url=$2 WHERE item_id=$3", content, yt, iid)
 
         async def quiz_cfg(iid: int, max_score: int, weight: int) -> None:
-            await conn.execute("UPDATE quizzes SET max_score=$1, weight_pct=$2 WHERE item_id=$3", max_score, weight, iid)
+            await conn.execute(
+                """
+                INSERT INTO quizzes (item_id, max_score, weight_pct)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (item_id)
+                DO UPDATE SET max_score = EXCLUDED.max_score, weight_pct = EXCLUDED.weight_pct
+                """,
+                iid,
+                max_score,
+                weight,
+            )
 
         async def hw_cfg(
             iid: int,
@@ -196,7 +206,7 @@ async def seed() -> None:
             "Қазақ хандығы XV ғасырда құрылды. Тақырыпта хандықтың құрылу себептері, алғашқы хандар және тарихи деректер талданады.",
             "https://www.youtube.com/watch?v=kKKM8Y-u7ds",
         )
-        h_q = await item(c_history, "quiz", "Тест: Қазақстан тарихы", 2, seq=True)
+        h_q = h_l2
         await quiz_cfg(h_q, 100, 60)
         await question(
             h_q,
@@ -215,7 +225,7 @@ async def seed() -> None:
             1,
             "Көсемдер мен ақсүйектер билеуші топқа жатады.",
         )
-        h_hw = await item(c_history, "homework", "Тапсырма: тарихи кесте", 3, seq=True)
+        h_hw = await item(c_history, "homework", "Тапсырма: тарихи кесте", 2, seq=True)
         await hw_cfg(h_hw, "Сақтар, ғұндар және Қазақ хандығы бойынша негізгі даталар кестесін жасаңыз.", 100, 40)
 
         c_math_lit = await course(
@@ -237,7 +247,7 @@ async def seed() -> None:
             "Диаграммадағы мәліметті оқу үшін ось атауын, өлшем бірлігін және салыстырылатын шамаларды анықтау керек.",
             "https://www.youtube.com/watch?v=kqtD5dpn9C8",
         )
-        ml_q = await item(c_math_lit, "quiz", "Тест: математикалық сауаттылық", 2)
+        ml_q = ml_l2
         await quiz_cfg(ml_q, 100, 100)
         await question(
             ml_q,
@@ -289,7 +299,7 @@ async def seed() -> None:
             "Ньютонның екінші заңы: F = ma. Күш, масса және үдеу арасындағы байланыс есеп шығарудың негізі болады.",
             "https://www.youtube.com/watch?v=kKKM8Y-u7ds",
         )
-        mf_q = await item(c_mf, "quiz", "Тест: математика-физика", 2, seq=True)
+        mf_q = mf_l2
         await quiz_cfg(mf_q, 100, 50)
         await question(
             mf_q,
@@ -300,7 +310,7 @@ async def seed() -> None:
             "F = ma = 2 * 3 = 6 Н.",
             [("6 Н", True), ("5 Н", False), ("9 Н", False)],
         )
-        mf_hw = await item(c_mf, "homework", "Тапсырма: график және күш", 3, seq=True)
+        mf_hw = await item(c_mf, "homework", "Тапсырма: график және күш", 2, seq=True)
         await hw_cfg(mf_hw, "Функция графигі және Ньютон заңы бойынша 5 есеп шығарыңыз.", 100, 50)
 
         c_im = await course(
@@ -342,7 +352,7 @@ async def seed() -> None:
             "Иондық, коваленттік және металдық байланыстар заттың қасиетін анықтайды.",
             "https://www.youtube.com/watch?v=WUvTyaaNkzM",
         )
-        bh_q = await item(c_bh, "quiz", "Тест: биология-химия", 2)
+        bh_q = bh_l2
         await quiz_cfg(bh_q, 100, 100)
         await question(
             bh_q,

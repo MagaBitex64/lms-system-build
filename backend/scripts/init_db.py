@@ -119,6 +119,14 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_attempts_student ON quiz_attempts(student_id);
 
+CREATE TABLE IF NOT EXISTS quiz_starts (
+    quiz_id BIGINT NOT NULL REFERENCES quizzes(item_id) ON DELETE CASCADE,
+    student_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (quiz_id, student_id)
+);
+CREATE INDEX IF NOT EXISTS idx_quiz_starts_student ON quiz_starts(student_id);
+
 CREATE TABLE IF NOT EXISTS attempt_answers (
     id BIGSERIAL PRIMARY KEY,
     attempt_id BIGINT NOT NULL REFERENCES quiz_attempts(id) ON DELETE CASCADE,
@@ -223,6 +231,68 @@ MIGRATIONS = [
     "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS close_at TIMESTAMPTZ",
     "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS time_limit_minutes INTEGER",
     "ALTER TABLE groups ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 20",
+    """
+    DO $$
+    DECLARE
+        quiz_item RECORD;
+        target_lesson_id BIGINT;
+    BEGIN
+        FOR quiz_item IN
+            SELECT ci.id, ci.course_id, ci.position, q.max_score, q.weight_pct,
+                   q.open_at, q.deadline_at, q.close_at, q.time_limit_minutes
+            FROM course_items ci
+            JOIN quizzes q ON q.item_id = ci.id
+            WHERE ci.type = 'quiz'
+            ORDER BY ci.course_id, ci.position
+        LOOP
+            SELECT lesson.id INTO target_lesson_id
+            FROM course_items lesson
+            LEFT JOIN quizzes existing_quiz ON existing_quiz.item_id = lesson.id
+            WHERE lesson.course_id = quiz_item.course_id
+              AND lesson.type = 'lesson'
+              AND lesson.position < quiz_item.position
+              AND existing_quiz.item_id IS NULL
+            ORDER BY lesson.position DESC
+            LIMIT 1;
+
+            IF target_lesson_id IS NOT NULL THEN
+                INSERT INTO quizzes (item_id, max_score, weight_pct, open_at, deadline_at, close_at, time_limit_minutes)
+                VALUES (
+                    target_lesson_id,
+                    quiz_item.max_score,
+                    quiz_item.weight_pct,
+                    quiz_item.open_at,
+                    quiz_item.deadline_at,
+                    quiz_item.close_at,
+                    quiz_item.time_limit_minutes
+                )
+                ON CONFLICT (item_id) DO NOTHING;
+
+                INSERT INTO item_group_access (item_id, group_id, opened_at)
+                SELECT target_lesson_id, group_id, opened_at
+                FROM item_group_access
+                WHERE item_id = quiz_item.id
+                ON CONFLICT DO NOTHING;
+
+                INSERT INTO item_student_access (item_id, student_id, opened_at)
+                SELECT target_lesson_id, student_id, opened_at
+                FROM item_student_access
+                WHERE item_id = quiz_item.id
+                ON CONFLICT DO NOTHING;
+
+                UPDATE quiz_questions SET quiz_id = target_lesson_id WHERE quiz_id = quiz_item.id;
+                UPDATE quiz_attempts SET quiz_id = target_lesson_id WHERE quiz_id = quiz_item.id;
+                UPDATE quiz_starts SET quiz_id = target_lesson_id WHERE quiz_id = quiz_item.id;
+
+                DELETE FROM quizzes WHERE item_id = quiz_item.id;
+                DELETE FROM course_items WHERE id = quiz_item.id;
+                UPDATE course_items
+                SET position = position - 1
+                WHERE course_id = quiz_item.course_id AND position > quiz_item.position;
+            END IF;
+        END LOOP;
+    END $$;
+    """,
 ]
 
 

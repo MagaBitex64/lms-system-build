@@ -279,7 +279,7 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         if user["role"] == "student":
             d["topic_open"] = topic_open
             d["locked"] = (not topic_open) or sequential_locked
-            if r["type"] == "quiz":
+            if r["quiz_max_score"] is not None:
                 a = await pool.fetchrow(
                     "SELECT auto_score, manual_score, status FROM quiz_attempts WHERE quiz_id = $1 AND student_id = $2",
                     r["id"],
@@ -503,13 +503,86 @@ async def get_lesson(item_id: int, user: dict = Depends(get_current_user)):
         """,
         item_id,
     )
+    is_owner = user["role"] == "admin" or (user["role"] == "teacher" and _course["teacher_id"] == user["id"])
+    quiz = await pool.fetchrow("SELECT * FROM quizzes WHERE item_id = $1", item_id)
+    attempt = None
+    quiz_started = False
+    questions = []
+    total_points = None
+    question_count = 0
+    if quiz:
+        raw_questions = await pool.fetch("SELECT * FROM quiz_questions WHERE quiz_id = $1 ORDER BY position", item_id)
+        question_count = len(raw_questions)
+        total_points = sum(q["points"] for q in raw_questions)
+        if user["role"] == "student":
+            attempt = await pool.fetchrow(
+                "SELECT * FROM quiz_attempts WHERE quiz_id = $1 AND student_id = $2", item_id, user["id"]
+            )
+            started = await pool.fetchrow(
+                "SELECT 1 FROM quiz_starts WHERE quiz_id = $1 AND student_id = $2", item_id, user["id"]
+            )
+            quiz_started = started is not None or attempt is not None
+        if is_owner:
+            quiz_started = True
+        if is_owner or quiz_started:
+            for q in raw_questions:
+                opts = await pool.fetch(
+                    "SELECT id, text, is_correct, position FROM question_options WHERE question_id = $1 ORDER BY position",
+                    q["id"],
+                )
+                qd = {
+                    "id": q["id"],
+                    "type": q["type"],
+                    "prompt": q["prompt"],
+                    "image_file_id": q["image_file_id"],
+                    "points": q["points"],
+                    "options": [
+                        {"id": o["id"], "text": o["text"]}
+                        | ({"is_correct": o["is_correct"]} if is_owner or attempt else {})
+                        for o in opts
+                    ],
+                }
+                if is_owner or attempt:
+                    qd["explanation"] = q["explanation"]
+                questions.append(qd)
+    attempt_out = None
+    if attempt:
+        answers = await pool.fetch("SELECT * FROM attempt_answers WHERE attempt_id = $1", attempt["id"])
+        attempt_out = {
+            "id": attempt["id"],
+            "submitted_at": str(attempt["submitted_at"]),
+            "auto_score": float(attempt["auto_score"]),
+            "manual_score": float(attempt["manual_score"]) if attempt["manual_score"] is not None else None,
+            "status": attempt["status"],
+            "answers": [
+                {
+                    "question_id": a["question_id"],
+                    "selected_option_ids": list(a["selected_option_ids"]),
+                    "text_answer": a["text_answer"],
+                    "awarded_points": float(a["awarded_points"]) if a["awarded_points"] is not None else None,
+                }
+                for a in answers
+            ],
+        }
     return {
         "type": "lesson",
-        "is_owner": user["role"] == "admin" or (user["role"] == "teacher" and _course["teacher_id"] == user["id"]),
+        "is_owner": is_owner,
         "item": {"id": item["id"], "title": item["title"], "note": item["note"], "course_id": item["course_id"]},
         "content": lesson["content"],
-        "youtube_url": lesson["youtube_url"],
+        "youtube_url": None if (quiz and user["role"] == "student" and quiz_started) else lesson["youtube_url"],
         "materials": [dict(m) for m in materials],
+        "has_quiz": quiz is not None,
+        "quiz_started": quiz_started,
+        "question_count": question_count,
+        "max_score": quiz["max_score"] if quiz else None,
+        "weight_pct": float(quiz["weight_pct"]) if quiz else None,
+        "open_at": str(quiz["open_at"]) if quiz and quiz["open_at"] else None,
+        "deadline_at": str(quiz["deadline_at"]) if quiz and quiz["deadline_at"] else None,
+        "close_at": str(quiz["close_at"]) if quiz and quiz["close_at"] else None,
+        "time_limit_minutes": quiz["time_limit_minutes"] if quiz else None,
+        "total_points": total_points,
+        "questions": questions,
+        "attempt": attempt_out,
     }
 
 

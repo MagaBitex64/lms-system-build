@@ -97,9 +97,10 @@ async def is_item_unlocked(student_id: int, item: dict) -> bool:
     pool = await get_pool()
     prior = await pool.fetch(
         """
-        SELECT ci.id, ci.type FROM course_items ci
+        SELECT ci.id, ci.type, q.item_id AS quiz_id FROM course_items ci
+        LEFT JOIN quizzes q ON q.item_id = ci.id
         WHERE ci.course_id = $1 AND ci.position < $2 AND ci.is_visible
-          AND ci.type IN ('quiz','homework')
+          AND (ci.type IN ('quiz','homework') OR q.item_id IS NOT NULL)
           AND (
             EXISTS (
               SELECT 1 FROM item_student_access isa
@@ -119,7 +120,7 @@ async def is_item_unlocked(student_id: int, item: dict) -> bool:
         student_id,
     )
     for p in prior:
-        if p["type"] == "quiz":
+        if p["quiz_id"] is not None:
             done = await pool.fetchrow(
                 "SELECT 1 FROM quiz_attempts WHERE quiz_id = $1 AND student_id = $2", p["id"], student_id
             )

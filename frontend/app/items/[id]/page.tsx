@@ -82,6 +82,9 @@ type ItemDetail = {
   content?: string
   youtube_url?: string
   materials?: Material[]
+  has_quiz?: boolean
+  quiz_started?: boolean
+  question_count?: number
   description?: string
   open_at?: string | null
   deadline_at?: string | null
@@ -279,34 +282,41 @@ function LessonViewer({ data }: { data: ItemDetail }) {
   const { t } = useI18n()
   const embedUrl = youtubeEmbedUrl(data.youtube_url)
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-      <Card className="space-y-4">
-        <div className="flex items-center gap-2 text-foreground">
-          <FileText size={18} className="text-primary" />
-          <h2 className="text-base font-semibold">{t('content')}</h2>
-        </div>
-        {embedUrl && (
-          <div className="overflow-hidden rounded-lg border border-border bg-black">
-            <iframe
-              className="aspect-video w-full"
-              src={embedUrl}
-              title={data.item.title}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-            />
+    <div className="space-y-6">
+      <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+        <Card className="space-y-4">
+          <div className="flex items-center gap-2 text-foreground">
+            <FileText size={18} className="text-primary" />
+            <h2 className="text-base font-semibold">{t('content')}</h2>
           </div>
-        )}
-        <p className="whitespace-pre-line text-sm leading-relaxed text-muted">{data.content || t('noData')}</p>
-        {data.youtube_url && !embedUrl && (
-          <Button asChild>
-            <a href={data.youtube_url} target="_blank" rel="noreferrer">
-              <PlayCircle size={16} />
-              {t('watchVideo')}
-            </a>
-          </Button>
-        )}
-      </Card>
-      <MaterialsList materials={data.materials ?? []} />
+          {embedUrl ? (
+            <div className="overflow-hidden rounded-lg border border-border bg-black">
+              <iframe
+                className="aspect-video w-full"
+                src={embedUrl}
+                title={data.item.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            </div>
+          ) : data.has_quiz && data.quiz_started ? (
+            <div className="rounded-lg border border-warning/30 bg-warning-soft p-4 text-sm font-medium text-warning">
+              {t('videoLockedDuringQuiz')}
+            </div>
+          ) : null}
+          <p className="whitespace-pre-line text-sm leading-relaxed text-muted">{data.content || t('noData')}</p>
+          {data.youtube_url && !embedUrl && (
+            <Button asChild>
+              <a href={data.youtube_url} target="_blank" rel="noreferrer">
+                <PlayCircle size={16} />
+                {t('watchVideo')}
+              </a>
+            </Button>
+          )}
+        </Card>
+        <MaterialsList materials={data.materials ?? []} />
+      </div>
+      {data.has_quiz && <StudentQuiz data={data} reload={async () => { window.location.reload() }} />}
     </div>
   )
 }
@@ -497,6 +507,7 @@ function LessonEditor({ data, reload }: { data: ItemDetail; reload: () => Promis
         </div>
       </div>
       <MaterialsList materials={data.materials ?? []} onDelete={deleteMaterial} />
+      <QuizEditor data={data} reload={reload} />
     </div>
   )
 }
@@ -781,13 +792,13 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
   const closed = isAfter(data.close_at)
 
   useEffect(() => {
-    if (!data.time_limit_minutes || data.attempt) return
+    if (!data.time_limit_minutes || data.attempt || !data.quiz_started) return
     setSecondsLeft(data.time_limit_minutes * 60)
     const timer = window.setInterval(() => {
       setSecondsLeft((current) => Math.max(0, current - 1))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [data.time_limit_minutes, data.attempt])
+  }, [data.time_limit_minutes, data.attempt, data.quiz_started])
 
   const attemptAnswers = useMemo(() => {
     const map = new Map<number, AttemptAnswer>()
@@ -806,6 +817,19 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
             : current.selected_option_ids.filter((id) => id !== optionId)
       return { ...prev, [question.id]: { ...current, selected_option_ids: selected } }
     })
+  }
+
+  async function startQuiz() {
+    setWorking(true)
+    setError(null)
+    try {
+      await api(`/quizzes/${data.item.id}/start`, { method: 'POST' })
+      await reload()
+    } catch (err) {
+      setError((err as Error).message || t('errorOccurred'))
+    } finally {
+      setWorking(false)
+    }
   }
 
   async function submitQuiz(event: FormEvent<HTMLFormElement>) {
@@ -875,6 +899,26 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
             )
           })}
         </div>
+      </Card>
+    )
+  }
+
+  if (!data.quiz_started) {
+    return (
+      <Card className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold">{t('quiz')}</h2>
+            <p className="mt-1 text-sm text-muted">{t('quizStartLocksVideo')}</p>
+          </div>
+          <Badge tone="neutral">{data.question_count ?? questions.length} {t('questions')}</Badge>
+        </div>
+        {notOpen && <ErrorState message={t('homeworkNotOpen')} />}
+        {closed && <ErrorState message={t('homeworkClosed')} />}
+        {error && <ErrorState message={error} />}
+        <Button onClick={startQuiz} disabled={working || notOpen || closed || (data.question_count ?? 0) === 0}>
+          {working ? t('loading') : t('startQuiz')}
+        </Button>
       </Card>
     )
   }

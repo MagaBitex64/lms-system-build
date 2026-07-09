@@ -443,7 +443,6 @@ export default function CoursePage() {
           <Field label={t('content')}>
             <Select value={itemType} onChange={(e) => setItemType(e.target.value as ItemType)}>
               <option value="lesson">{t('lesson')}</option>
-              <option value="quiz">{t('quiz')}</option>
               <option value="homework">{t('homework')}</option>
             </Select>
           </Field>

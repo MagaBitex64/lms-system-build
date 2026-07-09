@@ -112,6 +112,8 @@ const dictionaries = {
     startQuiz: 'Тестті бастау',
     submitQuiz: 'Тестті аяқтау',
     quizResult: 'Тест нәтижесі',
+    quizStartLocksVideo: 'Тест басталғаннан кейін бейнесабақ қолжетімсіз болады.',
+    videoLockedDuringQuiz: 'Тест басталды. Енді бейнесабақты көру қолжетімсіз.',
     explanation: 'Түсіндірме',
     correct: 'Дұрыс',
     incorrect: 'Қате',
