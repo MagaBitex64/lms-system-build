@@ -159,6 +159,27 @@ function inferType(data: ItemDetail): ItemType {
   return 'homework'
 }
 
+function youtubeEmbedUrl(value?: string) {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    let id = ''
+    if (url.hostname.includes('youtu.be')) {
+      id = url.pathname.slice(1)
+    } else if (url.pathname.startsWith('/shorts/')) {
+      id = url.pathname.split('/')[2] ?? ''
+    } else if (url.pathname.startsWith('/embed/')) {
+      id = url.pathname.split('/')[2] ?? ''
+    } else {
+      id = url.searchParams.get('v') ?? ''
+    }
+    const cleanId = id.replace(/[^a-zA-Z0-9_-]/g, '')
+    return cleanId ? `https://www.youtube.com/embed/${cleanId}` : null
+  } catch {
+    return null
+  }
+}
+
 function isBefore(value?: string | null) {
   return !!value && Date.now() < new Date(value).getTime()
 }
@@ -256,6 +277,7 @@ export default function ItemDetailPage() {
 
 function LessonViewer({ data }: { data: ItemDetail }) {
   const { t } = useI18n()
+  const embedUrl = youtubeEmbedUrl(data.youtube_url)
   return (
     <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
       <Card className="space-y-4">
@@ -263,8 +285,19 @@ function LessonViewer({ data }: { data: ItemDetail }) {
           <FileText size={18} className="text-primary" />
           <h2 className="text-base font-semibold">{t('content')}</h2>
         </div>
+        {embedUrl && (
+          <div className="overflow-hidden rounded-lg border border-border bg-black">
+            <iframe
+              className="aspect-video w-full"
+              src={embedUrl}
+              title={data.item.title}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          </div>
+        )}
         <p className="whitespace-pre-line text-sm leading-relaxed text-muted">{data.content || t('noData')}</p>
-        {data.youtube_url && (
+        {data.youtube_url && !embedUrl && (
           <Button asChild>
             <a href={data.youtube_url} target="_blank" rel="noreferrer">
               <PlayCircle size={16} />
@@ -333,6 +366,7 @@ function LessonEditor({ data, reload }: { data: ItemDetail; reload: () => Promis
   const [linkLabel, setLinkLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
+  const embedUrl = youtubeEmbedUrl(youtubeUrl)
 
   useEffect(() => {
     setContent(data.content ?? '')
@@ -416,6 +450,17 @@ function LessonEditor({ data, reload }: { data: ItemDetail; reload: () => Promis
             <Field label={t('youtubeUrl')}>
               <Input value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} placeholder="https://youtube.com/..." />
             </Field>
+            {embedUrl && (
+              <div className="overflow-hidden rounded-lg border border-border bg-black">
+                <iframe
+                  className="aspect-video w-full"
+                  src={embedUrl}
+                  title={data.item.title}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              </div>
+            )}
             <Button type="submit" disabled={working}>
               <Save size={16} />
               {working ? t('loading') : t('save')}

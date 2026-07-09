@@ -1,4 +1,4 @@
-"""Demo data seed for Phenomenon School LMS.
+"""Phenomenon School LMS demo data.
 
 Run: python -m scripts.seed  (from the backend/ directory)
 All demo accounts share the password: Phenomenon1!
@@ -29,31 +29,45 @@ async def seed() -> None:
 
         pw = hash_password(PASSWORD)
 
-        async def user(email, name, role):
+        async def user(email: str, name: str, role: str) -> int:
             return await conn.fetchval(
                 "INSERT INTO users (email, password_hash, full_name, role) VALUES ($1,$2,$3,$4) RETURNING id",
-                email, pw, name, role,
+                email,
+                pw,
+                name,
+                role,
             )
 
-        admin = await user("admin@phenomenon.school", "Айгуль Администратор", "admin")
-        t1 = await user("teacher1@phenomenon.school", "Марат Ибрагимов", "teacher")
-        t2 = await user("teacher2@phenomenon.school", "Елена Соколова", "teacher")
-        s1 = await user("student1@phenomenon.school", "Данияр Ахметов", "student")
-        s2 = await user("student2@phenomenon.school", "Алия Нурланова", "student")
-        s3 = await user("student3@phenomenon.school", "Иван Петров", "student")
+        admin = await user("admin@phenomenon.school", "Айгүл Әкімші", "admin")
+        t1 = await user("teacher1@phenomenon.school", "Марат Ибраев", "teacher")
+        t2 = await user("teacher2@phenomenon.school", "Әсел Нұрланқызы", "teacher")
+        s1 = await user("student1@phenomenon.school", "Данияр Ахмет", "student")
+        s2 = await user("student2@phenomenon.school", "Әлия Нұрлан", "student")
+        s3 = await user("student3@phenomenon.school", "Айбар Сәрсен", "student")
+        s4 = await user("student4@phenomenon.school", "Мадина Қайрат", "student")
+        s5 = await user("student5@phenomenon.school", "Ерасыл Болат", "student")
+        s6 = await user("student6@phenomenon.school", "Аружан Сейіт", "student")
 
-        async def course(teacher, title, desc, ann):
+        async def course(teacher: int, title: str, desc: str, ann: str) -> int:
             return await conn.fetchval(
                 """INSERT INTO courses (teacher_id, title, description, announcement, is_published)
                    VALUES ($1,$2,$3,$4,TRUE) RETURNING id""",
-                teacher, title, desc, ann,
+                teacher,
+                title,
+                desc,
+                ann,
             )
 
-        async def item(cid, typ, title, pos, note="", seq=False):
+        async def item(cid: int, typ: str, title: str, pos: int, note: str = "", seq: bool = False) -> int:
             iid = await conn.fetchval(
                 """INSERT INTO course_items (course_id, type, title, position, note, sequential_unlock)
                    VALUES ($1,$2,$3,$4,$5,$6) RETURNING id""",
-                cid, typ, title, pos, note, seq,
+                cid,
+                typ,
+                title,
+                pos,
+                note,
+                seq,
             )
             if typ == "lesson":
                 await conn.execute("INSERT INTO lessons (item_id) VALUES ($1)", iid)
@@ -63,63 +77,85 @@ async def seed() -> None:
                 await conn.execute("INSERT INTO homework (item_id) VALUES ($1)", iid)
             return iid
 
-        async def lesson_content(iid, content, yt=""):
+        async def lesson_content(iid: int, content: str, yt: str = "") -> None:
             await conn.execute("UPDATE lessons SET content=$1, youtube_url=$2 WHERE item_id=$3", content, yt, iid)
 
-        async def quiz_cfg(iid, max_score, weight):
+        async def quiz_cfg(iid: int, max_score: int, weight: int) -> None:
             await conn.execute("UPDATE quizzes SET max_score=$1, weight_pct=$2 WHERE item_id=$3", max_score, weight, iid)
 
-        async def hw_cfg(iid, desc, max_score, weight, days_open=-7, days_deadline=7, days_close=14):
+        async def hw_cfg(
+            iid: int,
+            desc: str,
+            max_score: int,
+            weight: int,
+            days_open: int = -7,
+            days_deadline: int = 7,
+            days_close: int = 14,
+        ) -> None:
             now = datetime.datetime.now(datetime.timezone.utc)
             await conn.execute(
                 """UPDATE homework SET description=$1, max_score=$2, weight_pct=$3,
                    open_at=$4, deadline_at=$5, close_at=$6 WHERE item_id=$7""",
-                desc, max_score, weight,
+                desc,
+                max_score,
+                weight,
                 now + datetime.timedelta(days=days_open),
                 now + datetime.timedelta(days=days_deadline),
                 now + datetime.timedelta(days=days_close),
                 iid,
             )
 
-        async def question(qid, typ, prompt, points, pos, explanation="", options=None):
+        async def question(
+            qid: int,
+            typ: str,
+            prompt: str,
+            points: int,
+            pos: int,
+            explanation: str = "",
+            options: list[tuple[str, bool]] | None = None,
+        ) -> int:
             question_id = await conn.fetchval(
                 """INSERT INTO quiz_questions (quiz_id, type, prompt, points, position, explanation)
                    VALUES ($1,$2,$3,$4,$5,$6) RETURNING id""",
-                qid, typ, prompt, points, pos, explanation,
+                qid,
+                typ,
+                prompt,
+                points,
+                pos,
+                explanation,
             )
             for i, (text, correct) in enumerate(options or []):
                 await conn.execute(
                     "INSERT INTO question_options (question_id, text, is_correct, position) VALUES ($1,$2,$3,$4)",
-                    question_id, text, correct, i,
+                    question_id,
+                    text,
+                    correct,
+                    i,
                 )
             return question_id
 
-        async def enroll(cid, sid, status="approved"):
-            await conn.execute(
-                """INSERT INTO enrollments (course_id, student_id, status, decided_at)
-                   VALUES ($1,$2,$3, now())
-                   ON CONFLICT (course_id, student_id)
-                   DO UPDATE SET status = EXCLUDED.status, decided_at = now()""",
-                cid, sid, status,
-            )
-
-        async def group(code, title, direction, stream, students):
+        async def group(code: str, title: str, direction: str, stream: str, students: list[int]) -> int:
             gid = await conn.fetchval(
                 """INSERT INTO groups (code, title, direction, stream, capacity)
                    VALUES ($1,$2,$3,$4,20) RETURNING id""",
-                code, title, direction, stream,
+                code,
+                title,
+                direction,
+                stream,
             )
             for sid in students:
                 await conn.execute(
                     "INSERT INTO group_students (group_id, student_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
-                    gid, sid,
+                    gid,
+                    sid,
                 )
             return gid
 
-        async def course_group(cid, gid):
+        async def course_group(cid: int, gid: int) -> None:
             await conn.execute(
                 "INSERT INTO course_groups (course_id, group_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
-                cid, gid,
+                cid,
+                gid,
             )
             await conn.execute(
                 """
@@ -129,181 +165,233 @@ async def seed() -> None:
                 ON CONFLICT (course_id, student_id)
                 DO UPDATE SET status = 'approved', decided_at = now()
                 """,
-                cid, gid,
+                cid,
+                gid,
             )
 
-        # ---------- Course 1: Algebra ----------
-        c1 = await course(
-            t1, "Алгебра 9 класс",
-            "Полный курс алгебры для 9 класса: квадратные уравнения, функции, прогрессии.",
-            "Добро пожаловать! Занятия обновляются каждую неделю. Не забывайте про дедлайны домашних заданий.",
+        # ---------- Groups: UNT profile streams ----------
+        mf1 = await group("МФ1", "МФ1 - математика-физика", "Математика-физика", "1", [s1, s2, s3])
+        im1 = await group("ИМ1", "ИМ1 - информатика-математика", "Информатика-математика", "1", [s4, s5, s6])
+        bh1 = await group("БХ1", "БХ1 - биология-химия", "Биология-химия", "1", [s1, s4])
+        bg1 = await group("БГ1", "БГ1 - биология-география", "Биология-география", "1", [s2, s5])
+        dt1 = await group("ДГ1", "ДГ1 - дүниежүзі тарихы-география", "Дүниежүзі тарихы-география", "1", [s3, s6])
+
+        # ---------- Mandatory UNT subjects ----------
+        c_history = await course(
+            t1,
+            "Қазақстан тарихы",
+            "ҰБТ-дағы міндетті пән: ежелгі дәуірден қазіргі Қазақстанға дейінгі негізгі оқиғалар.",
+            "Әр тақырып бір бейнесабақпен беріледі. Мұғалім қолжетімділікті топқа немесе жеке оқушыға ашады.",
         )
-        l1 = await item(c1, "lesson", "Квадратные уравнения: введение", 0)
+        h_l1 = await item(c_history, "lesson", "Сақтар мен ғұндар", 0, "Бір бейнесабақ - бір тақырып.")
         await lesson_content(
-            l1,
-            "Квадратное уравнение имеет вид ax² + bx + c = 0, где a ≠ 0.\n\n"
-            "Дискриминант: D = b² − 4ac.\n\n"
-            "Если D > 0 — два корня, D = 0 — один корень, D < 0 — корней нет.\n\n"
-            "Формула корней: x = (−b ± √D) / 2a.",
+            h_l1,
+            "Бұл тақырыпта сақ, ғұн тайпаларының қоғамдық құрылымы, шаруашылығы және тарихи маңызы қарастырылады.\n\n"
+            "ҰБТ-да жиі кездесетін ұғымдар: тайпа, көсем, әскери демократия, көшпелі мәдениет.",
             "https://www.youtube.com/watch?v=WUvTyaaNkzM",
         )
-        q1 = await item(c1, "quiz", "Тест: квадратные уравнения", 1)
-        await quiz_cfg(q1, 100, 40)
-        await question(
-            q1, "single", "Чему равен дискриминант уравнения x² − 5x + 6 = 0?", 2, 0,
-            "D = b² − 4ac = 25 − 24 = 1",
-            [("1", True), ("−1", False), ("49", False), ("25", False)],
-        )
-        await question(
-            q1, "multiple", "Какие из чисел являются корнями уравнения x² − 5x + 6 = 0?", 2, 1,
-            "x² − 5x + 6 = (x − 2)(x − 3), корни: 2 и 3",
-            [("2", True), ("3", True), ("−2", False), ("6", False)],
-        )
-        await question(
-            q1, "short_text", "Запишите формулу дискриминанта.", 2, 2,
-            "D = b² − 4ac",
-        )
-        h1 = await item(c1, "homework", "Домашняя работа №1: решение уравнений", 2)
-        await hw_cfg(h1, "Решите задачи 1–10 из учебника, стр. 45. Загрузите фото или PDF решения.", 100, 60)
-
-        # ---------- Course 2: Physics ----------
-        c2 = await course(
-            t1, "Физика: механика",
-            "Кинематика, динамика, законы Ньютона и законы сохранения.",
-            "Перед каждым тестом внимательно смотрите видеоуроки.",
-        )
-        l2 = await item(c2, "lesson", "Законы Ньютона", 0)
+        h_l2 = await item(c_history, "lesson", "Қазақ хандығының құрылуы", 1, "Керей мен Жәнібек кезеңі.")
         await lesson_content(
-            l2,
-            "Первый закон Ньютона: тело сохраняет состояние покоя или равномерного движения, "
-            "пока на него не подействует сила.\n\nВторой закон: F = ma.\n\n"
-            "Третий закон: сила действия равна силе противодействия.",
+            h_l2,
+            "Қазақ хандығы XV ғасырда құрылды. Тақырыпта хандықтың құрылу себептері, алғашқы хандар және тарихи деректер талданады.",
             "https://www.youtube.com/watch?v=kKKM8Y-u7ds",
         )
-        q2 = await item(c2, "quiz", "Тест: законы Ньютона", 1, seq=True)
-        await quiz_cfg(q2, 100, 50)
+        h_q = await item(c_history, "quiz", "Тест: Қазақстан тарихы", 2, seq=True)
+        await quiz_cfg(h_q, 100, 60)
         await question(
-            q2, "single", "Какая формула выражает второй закон Ньютона?", 1, 0,
-            "Сила равна произведению массы на ускорение.",
-            [("F = ma", True), ("E = mc²", False), ("F = mv", False)],
+            h_q,
+            "single",
+            "Қазақ хандығының алғашқы хандары кімдер?",
+            2,
+            0,
+            "Қазақ хандығының негізін Керей мен Жәнібек қалаған.",
+            [("Керей мен Жәнібек", True), ("Абылай мен Әбілқайыр", False), ("Тәуке мен Қасым", False)],
         )
         await question(
-            q2, "long_text", "Опишите своими словами третий закон Ньютона и приведите пример из жизни.", 3, 1,
-            "Действию всегда есть равное и противоположное противодействие.",
+            h_q,
+            "short_text",
+            "Сақ қоғамындағы билеуші топ қалай аталды?",
+            2,
+            1,
+            "Көсемдер мен ақсүйектер билеуші топқа жатады.",
         )
-        h2 = await item(c2, "homework", "Лабораторная работа: измерение ускорения", 2, seq=True)
-        await hw_cfg(h2, "Проведите эксперимент по инструкции и оформите отчёт в PDF.", 100, 50)
+        h_hw = await item(c_history, "homework", "Тапсырма: тарихи кесте", 3, seq=True)
+        await hw_cfg(h_hw, "Сақтар, ғұндар және Қазақ хандығы бойынша негізгі даталар кестесін жасаңыз.", 100, 40)
 
-        # ---------- Course 3: Kazakh language ----------
-        c3 = await course(
-            t2, "Қазақ тілі: грамматика негіздері",
-            "Қазақ тілінің грамматикасы: септіктер, жіктік жалғаулары және сөйлем құрылымы.",
-            "Сабақ материалдары аптасына екі рет жаңартылады.",
+        c_math_lit = await course(
+            t1,
+            "Математикалық сауаттылық",
+            "ҰБТ-дағы міндетті пән: пайыз, пропорция, логика, диаграмма және мәтінді есептер.",
+            "Есепті шығарғанда жауап қана емес, қысқа шешу жолын да көрсетіңіз.",
         )
-        l3 = await item(c3, "lesson", "Септіктер жүйесі", 0)
+        ml_l1 = await item(c_math_lit, "lesson", "Пайыз және пропорция", 0)
         await lesson_content(
-            l3,
-            "Қазақ тілінде 7 септік бар: атау, ілік, барыс, табыс, жатыс, шығыс, көмектес.\n\n"
-            "Әр септіктің өз сұрақтары мен жалғаулары бар.",
+            ml_l1,
+            "Пайыз - санның жүзден бір бөлігі. Пропорцияда екі қатынас тең болады.\n\n"
+            "Мысал: 200 санының 15%-ы = 200 * 0.15 = 30.",
+            "https://www.youtube.com/watch?v=WUvTyaaNkzM",
         )
-        q3 = await item(c3, "quiz", "Тест: септіктер", 1)
-        await quiz_cfg(q3, 100, 100)
-        await question(
-            q3, "single", "Қазақ тілінде неше септік бар?", 1, 0, "Жеті септік.",
-            [("7", True), ("6", False), ("8", False)],
-        )
-        await question(
-            q3, "short_text", "Ілік септігінің сұрақтарын жазыңыз.", 2, 1, "кімнің? ненің?",
-        )
-
-        # ---------- Course 4: Programming ----------
-        c4 = await course(
-            t2, "Основы программирования на Python",
-            "Переменные, условия, циклы, функции и первые проекты на Python.",
-            "Устанавливать ничего не нужно — используйте любой онлайн-интерпретатор.",
-        )
-        l4 = await item(c4, "lesson", "Переменные и типы данных", 0)
+        ml_l2 = await item(c_math_lit, "lesson", "Диаграмма және кесте оқу", 1)
         await lesson_content(
-            l4,
-            "В Python переменные создаются простым присваиванием: x = 5.\n\n"
-            "Основные типы: int, float, str, bool, list, dict.\n\n"
-            "Функция type() показывает тип значения.",
+            ml_l2,
+            "Диаграммадағы мәліметті оқу үшін ось атауын, өлшем бірлігін және салыстырылатын шамаларды анықтау керек.",
             "https://www.youtube.com/watch?v=kqtD5dpn9C8",
         )
-        h4 = await item(c4, "homework", "Практика: первая программа", 1)
-        await hw_cfg(h4, "Напишите программу-калькулятор и загрузите файл с кодом (или скриншот).", 100, 100,
-                     days_open=-3, days_deadline=10, days_close=20)
-
-        # ---------- Groups and course access ----------
-        im1 = await group("ИМ1", "ИМ1 - информатика-математика", "Информатика-математика", "1", [s1, s2])
-        im2 = await group("ИМ2", "ИМ2 - информатика-математика", "Информатика-математика", "2", [s3])
-        fm1 = await group("ФМ1", "ФМ1 - физика-математика", "Физика-математика", "1", [s1, s3])
-        await group("БГ1", "БГ1 - биология-география", "Биология-география", "1", [])
-        await course_group(c1, im1)
-        await course_group(c2, fm1)
-        await course_group(c3, im2)
-        await course_group(c4, im1)
-
-        # ---------- Activity: quiz attempts ----------
-        # s1 takes algebra quiz: correct single + correct multiple, text pending manual review
-        a1 = await conn.fetchval(
-            """INSERT INTO quiz_attempts (quiz_id, student_id, auto_score, status)
-               VALUES ($1,$2,$3,'pending_review') RETURNING id""",
-            q1, s1, round(4 / 6 * 100, 2),
-        )
-        qs = await conn.fetch("SELECT id, type FROM quiz_questions WHERE quiz_id=$1 ORDER BY position", q1)
-        opts_correct_q0 = [r["id"] for r in await conn.fetch(
-            "SELECT id FROM question_options WHERE question_id=$1 AND is_correct", qs[0]["id"])]
-        opts_correct_q1 = [r["id"] for r in await conn.fetch(
-            "SELECT id FROM question_options WHERE question_id=$1 AND is_correct", qs[1]["id"])]
-        await conn.execute(
-            "INSERT INTO attempt_answers (attempt_id, question_id, selected_option_ids, awarded_points) VALUES ($1,$2,$3,2)",
-            a1, qs[0]["id"], opts_correct_q0,
-        )
-        await conn.execute(
-            "INSERT INTO attempt_answers (attempt_id, question_id, selected_option_ids, awarded_points) VALUES ($1,$2,$3,2)",
-            a1, qs[1]["id"], opts_correct_q1,
-        )
-        await conn.execute(
-            "INSERT INTO attempt_answers (attempt_id, question_id, text_answer) VALUES ($1,$2,$3)",
-            a1, qs[2]["id"], "D = b в квадрате минус 4ac",
+        ml_q = await item(c_math_lit, "quiz", "Тест: математикалық сауаттылық", 2)
+        await quiz_cfg(ml_q, 100, 100)
+        await question(
+            ml_q,
+            "single",
+            "300 санының 20%-ы нешеге тең?",
+            1,
+            0,
+            "300 * 0.20 = 60.",
+            [("60", True), ("30", False), ("20", False)],
         )
 
-        # s2 takes kazakh quiz — fully graded
-        a2 = await conn.fetchval(
-            """INSERT INTO quiz_attempts (quiz_id, student_id, auto_score, manual_score, status)
-               VALUES ($1,$2,$3,$4,'graded') RETURNING id""",
-            q3, s2, round(1 / 3 * 100, 2), round(2 / 3 * 100, 2),
+        c_reading = await course(
+            t2,
+            "Оқу сауаттылығы",
+            "ҰБТ-дағы міндетті пән: мәтінді түсіну, негізгі ойды табу және дәлелді жауап беру.",
+            "Мәтінді алдымен толық оқып, содан кейін сұраққа оралыңыз.",
         )
-        qs3 = await conn.fetch("SELECT id, type FROM quiz_questions WHERE quiz_id=$1 ORDER BY position", q3)
-        opt = [r["id"] for r in await conn.fetch(
-            "SELECT id FROM question_options WHERE question_id=$1 AND is_correct", qs3[0]["id"])]
-        await conn.execute(
-            "INSERT INTO attempt_answers (attempt_id, question_id, selected_option_ids, awarded_points) VALUES ($1,$2,$3,1)",
-            a2, qs3[0]["id"], opt,
+        r_l1 = await item(c_reading, "lesson", "Негізгі ойды анықтау", 0)
+        await lesson_content(
+            r_l1,
+            "Негізгі ой - мәтіндегі ең басты пікір. Оны табу үшін қай ой бірнеше сөйлем арқылы дәлелденетінін анықтаңыз.",
+            "https://www.youtube.com/watch?v=kKKM8Y-u7ds",
         )
-        await conn.execute(
-            "INSERT INTO attempt_answers (attempt_id, question_id, text_answer, awarded_points) VALUES ($1,$2,$3,2)",
-            a2, qs3[1]["id"], "кімнің? ненің?",
+        r_l2 = await item(c_reading, "lesson", "Автор көзқарасы", 1)
+        await lesson_content(
+            r_l2,
+            "Автор көзқарасы мәтіндегі бағалау сөздерінен, дәлелдерінен және қорытындысынан байқалады.",
+            "https://www.youtube.com/watch?v=WUvTyaaNkzM",
+        )
+        r_hw = await item(c_reading, "homework", "Тапсырма: мәтін талдау", 2)
+        await hw_cfg(r_hw, "Берілген мәтіннен негізгі ойды, автор көзқарасын және екі дәлелді жазыңыз.", 100, 100)
+
+        # ---------- Profile UNT subject combinations ----------
+        c_mf = await course(
+            t1,
+            "Математика-физика",
+            "Бейіндік бағыт: функциялар, қозғалыс, күш, энергия және ҰБТ есептері.",
+            "Бұл курс МФ топтарына арналған. Әр тақырып жеке бейнесабақ ретінде ашылады.",
+        )
+        mf_l1 = await item(c_mf, "lesson", "Функция және график", 0)
+        await lesson_content(
+            mf_l1,
+            "Функция бір айнымалының мәніне екінші айнымалының бір мәнін сәйкестендіреді. График арқылы өсу, кему және нөлдерін көруге болады.",
+            "https://www.youtube.com/watch?v=WUvTyaaNkzM",
+        )
+        mf_l2 = await item(c_mf, "lesson", "Ньютон заңдары", 1)
+        await lesson_content(
+            mf_l2,
+            "Ньютонның екінші заңы: F = ma. Күш, масса және үдеу арасындағы байланыс есеп шығарудың негізі болады.",
+            "https://www.youtube.com/watch?v=kKKM8Y-u7ds",
+        )
+        mf_q = await item(c_mf, "quiz", "Тест: математика-физика", 2, seq=True)
+        await quiz_cfg(mf_q, 100, 50)
+        await question(
+            mf_q,
+            "single",
+            "Егер m = 2 кг, a = 3 м/с² болса, F нешеге тең?",
+            2,
+            0,
+            "F = ma = 2 * 3 = 6 Н.",
+            [("6 Н", True), ("5 Н", False), ("9 Н", False)],
+        )
+        mf_hw = await item(c_mf, "homework", "Тапсырма: график және күш", 3, seq=True)
+        await hw_cfg(mf_hw, "Функция графигі және Ньютон заңы бойынша 5 есеп шығарыңыз.", 100, 50)
+
+        c_im = await course(
+            t2,
+            "Математика-информатика",
+            "Бейіндік бағыт: алгоритм, Python, логика және дискретті есептер.",
+            "Кодты түсініктемемен жазыңыз, тек нәтиже жеткіліксіз.",
+        )
+        im_l1 = await item(c_im, "lesson", "Алгоритм және айнымалылар", 0)
+        await lesson_content(
+            im_l1,
+            "Алгоритм - есепті шешуге арналған нақты қадамдар тізбегі. Python тілінде айнымалы мәнді сақтайды: x = 5.",
+            "https://www.youtube.com/watch?v=kqtD5dpn9C8",
+        )
+        im_l2 = await item(c_im, "lesson", "Циклдер", 1)
+        await lesson_content(
+            im_l2,
+            "Цикл қайталанатын әрекеттерді орындауға көмектеседі. for циклі белгілі сан рет, while циклі шарт орындалғанша жұмыс істейді.",
+            "https://www.youtube.com/watch?v=WUvTyaaNkzM",
+        )
+        im_hw = await item(c_im, "homework", "Практика: Python есептері", 2)
+        await hw_cfg(im_hw, "for және while циклдерін қолданып үш шағын бағдарлама жазыңыз.", 100, 100)
+
+        c_bh = await course(
+            t2,
+            "Биология-химия",
+            "Бейіндік бағыт: жасуша, генетика, химиялық байланыс және реакциялар.",
+            "Биология мен химиядағы негізгі терминдерді дәптерге бөлек жазып жүріңіз.",
+        )
+        bh_l1 = await item(c_bh, "lesson", "Жасуша құрылысы", 0)
+        await lesson_content(
+            bh_l1,
+            "Жасуша мембрана, цитоплазма және ядродан тұрады. Органоидтер әртүрлі қызмет атқарады.",
+            "https://www.youtube.com/watch?v=kKKM8Y-u7ds",
+        )
+        bh_l2 = await item(c_bh, "lesson", "Химиялық байланыс", 1)
+        await lesson_content(
+            bh_l2,
+            "Иондық, коваленттік және металдық байланыстар заттың қасиетін анықтайды.",
+            "https://www.youtube.com/watch?v=WUvTyaaNkzM",
+        )
+        bh_q = await item(c_bh, "quiz", "Тест: биология-химия", 2)
+        await quiz_cfg(bh_q, 100, 100)
+        await question(
+            bh_q,
+            "single",
+            "Жасушаның тұқымқуалаушылық ақпаратын сақтайтын бөлігі қайсы?",
+            1,
+            0,
+            "Ядро ДНҚ-ны сақтайды.",
+            [("Ядро", True), ("Мембрана", False), ("Рибосома", False)],
         )
 
-        # ---------- Activity: homework submissions ----------
-        sub1 = await conn.fetchval(
-            """INSERT INTO homework_submissions (homework_id, student_id, comment, grade, feedback, status)
-               VALUES ($1,$2,'Решил все задачи, задача 7 вызвала трудности.',85,'Хорошая работа! Обратите внимание на оформление задачи 7.','graded')
-               RETURNING id""",
-            h1, s1,
+        c_geo = await course(
+            t1,
+            "География-дүниежүзі тарихы",
+            "Бейіндік бағыт: карта, табиғи ресурстар, өркениеттер және тарихи үдерістер.",
+            "Карта және хронологиямен жұмыс істеу дағдысын тұрақты қайталаңыз.",
         )
-        await conn.execute(
-            """INSERT INTO homework_submissions (homework_id, student_id, comment, status)
-               VALUES ($1,$2,'Прикладываю решение.','submitted')""",
-            h1, s2,
+        geo_l1 = await item(c_geo, "lesson", "Карта және координата", 0)
+        await lesson_content(
+            geo_l1,
+            "Географиялық координата ендік пен бойлық арқылы анықталады. Карта масштабын дұрыс оқу есеп шығаруға көмектеседі.",
+            "https://www.youtube.com/watch?v=kqtD5dpn9C8",
         )
-        _ = sub1
+        geo_l2 = await item(c_geo, "lesson", "Ежелгі өркениеттер", 1)
+        await lesson_content(
+            geo_l2,
+            "Ежелгі өркениеттер өзен аңғарларында қалыптасты. Ніл, Тигр, Евфрат, Үнді және Хуанхэ аймақтары маңызды.",
+            "https://www.youtube.com/watch?v=kKKM8Y-u7ds",
+        )
+        geo_hw = await item(c_geo, "homework", "Тапсырма: карта және хронология", 2)
+        await hw_cfg(geo_hw, "Картадан 5 нысан белгілеп, ежелгі өркениеттер бойынша қысқа хронология жасаңыз.", 100, 100)
+
+        # ---------- Link groups to relevant courses ----------
+        for gid in [mf1, im1, bh1, bg1, dt1]:
+            await course_group(c_history, gid)
+            await course_group(c_math_lit, gid)
+            await course_group(c_reading, gid)
+        await course_group(c_mf, mf1)
+        await course_group(c_im, im1)
+        await course_group(c_bh, bh1)
+        await course_group(c_bh, bg1)
+        await course_group(c_geo, bg1)
+        await course_group(c_geo, dt1)
+
+        _ = admin
 
         print("Seed complete.")
         print(f"All accounts use password: {PASSWORD}")
-        print("admin@phenomenon.school / teacher1..2@phenomenon.school / student1..3@phenomenon.school")
+        print("admin@phenomenon.school / teacher1..2@phenomenon.school / student1..6@phenomenon.school")
     finally:
         await conn.close()
 
