@@ -68,7 +68,15 @@ function AuthedShell({ children }: { children: ReactNode }) {
         onClick={() => setMenuOpen(false)}
       >
         <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-          <GraduationCap size={20} />
+          <img
+            src="/logo.jpg"
+            alt="Logo"
+            className="h-full w-full rounded-xl object-cover"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = 'none'
+              ;(e.target as HTMLImageElement).parentElement!.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>'
+            }}
+          />
         </div>
         <div className="leading-tight">
           <p className="text-sm font-semibold text-white">Fenomen School</p>
