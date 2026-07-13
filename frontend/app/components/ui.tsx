@@ -300,7 +300,20 @@ export function ProgressBar({ value, className }: { value: number; className?: s
   )
 }
 
-export function Avatar({ name, className }: { name: string; className?: string }) {
+export function Avatar({ 
+  name, 
+  className,
+  size = 'md'
+}: { 
+  name: string
+  className?: string
+  size?: 'sm' | 'md' | 'lg'
+}) {
+  const sizeClasses = {
+    sm: 'size-8 text-xs',
+    md: 'size-10 text-sm',
+    lg: 'size-12 text-base'
+  }
   const initials = name
     .split(' ')
     .map((p) => p[0])
@@ -311,7 +324,8 @@ export function Avatar({ name, className }: { name: string; className?: string }
   return (
     <div
       className={cx(
-        'flex size-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-sm font-semibold text-primary',
+        'flex shrink-0 items-center justify-center rounded-full bg-primary-soft font-semibold text-primary',
+        sizeClasses[size],
         className,
       )}
       aria-hidden="true"
@@ -354,6 +368,141 @@ export function Modal({
           </button>
         </div>
         <div className="p-5">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+export function DropdownMenu({
+  open,
+  onClose,
+  items,
+  position = 'right',
+}: {
+  open: boolean
+  onClose: () => void
+  items: Array<{
+    label: string
+    icon?: ReactNode
+    onClick: () => void
+    destructive?: boolean
+    divider?: boolean
+  }>
+  position?: 'left' | 'right'
+}) {
+  if (!open) return null
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div
+        className={cx(
+          'absolute top-full z-50 mt-1 rounded-lg border border-border bg-surface shadow-lg',
+          position === 'right' ? 'right-0' : 'left-0',
+        )}
+      >
+        {items.map((item, idx) => (
+          <div key={idx}>
+            {item.divider && <div className="my-1 h-px bg-border" />}
+            <button
+              onClick={() => {
+                item.onClick()
+                onClose()
+              }}
+              className={cx(
+                'flex w-full items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors',
+                item.destructive
+                  ? 'text-danger hover:bg-red-50/50'
+                  : 'text-foreground hover:bg-surface-muted',
+              )}
+            >
+              {item.icon && <span className="flex-shrink-0">{item.icon}</span>}
+              {item.label}
+            </button>
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+export function DeletionConfirmModal({
+  open,
+  onClose,
+  onConfirm,
+  title,
+  description,
+  courseName,
+  warning,
+  isLoading,
+}: {
+  open: boolean
+  onClose: () => void
+  onConfirm: () => void
+  title: string
+  description: string
+  courseName: string
+  warning?: string
+  isLoading?: boolean
+}) {
+  if (!open) return null
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-foreground/50 p-4 backdrop-blur-sm"
+      onClick={!isLoading ? onClose : undefined}
+    >
+      <div
+        className="w-full max-w-md rounded-3xl border border-border bg-surface shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Icon */}
+        <div className="flex justify-center pt-6">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-50">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-danger">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="currentColor" />
+            </svg>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="space-y-4 px-6 py-6 text-center">
+          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+          <p className="text-sm text-muted">{description}</p>
+
+          {/* Course name */}
+          <div className="rounded-lg bg-surface-muted px-4 py-3">
+            <p className="text-sm font-medium text-foreground">«{courseName}»</p>
+          </div>
+
+          {/* Warning */}
+          {warning && (
+            <div className="rounded-lg bg-red-50/30 px-4 py-3">
+              <p className="text-xs text-danger">{warning}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col gap-3 border-t border-border px-6 py-4 sm:flex-row sm:justify-end">
+          <button
+            onClick={onClose}
+            disabled={isLoading}
+            className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-surface-muted disabled:opacity-50"
+          >
+            Бас тарту
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isLoading}
+            className="flex items-center justify-center gap-2 rounded-lg bg-danger px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+          >
+            {isLoading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />}
+            {isLoading ? 'Жойылуда...' : 'Курсты жою'}
+          </button>
+        </div>
       </div>
     </div>
   )

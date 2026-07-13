@@ -2,35 +2,42 @@
 
 @theme {
   /* Neutrals */
-  --color-background: #f4f6fb;
+  --color-background: #f5f7f9;
   --color-surface: #ffffff;
-  --color-surface-muted: #f8fafc;
-  --color-foreground: #0f1729;
-  --color-muted: #64748b;
-  --color-border: #e6e9f0;
-  --color-ring: #2563eb;
+  --color-surface-muted: #fafbfc;
+  --color-foreground: #172033;
+  --color-muted: #667085;
+  --color-border: #e3e8ee;
+  --color-ring: #005f7a;
 
-  /* Brand */
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
+  /* Brand - Teal/Turquoise from FENOMEN logo */
+  --color-primary: #005f7a;
+  --color-primary-hover: #004b61;
   --color-primary-foreground: #ffffff;
-  --color-primary-soft: #eaf1ff;
+  --color-primary-soft: #e8f5f8;
+  --color-primary-extra-light: #f3fafb;
+
+  /* Brand Secondary */
+  --color-secondary: #0b7894;
 
   /* Status */
-  --color-success: #15803d;
-  --color-success-soft: #e7f7ee;
-  --color-warning: #b45309;
-  --color-warning-soft: #fdf3e2;
-  --color-danger: #dc2626;
-  --color-danger-soft: #fdecec;
+  --color-success: #16a36a;
+  --color-success-soft: #ecf8f1;
+  --color-warning: #f5a524;
+  --color-warning-soft: #fef5e8;
+  --color-danger: #d92d20;
+  --color-danger-soft: #fef3f2;
 
-  /* Sidebar (dark navy) */
-  --color-sidebar: #0d1526;
-  --color-sidebar-accent: #131d33;
-  --color-sidebar-foreground: #e2e8f0;
-  --color-sidebar-muted: #8291ab;
-  --color-sidebar-hover: #1a2540;
-  --color-sidebar-border: #1e293f;
+  /* Sidebar (light) */
+  --color-sidebar: #ffffff;
+  --color-sidebar-accent: #f3fafb;
+  --color-sidebar-foreground: #172033;
+  --color-sidebar-muted: #667085;
+  --color-sidebar-hover: #f0f6f8;
+  --color-sidebar-border: #e3e8ee;
+
+  /* Dark navy for contrast */
+  --color-dark-navy: #102033;
 
   --radius: 0.75rem;
 }

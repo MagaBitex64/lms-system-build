@@ -176,11 +176,28 @@ async def update_course(course_id: int, data: CourseIn, user: dict = Depends(req
 
 
 @router.delete("/{course_id}")
-async def delete_course(course_id: int, user: dict = Depends(require_teacher)):
-    await ensure_course_owner(user, course_id)
+async def delete_course(course_id: int, user: dict = Depends(get_current_user)):
+    """Delete course. Only teacher/admin with ownership can delete."""
+    # Check admin first (can delete any course)
     pool = await get_pool()
+    if user["role"] != "admin":
+        # Teachers can only delete their own courses
+        if user["role"] != "teacher":
+            raise HTTPException(status_code=403, detail="Only teachers and admins can delete courses")
+        course = await pool.fetchrow("SELECT teacher_id FROM courses WHERE id = $1", course_id)
+        if course is None:
+            raise HTTPException(status_code=404, detail="Course not found")
+        if course["teacher_id"] != user["id"]:
+            raise HTTPException(status_code=403, detail="You do not have permission to delete this course")
+    else:
+        # Admin - just check if course exists
+        course = await pool.fetchrow("SELECT 1 FROM courses WHERE id = $1", course_id)
+        if course is None:
+            raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Delete the course (cascades will handle related data)
     await pool.execute("DELETE FROM courses WHERE id = $1", course_id)
-    return {"ok": True}
+    return {"ok": True, "message": "Course deleted successfully"}
 
 
 # ---------- Course detail ----------

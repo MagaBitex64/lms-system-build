@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
@@ -18,17 +18,22 @@ import {
   ListChecks,
   Lock,
   Megaphone,
+  MoreVertical,
   PlusCircle,
   Settings2,
+  Trash,
   UserRound,
   Users,
 } from 'lucide-react'
 import { useI18n, type TKey } from '@/lib/i18n'
+import { useAuth } from '@/lib/auth'
 import { api, fetcher } from '@/lib/api'
 import {
   Badge,
   Button,
   Card,
+  DeletionConfirmModal,
+  DropdownMenu,
   EmptyState,
   ErrorState,
   FadeIn,
@@ -110,6 +115,8 @@ function fmtDate(value?: string | null) {
 
 export default function CoursePage() {
   const { t } = useI18n()
+  const { user } = useAuth()
+  const router = useRouter()
   const params = useParams()
   const id = params.id as string
   const { data: course, error, isLoading, mutate } = useSWR<Course>(id ? `/courses/${id}` : null, fetcher)
@@ -126,6 +133,11 @@ export default function CoursePage() {
   const [accessGroupIds, setAccessGroupIds] = useState<number[]>([])
   const [accessStudentIds, setAccessStudentIds] = useState<number[]>([])
   const [expandedGroupIds, setExpandedGroupIds] = useState<number[]>([])
+  
+  // Delete course states
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   if (isLoading) return <Spinner className="mt-20" />
   if (error || !course) return <ErrorState message={t('errorOccurred')} />
@@ -216,6 +228,34 @@ export default function CoursePage() {
     }
   }
 
+  async function deleteCourse() {
+    setIsDeleting(true)
+    try {
+      await api(`/courses/${id}`, { method: 'DELETE' })
+      // Close modal and show success message
+      setDeleteModalOpen(false)
+      // Redirect to teacher courses page
+      router.push('/teacher')
+    } catch (err) {
+      const msg = (err as Error).message
+      if (msg.includes('404') || msg.includes('not found')) {
+        setActionError(t('courseNotFound'))
+      } else if (msg.includes('403') || msg.includes('permission')) {
+        setActionError(t('noPermission'))
+      } else if (msg.includes('5')) {
+        setActionError(t('serverError'))
+      } else {
+        setActionError(t('courseDeleteError'))
+      }
+      setIsDeleting(false)
+    }
+  }
+
+  const canDeleteCourse = user && (user.id === course?.teacher_id || user.role === 'admin')
+  const studentCount = (course?.students ?? []).length
+  const itemCount = (course?.items ?? []).length
+  const shouldShowWarning = course?.is_published && studentCount > 0
+
   return (
     <div className="space-y-8">
       <Link href="/courses" className="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground">
@@ -228,7 +268,7 @@ export default function CoursePage() {
         title={course.title}
         description={course.description}
         actions={
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 items-center">
             {course.enrollment_status && (
               <Badge tone={course.enrollment_status === 'approved' ? 'success' : 'warning'}>
                 {t(course.enrollment_status as TKey)}
@@ -246,6 +286,33 @@ export default function CoursePage() {
                   <PlusCircle size={16} />
                   {t('addItem')}
                 </Button>
+
+                {/* Menu button */}
+                <div className="relative">
+                  <button
+                    onClick={() => setMenuOpen(!menuOpen)}
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-border transition-colors hover:bg-surface-muted text-muted hover:text-foreground"
+                    aria-label={t('courseOptions')}
+                  >
+                    <MoreVertical size={18} />
+                  </button>
+
+                  {/* Dropdown Menu */}
+                  <DropdownMenu
+                    open={menuOpen}
+                    onClose={() => setMenuOpen(false)}
+                    items={[
+                      {
+                        label: t('deleteCourse'),
+                        icon: <Trash size={16} />,
+                        destructive: true,
+                        divider: true,
+                        onClick: () => setDeleteModalOpen(true),
+                      },
+                    ]}
+                    position="right"
+                  />
+                </div>
               </>
             )}
           </div>
@@ -552,6 +619,18 @@ export default function CoursePage() {
           </div>
         </form>
       </Modal>
+
+      {/* Delete Course Modal */}
+      <DeletionConfirmModal
+        open={deleteModalOpen}
+        onClose={() => !isDeleting && setDeleteModalOpen(false)}
+        onConfirm={deleteCourse}
+        title={t('confirmDeleteCourse')}
+        description={t('deleteWarning')}
+        courseName={course.title}
+        warning={shouldShowWarning ? t('publishedWithStudents') : undefined}
+        isLoading={isDeleting}
+      />
     </div>
   )
 }

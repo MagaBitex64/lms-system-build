@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import Image from 'next/image'
 import {
   LayoutDashboard,
   BookOpen,
@@ -12,6 +13,10 @@ import {
   Menu,
   LogOut,
   X,
+  Home,
+  Settings,
+  BarChart3,
+  ChevronDown,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
@@ -43,48 +48,54 @@ function AuthedShell({ children }: { children: ReactNode }) {
     return <Spinner className="mt-40" />
   }
 
-  const nav: NavItem[] = [{ href: '/dashboard', label: 'dashboard', icon: <LayoutDashboard size={18} /> }]
+  // Build navigation based on role
+  const nav: NavItem[] = [{ href: '/dashboard', label: 'overview', icon: <Home size={20} /> }]
+  
   if (user.role === 'student') {
-    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={18} /> })
+    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
   }
+  
   if (user.role === 'teacher') {
-    nav.push({ href: '/teacher', label: 'courseManagement', icon: <GraduationCap size={18} /> })
-    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={18} /> })
+    nav.push({ href: '/teacher', label: 'myCourses', icon: <GraduationCap size={20} /> })
+    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
   }
+  
   if (user.role === 'admin') {
-    nav.push({ href: '/teacher', label: 'courseManagement', icon: <GraduationCap size={18} /> })
-    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={18} /> })
-    nav.push({ href: '/admin', label: 'adminPanel', icon: <Users size={18} /> })
+    nav.push({ href: '/teacher', label: 'myCourses', icon: <GraduationCap size={20} /> })
+    nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
+    nav.push({ href: '/admin', label: 'adminPanel', icon: <Users size={20} /> })
   }
 
   const roleLabel: TKey =
     user.role === 'admin' ? 'admin' : user.role === 'teacher' ? 'teacher' : 'student'
 
+  // Sidebar component
   const sidebar = (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
+      {/* Logo section */}
       <Link
         href="/dashboard"
-        className="flex items-center gap-2.5 px-5 py-5"
+        className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border"
         onClick={() => setMenuOpen(false)}
       >
-        <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-          <img
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-soft flex-shrink-0 overflow-hidden">
+          <Image
             src="/logo.jpg"
-            alt="Logo"
-            className="h-full w-full rounded-xl object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none'
-              ;(e.target as HTMLImageElement).parentElement!.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>'
-            }}
+            alt="FENOMEN"
+            width={52}
+            height={52}
+            className="w-full h-full object-cover"
+            priority
           />
         </div>
-        <div className="leading-tight">
-          <p className="text-sm font-semibold text-white">Fenomen School</p>
+        <div className="flex flex-col gap-0.5">
+          <p className="text-sm font-bold text-sidebar-foreground">FENOMEN</p>
           <p className="text-xs text-sidebar-muted">{t('platformLabel')}</p>
         </div>
       </Link>
 
-      <nav className="flex flex-1 flex-col gap-1 px-3 py-2" aria-label="Негізгі навигация">
+      {/* Navigation */}
+      <nav className="flex flex-1 flex-col gap-1 px-4 py-4" aria-label="Негізгі навигация">
         {nav.map((n) => {
           const active = pathname === n.href || pathname.startsWith(n.href + '/')
           return (
@@ -93,102 +104,119 @@ function AuthedShell({ children }: { children: ReactNode }) {
               href={n.href}
               onClick={() => setMenuOpen(false)}
               className={cx(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-150',
                 active
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-white',
+                  ? 'bg-primary-soft text-primary'
+                  : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-foreground',
               )}
             >
-              <span className={cx('shrink-0', active ? 'text-primary-foreground' : '')}>{n.icon}</span>
-              {t(n.label)}
+              <span className="flex-shrink-0">{n.icon}</span>
+              <span>{t(n.label)}</span>
             </Link>
           )
         })}
       </nav>
 
-      <div className="border-t border-sidebar-border p-3">
-        <Link
-          href="/profile"
-          onClick={() => setMenuOpen(false)}
-          className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-sidebar-hover"
+      {/* Profile & Logout */}
+      <div className="border-t border-sidebar-border p-4">
+        <button
+          onClick={() => {
+            setMenuOpen(false)
+            logout()
+          }}
+          className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-foreground transition-colors"
         >
-          <Avatar name={user.full_name} className="bg-sidebar-hover text-white" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-white">{user.full_name}</p>
-            <p className="truncate text-xs text-sidebar-muted">{t(roleLabel)}</p>
-          </div>
-        </Link>
-        <div className="mt-2 flex items-center justify-end gap-2 px-1">
-          <button
-            onClick={logout}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-sidebar-muted transition-colors hover:text-white"
-          >
-            <LogOut size={14} />
-            {t('logout')}
-          </button>
-        </div>
+          <LogOut size={18} />
+          {t('logout')}
+        </button>
       </div>
     </div>
   )
 
   return (
-    <div className="min-h-screen">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 lg:block">{sidebar}</aside>
+    <div className="min-h-screen bg-background">
+      {/* Desktop Sidebar */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-sidebar-border lg:block bg-sidebar">
+        {sidebar}
+      </aside>
 
+      {/* Mobile Menu Overlay */}
       {menuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-foreground/50 backdrop-blur-sm" onClick={() => setMenuOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-64 shadow-2xl">
+          <div
+            className="absolute inset-0 bg-foreground/50 backdrop-blur-sm"
+            onClick={() => setMenuOpen(false)}
+          />
+          <aside className="absolute inset-y-0 left-0 w-64 shadow-2xl bg-sidebar">
             <button
               onClick={() => setMenuOpen(false)}
-              className="absolute right-3 top-4 z-10 text-sidebar-muted hover:text-white"
+              className="absolute right-4 top-4 z-10 text-sidebar-muted hover:text-sidebar-foreground p-2"
               aria-label="Мәзірді жабу"
             >
-              <X size={20} />
+              <X size={24} />
             </button>
             {sidebar}
           </aside>
         </div>
       )}
 
-      <div className="flex min-h-screen flex-col lg:pl-64">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-surface/80 px-4 backdrop-blur-md sm:px-6">
-          <button
-            className="text-muted transition-colors hover:text-foreground lg:hidden"
-            onClick={() => setMenuOpen(true)}
-            aria-label="Мәзірді ашу"
-          >
-            <Menu size={22} />
-          </button>
+      {/* Main content wrapper */}
+      <div className="lg:ml-64">
+        {/* Top Bar */}
+        <header className="sticky top-0 z-20 border-b border-border bg-surface">
+          <div className="flex items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 py-4">
+            {/* Left: Menu button + Search */}
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <button
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="flex items-center justify-center w-10 h-10 rounded-lg hover:bg-surface-muted transition-colors lg:hidden text-sidebar-muted hover:text-sidebar-foreground"
+                aria-label="Мәзірді ашу"
+              >
+                <Menu size={20} />
+              </button>
 
-          <form
-            className="flex max-w-md flex-1 items-center"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (q.trim()) router.push(`/search?q=${encodeURIComponent(q.trim())}`)
-            }}
-          >
-            <div className="relative w-full">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder={t('searchPlaceholder')}
-                className="h-10 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm placeholder:text-muted/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
-                aria-label={t('search')}
-              />
+              {/* Search */}
+              <div className="hidden sm:flex flex-1 max-w-md items-center">
+                <div className="relative w-full">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" size={18} />
+                  <input
+                    type="text"
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder={t('searchPlaceholder')}
+                    className="w-full h-10 pl-10 pr-4 rounded-lg border border-border bg-surface-muted text-foreground placeholder:text-muted/60 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+              </div>
             </div>
-          </form>
 
-          <div className="ml-auto flex items-center gap-3">
-            <div className="hidden items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 sm:flex">
-              <Avatar name={user.full_name} className="size-7 text-xs" />
-              <span className="text-sm font-medium text-foreground">{user.full_name.split(' ')[0]}</span>
+            {/* Right: Profile */}
+            <div className="flex items-center justify-end">
+              <button
+                className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-primary-extra-light focus:outline-none focus:ring-2 focus:ring-primary/20"
+                aria-label="Профиль"
+              >
+                {/* Avatar */}
+                <Avatar name={user.full_name} className="bg-primary-soft text-primary flex-shrink-0" size="sm" />
+                
+                {/* Name & Role - Hidden on mobile */}
+                <div className="hidden sm:flex flex-col gap-0 min-w-0">
+                  <p className="truncate text-sm font-semibold text-foreground leading-tight">{user.full_name}</p>
+                  <p className="truncate text-xs text-muted leading-tight">{t(roleLabel)}</p>
+                </div>
+                
+                {/* Chevron - Hidden on mobile */}
+                <ChevronDown className="hidden sm:block flex-shrink-0 text-muted" size={16} />
+                
+                {/* Avatar only - Visible on mobile */}
+                <div className="sm:hidden flex-shrink-0" />
+              </button>
             </div>
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-6xl flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
+        {/* Page Content */}
+        <main className="p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   )
