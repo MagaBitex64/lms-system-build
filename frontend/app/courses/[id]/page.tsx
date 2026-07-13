@@ -93,6 +93,7 @@ type Course = {
   description: string
   announcement?: string
   teacher_name: string
+  teacher_id?: number
   is_published: boolean
   is_owner?: boolean
   enrollment_status?: string | null
@@ -407,18 +408,18 @@ export default function CoursePage() {
               const content = (
                 <Card interactive={!locked} className={`flex flex-col gap-4 sm:flex-row sm:items-center ${locked ? 'opacity-70' : ''}`}>
                   <div
-                    className={`flex size-11 shrink-0 items-center justify-center rounded-xl ${
+                    className={`flex size-11 shrink-0 items-center justify-center rounded-xl ${ 
                       item.completed ? 'bg-success-soft text-success' : 'bg-surface-muted text-muted'
                     }`}
                   >
-                    {locked ? <Lock size={18} /> : TYPE_ICON[item.type]}
+{!locked || isOwner ? TYPE_ICON[item.type] : <Lock size={18} />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold text-foreground">{item.title}</p>
                       <Badge tone="neutral">{t(item.type)}</Badge>
                       {item.completed && <Badge tone="success">{t('completed')}</Badge>}
-                      {locked && <Badge tone="warning">{t('locked')}</Badge>}
+                      {!isOwner && locked && <Badge tone="warning">{t('locked')}</Badge>}
                       {isOwner && (
                         <Badge tone={item.is_visible ? 'success' : 'neutral'}>
                           {item.is_visible ? t('visible') : t('hidden')}
@@ -429,7 +430,6 @@ export default function CoursePage() {
                           {t('topicAccess')}: {(item.access_group_ids?.length ?? 0) + (item.access_student_ids?.length ?? 0)}
                         </Badge>
                       )}
-                      {item.sequential_unlock && <Badge tone="warning">{t('locked')}</Badge>}
                     </div>
                     {item.note && <p className="mt-1 line-clamp-1 text-sm text-muted">{item.note}</p>}
                     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">

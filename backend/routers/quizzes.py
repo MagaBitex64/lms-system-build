@@ -95,7 +95,13 @@ async def update_quiz_settings(item_id: int, data: QuizSettingsIn, user: dict = 
         data.time_limit_minutes,
         item_id,
     )
-    return {"ok": True}
+    # Reset all student attempts when quiz settings are changed
+    attempts = await pool.fetch("SELECT id FROM quiz_attempts WHERE quiz_id = $1", item_id)
+    for attempt in attempts:
+        await pool.execute("DELETE FROM attempt_answers WHERE attempt_id = $1", attempt["id"])
+    await pool.execute("DELETE FROM quiz_attempts WHERE quiz_id = $1", item_id)
+    await pool.execute("DELETE FROM quiz_starts WHERE quiz_id = $1", item_id)
+    return {"ok": True, "message": "Quiz updated and all attempts reset"}
 
 
 @router.post("/{item_id}/questions")
@@ -114,6 +120,12 @@ async def add_question(item_id: int, data: QuestionIn, user: dict = Depends(requ
             raise HTTPException(status_code=422, detail="Multiple-choice questions need at least 1 correct option")
     pool = await get_pool()
     await ensure_quiz_row(pool, item_id)
+    # Reset all student attempts when quiz is modified
+    attempts = await pool.fetch("SELECT id FROM quiz_attempts WHERE quiz_id = $1", item_id)
+    for attempt in attempts:
+        await pool.execute("DELETE FROM attempt_answers WHERE attempt_id = $1", attempt["id"])
+    await pool.execute("DELETE FROM quiz_attempts WHERE quiz_id = $1", item_id)
+    await pool.execute("DELETE FROM quiz_starts WHERE quiz_id = $1", item_id)
     async with pool.acquire() as conn:
         async with conn.transaction():
             pos = await conn.fetchval(
@@ -140,7 +152,7 @@ async def add_question(item_id: int, data: QuestionIn, user: dict = Depends(requ
                     opt.is_correct,
                     i,
                 )
-    return {"id": q["id"]}
+    return {"id": q["id"], "message": "Question added and all attempts reset"}
 
 
 @router.delete("/questions/{question_id}")
@@ -151,8 +163,14 @@ async def delete_question(question_id: int, user: dict = Depends(require_teacher
         raise HTTPException(status_code=404, detail="Question not found")
     item = await get_item_or_404(q["quiz_id"])
     await ensure_course_owner(user, item["course_id"])
+    # Reset all student attempts when quiz is modified
+    attempts = await pool.fetch("SELECT id FROM quiz_attempts WHERE quiz_id = $1", q["quiz_id"])
+    for attempt in attempts:
+        await pool.execute("DELETE FROM attempt_answers WHERE attempt_id = $1", attempt["id"])
+    await pool.execute("DELETE FROM quiz_attempts WHERE quiz_id = $1", q["quiz_id"])
+    await pool.execute("DELETE FROM quiz_starts WHERE quiz_id = $1", q["quiz_id"])
     await pool.execute("DELETE FROM quiz_questions WHERE id = $1", question_id)
-    return {"ok": True}
+    return {"ok": True, "message": "Question deleted and all attempts reset"}
 
 
 # ---------- Quiz detail ----------

@@ -12,6 +12,7 @@ from core.access import (
 )
 from core.db import get_pool
 from core.deps import get_current_user, require_teacher
+from storage.local import storage
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -195,8 +196,39 @@ async def delete_course(course_id: int, user: dict = Depends(get_current_user)):
         if course is None:
             raise HTTPException(status_code=404, detail="Course not found")
     
+    # Find all files associated with this course before deleting
+    file_rows = await pool.fetch(
+        """
+        SELECT DISTINCT f.id, f.stored_name
+        FROM files f
+        WHERE f.owner_id = $1
+        AND (
+            EXISTS (
+                SELECT 1 FROM lesson_materials lm
+                JOIN lessons l ON l.item_id = lm.lesson_id
+                JOIN course_items ci ON ci.id = l.item_id
+                WHERE lm.file_id = f.id AND ci.course_id = $2
+            )
+            OR EXISTS (
+                SELECT 1 FROM quiz_questions qq
+                JOIN quizzes q ON q.item_id = qq.quiz_id
+                JOIN course_items ci ON ci.id = q.item_id
+                WHERE qq.image_file_id = f.id AND ci.course_id = $2
+            )
+        )
+        """,
+        user["id"],
+        course_id,
+    )
+    
     # Delete the course (cascades will handle related data)
     await pool.execute("DELETE FROM courses WHERE id = $1", course_id)
+    
+    # Clean up orphaned files from storage
+    for file_row in file_rows:
+        storage.delete(file_row["stored_name"])
+        await pool.execute("DELETE FROM files WHERE id = $1", file_row["id"])
+    
     return {"ok": True, "message": "Course deleted successfully"}
 
 
@@ -586,7 +618,7 @@ async def get_lesson(item_id: int, user: dict = Depends(get_current_user)):
         "is_owner": is_owner,
         "item": {"id": item["id"], "title": item["title"], "note": item["note"], "course_id": item["course_id"]},
         "content": lesson["content"],
-        "youtube_url": None if (quiz and user["role"] == "student" and quiz_started) else lesson["youtube_url"],
+        "youtube_url": None if (quiz and user["role"] == "student" and quiz_started and not attempt) else lesson["youtube_url"],
         "materials": [dict(m) for m in materials],
         "has_quiz": quiz is not None,
         "quiz_started": quiz_started,

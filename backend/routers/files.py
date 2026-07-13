@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from core.db import get_pool
@@ -31,15 +31,57 @@ async def upload_file(file: UploadFile, user: dict = Depends(get_current_user)):
     return dict(row) | {"created_at": str(row["created_at"])}
 
 
+async def get_user_from_token(token: str | None):
+    """Extract user from JWT token in query parameter."""
+    if not token:
+        return None
+    try:
+        from core.security import decode_token
+        payload = decode_token(token)
+        if payload is None:
+            return None
+        user_id = payload.get("sub")
+        if user_id is None:
+            return None
+        pool = await get_pool()
+        user = await pool.fetchrow("SELECT * FROM users WHERE id = $1", int(user_id))
+        return dict(user) if user else None
+    except Exception:
+        return None
+
+async def get_optional_user(request: Request) -> dict | None:
+    if not request.headers.get("Authorization", "").startswith("Bearer "):
+        return None
+    try:
+        return await get_current_user(request)
+    except HTTPException:
+        return None
+
+
 @router.get("/{file_id}/download")
-async def download_file(file_id: int, user: dict = Depends(get_current_user)):
+async def download_file(
+    file_id: int,
+    request: Request,
+    token: str | None = Query(None),
+    user: dict | None = Depends(get_optional_user)
+):
     pool = await get_pool()
     f = await pool.fetchrow("SELECT * FROM files WHERE id = $1", file_id)
     if f is None:
         raise HTTPException(status_code=404, detail="File not found")
 
-    allowed = user["role"] in ("admin", "teacher") or f["owner_id"] == user["id"]
-    if not allowed and user["role"] == "student":
+    # If no user from header auth, try to get from token query parameter
+    if not user and token:
+        user = await get_user_from_token(token)
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = user["id"]
+    user_role = user["role"]
+    
+    allowed = user_role in ("admin", "teacher") or f["owner_id"] == user_id
+    if not allowed and user_role == "student":
         # Student may download files attached as lesson materials / question images
         # in courses they are enrolled in, or files of their own submissions.
         row = await pool.fetchrow(
@@ -83,7 +125,7 @@ async def download_file(file_id: int, user: dict = Depends(get_current_user)):
               )
             """,
             file_id,
-            user["id"],
+            user_id,
         )
         allowed = row is not None
     if not allowed:

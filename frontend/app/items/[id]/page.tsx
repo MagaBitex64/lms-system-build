@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
-import { api, downloadFile, ApiError } from '@/lib/api'
+import { api, downloadFile, getFileUrl, ApiError } from '@/lib/api'
 import {
   Badge,
   Button,
@@ -615,8 +615,45 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
   ])
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
+  const [questionImage, setQuestionImage] = useState<{ id: number; url: string } | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
 
   const isChoice = type === 'single' || type === 'multiple'
+
+  async function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = event.clipboardData?.items
+    if (!items) return
+
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        event.preventDefault()
+        const file = item.getAsFile()
+        if (!file) continue
+
+        const preview = URL.createObjectURL(file)
+        setImagePreview(preview)
+
+        try {
+          const formData = new FormData()
+          formData.append('file', file)
+          const uploaded = await api<UploadedFile>('/files/upload', { formData })
+          setQuestionImage({ id: uploaded.id, url: uploaded.original_name })
+        } catch (err) {
+          setError((err as Error).message || t('errorOccurred'))
+          setImagePreview(null)
+        }
+        break
+      }
+    }
+  }
+
+  function removeImage() {
+    setQuestionImage(null)
+    if (imagePreview) {
+      URL.revokeObjectURL(imagePreview)
+      setImagePreview(null)
+    }
+  }
 
   async function addQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -630,6 +667,7 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
           points: Number(points),
           explanation,
           options: isChoice ? options.filter((o) => o.text.trim()) : [],
+          image_file_id: questionImage?.id ?? null,
         },
       })
       setPrompt('')
@@ -639,6 +677,7 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
         { text: '', is_correct: true },
         { text: '', is_correct: false },
       ])
+      removeImage()
       await reload()
     } catch (err) {
       setError((err as Error).message || t('errorOccurred'))
@@ -666,7 +705,14 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
             <h2 className="text-base font-semibold">{t('addQuestion')}</h2>
           </div>
           <Field label={t('question')}>
-            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} required />
+            <Textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onPaste={handlePaste}
+              rows={4}
+              required
+            />
+            <p className="mt-1 text-xs text-muted">You can paste screenshots directly with Ctrl+V</p>
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t('content')}>
@@ -681,6 +727,19 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
               <Input type="number" min={1} max={100} value={points} onChange={(e) => setPoints(e.target.value)} />
             </Field>
           </div>
+          {(imagePreview || questionImage) && (
+            <div className="rounded-lg border border-border bg-surface-muted p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Attached image</span>
+                <Button type="button" variant="ghost" size="sm" onClick={removeImage}>
+                  <Trash2 size={14} />
+                </Button>
+              </div>
+              {imagePreview && (
+                <img src={imagePreview} alt="Question attachment" className="mt-2 max-h-48 rounded-md" />
+              )}
+            </div>
+          )}
           {isChoice && (
             <div className="space-y-2">
               {options.map((option, index) => (
@@ -949,6 +1008,15 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                   <Badge tone="neutral">{q.points} {t('points')}</Badge>
                 </div>
                 <p className="mt-3 whitespace-pre-line text-sm font-medium">{q.prompt}</p>
+                {q.image_file_id && (
+                  <div className="mt-3">
+                    <img
+                      src={getFileUrl(q.image_file_id)}
+                      alt="Question attachment"
+                      className="max-w-full rounded-lg border border-border"
+                    />
+                  </div>
+                )}
                 {(q.type === 'single' || q.type === 'multiple') && (
                   <div className="mt-3 grid gap-2">
                     {q.options.map((option) => (

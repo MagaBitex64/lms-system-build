@@ -18,3 +18,5 @@ __pycache__/
 *.pyc
 *.tsbuildinfo
 .DS_Store
+
+backend/uploads/
