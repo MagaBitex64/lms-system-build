@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from core.access import ensure_course_owner, ensure_item_access, get_item_or_404
 from core.db import get_pool
 from core.deps import get_current_user, require_student, require_teacher
+from storage.local import storage
 
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 
@@ -163,6 +164,11 @@ async def delete_question(question_id: int, user: dict = Depends(require_teacher
         raise HTTPException(status_code=404, detail="Question not found")
     item = await get_item_or_404(q["quiz_id"])
     await ensure_course_owner(user, item["course_id"])
+    
+    file_row = None
+    if q["image_file_id"]:
+        file_row = await pool.fetchrow("SELECT id, stored_name FROM files WHERE id = $1 AND owner_id = $2", q["image_file_id"], user["id"])
+        
     # Reset all student attempts when quiz is modified
     attempts = await pool.fetch("SELECT id FROM quiz_attempts WHERE quiz_id = $1", q["quiz_id"])
     for attempt in attempts:
@@ -170,6 +176,11 @@ async def delete_question(question_id: int, user: dict = Depends(require_teacher
     await pool.execute("DELETE FROM quiz_attempts WHERE quiz_id = $1", q["quiz_id"])
     await pool.execute("DELETE FROM quiz_starts WHERE quiz_id = $1", q["quiz_id"])
     await pool.execute("DELETE FROM quiz_questions WHERE id = $1", question_id)
+    
+    if file_row:
+        storage.delete(file_row["stored_name"])
+        await pool.execute("DELETE FROM files WHERE id = $1", file_row["id"])
+        
     return {"ok": True, "message": "Question deleted and all attempts reset"}
 
 

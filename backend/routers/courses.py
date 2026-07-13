@@ -515,7 +515,35 @@ async def delete_item(item_id: int, user: dict = Depends(require_teacher)):
     item = await get_item_or_404(item_id)
     await ensure_course_owner(user, item["course_id"])
     pool = await get_pool()
+    
+    file_rows = await pool.fetch(
+        """
+        SELECT DISTINCT f.id, f.stored_name
+        FROM files f
+        WHERE f.owner_id = $1
+        AND (
+            EXISTS (
+                SELECT 1 FROM lesson_materials lm
+                JOIN lessons l ON l.item_id = lm.lesson_id
+                WHERE lm.file_id = f.id AND l.item_id = $2
+            )
+            OR EXISTS (
+                SELECT 1 FROM quiz_questions qq
+                JOIN quizzes q ON q.item_id = qq.quiz_id
+                WHERE qq.image_file_id = f.id AND q.item_id = $2
+            )
+        )
+        """,
+        user["id"],
+        item_id,
+    )
+
     await pool.execute("DELETE FROM course_items WHERE id = $1", item_id)
+    
+    for file_row in file_rows:
+        storage.delete(file_row["stored_name"])
+        await pool.execute("DELETE FROM files WHERE id = $1", file_row["id"])
+
     return {"ok": True}
 
 
@@ -677,5 +705,15 @@ async def delete_material(material_id: int, user: dict = Depends(require_teacher
         raise HTTPException(status_code=404, detail="Material not found")
     item = await get_item_or_404(mat["lesson_id"])
     await ensure_course_owner(user, item["course_id"])
+    
+    file_row = None
+    if mat["file_id"]:
+        file_row = await pool.fetchrow("SELECT id, stored_name FROM files WHERE id = $1 AND owner_id = $2", mat["file_id"], user["id"])
+        
     await pool.execute("DELETE FROM lesson_materials WHERE id = $1", material_id)
+    
+    if file_row:
+        storage.delete(file_row["stored_name"])
+        await pool.execute("DELETE FROM files WHERE id = $1", file_row["id"])
+
     return {"ok": True}
