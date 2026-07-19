@@ -604,7 +604,7 @@ async def get_lesson(item_id: int, user: dict = Depends(get_current_user)):
         if is_owner or quiz_started:
             for q in raw_questions:
                 opts = await pool.fetch(
-                    "SELECT id, text, is_correct, position FROM question_options WHERE question_id = $1 ORDER BY position",
+                    "SELECT id, text, image_file_id, is_correct, position FROM question_options WHERE question_id = $1 ORDER BY position",
                     q["id"],
                 )
                 qd = {
@@ -614,7 +614,7 @@ async def get_lesson(item_id: int, user: dict = Depends(get_current_user)):
                     "image_file_id": q["image_file_id"],
                     "points": q["points"],
                     "options": [
-                        {"id": o["id"], "text": o["text"]}
+                        {"id": o["id"], "text": o["text"], "image_file_id": o["image_file_id"]}
                         | ({"is_correct": o["is_correct"]} if is_owner or attempt else {})
                         for o in opts
                     ],

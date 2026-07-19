@@ -21,7 +21,8 @@ class QuizSettingsIn(BaseModel):
 
 
 class OptionIn(BaseModel):
-    text: str = Field(min_length=1, max_length=1000)
+    text: str = Field(default="", max_length=1000)
+    image_file_id: int | None = None
     is_correct: bool = False
 
 
@@ -119,6 +120,8 @@ async def add_question(item_id: int, data: QuestionIn, user: dict = Depends(requ
             raise HTTPException(status_code=422, detail="Single-choice questions need exactly 1 correct option")
         if data.type == "multiple" and correct < 1:
             raise HTTPException(status_code=422, detail="Multiple-choice questions need at least 1 correct option")
+        if any(not o.text.strip() and o.image_file_id is None for o in data.options):
+            raise HTTPException(status_code=422, detail="Each option needs text or an image")
     pool = await get_pool()
     await ensure_quiz_row(pool, item_id)
     # Reset all student attempts when quiz is modified
@@ -147,9 +150,10 @@ async def add_question(item_id: int, data: QuestionIn, user: dict = Depends(requ
             )
             for i, opt in enumerate(data.options):
                 await conn.execute(
-                    "INSERT INTO question_options (question_id, text, is_correct, position) VALUES ($1,$2,$3,$4)",
+                    "INSERT INTO question_options (question_id, text, image_file_id, is_correct, position) VALUES ($1,$2,$3,$4,$5)",
                     q["id"],
                     opt.text,
+                    opt.image_file_id,
                     opt.is_correct,
                     i,
                 )
@@ -207,7 +211,7 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
     out_questions = []
     for q in questions:
         opts = await pool.fetch(
-            "SELECT id, text, is_correct, position FROM question_options WHERE question_id = $1 ORDER BY position",
+            "SELECT id, text, image_file_id, is_correct, position FROM question_options WHERE question_id = $1 ORDER BY position",
             q["id"],
         )
         qd = {
@@ -217,7 +221,7 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
             "image_file_id": q["image_file_id"],
             "points": q["points"],
             "options": [
-                {"id": o["id"], "text": o["text"]}
+                {"id": o["id"], "text": o["text"], "image_file_id": o["image_file_id"]}
                 | ({"is_correct": o["is_correct"]} if is_owner or attempt else {})
                 for o in opts
             ],

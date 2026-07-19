@@ -6,6 +6,7 @@ COPY requirements.txt .
 COPY . .
 
 RUN pip install --no-cache-dir -r requirements.txt && \
+    sed -i 's/\r$//' entrypoint.sh && \
     chmod +x entrypoint.sh
 
 EXPOSE 8000

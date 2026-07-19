@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS question_options (
     is_correct BOOLEAN NOT NULL DEFAULT FALSE,
     position INTEGER NOT NULL DEFAULT 0
 );
+ALTER TABLE question_options
+    ADD COLUMN IF NOT EXISTS image_file_id BIGINT REFERENCES files(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_options_question ON question_options(question_id, position);
 
 CREATE TABLE IF NOT EXISTS quiz_attempts (

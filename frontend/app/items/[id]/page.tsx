@@ -48,7 +48,7 @@ type Material = {
   original_name?: string
 }
 
-type QuestionOption = { id: number; text: string; is_correct?: boolean }
+type QuestionOption = { id: number; text: string; image_file_id?: number | null; is_correct?: boolean }
 type Question = {
   id: number
   type: QuestionType
@@ -610,8 +610,8 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
   const [points, setPoints] = useState('1')
   const [explanation, setExplanation] = useState('')
   const [options, setOptions] = useState([
-    { text: '', is_correct: true },
-    { text: '', is_correct: false },
+    { text: '', is_correct: true, image_file_id: null as number | null, image_preview: null as string | null },
+    { text: '', is_correct: false, image_file_id: null as number | null, image_preview: null as string | null },
   ])
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
@@ -655,6 +655,37 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
     }
   }
 
+  async function uploadOptionImage(index: number, file: File) {
+    if (!file.type.startsWith('image/')) return
+    const preview = URL.createObjectURL(file)
+    setOptions((prev) => prev.map((option, i) => i === index ? { ...option, image_preview: preview } : option))
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const uploaded = await api<UploadedFile>('/files/upload', { formData })
+      setOptions((prev) => prev.map((option, i) => i === index ? { ...option, image_file_id: uploaded.id } : option))
+    } catch (err) {
+      URL.revokeObjectURL(preview)
+      setOptions((prev) => prev.map((option, i) => i === index ? { ...option, image_file_id: null, image_preview: null } : option))
+      setError((err as Error).message || t('errorOccurred'))
+    }
+  }
+
+  function pasteOptionImage(index: number, event: React.ClipboardEvent<HTMLInputElement>) {
+    const image = Array.from(event.clipboardData.items).find((item) => item.type.startsWith('image/'))?.getAsFile()
+    if (!image) return
+    event.preventDefault()
+    void uploadOptionImage(index, image)
+  }
+
+  function removeOptionImage(index: number) {
+    setOptions((prev) => prev.map((option, i) => {
+      if (i !== index) return option
+      if (option.image_preview) URL.revokeObjectURL(option.image_preview)
+      return { ...option, image_file_id: null, image_preview: null }
+    }))
+  }
+
   async function addQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setWorking(true)
@@ -666,7 +697,9 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
           prompt,
           points: Number(points),
           explanation,
-          options: isChoice ? options.filter((o) => o.text.trim()) : [],
+          options: isChoice
+            ? options.filter((o) => o.text.trim() || o.image_file_id).map(({ text, is_correct, image_file_id }) => ({ text, is_correct, image_file_id }))
+            : [],
           image_file_id: questionImage?.id ?? null,
         },
       })
@@ -674,8 +707,8 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
       setPoints('1')
       setExplanation('')
       setOptions([
-        { text: '', is_correct: true },
-        { text: '', is_correct: false },
+        { text: '', is_correct: true, image_file_id: null, image_preview: null },
+        { text: '', is_correct: false, image_file_id: null, image_preview: null },
       ])
       removeImage()
       await reload()
@@ -743,7 +776,8 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
           {isChoice && (
             <div className="space-y-2">
               {options.map((option, index) => (
-                <div key={index} className="flex items-center gap-2">
+                <div key={index} className="rounded-lg border border-border bg-surface-muted p-2">
+                  <div className="flex items-center gap-2">
                   <input
                     type={type === 'single' ? 'radio' : 'checkbox'}
                     checked={option.is_correct}
@@ -759,9 +793,23 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
                   />
                   <Input
                     value={option.text}
+                    onPaste={(event) => pasteOptionImage(index, event)}
                     onChange={(e) => setOptions((prev) => prev.map((o, i) => (i === index ? { ...o, text: e.target.value } : o)))}
                     placeholder={`${t('option')} ${index + 1}`}
                   />
+                  <label className="inline-flex cursor-pointer items-center justify-center rounded-md border border-border bg-surface p-2 text-muted hover:text-foreground" title="Добавить скриншот">
+                    <Upload size={14} />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0]
+                        if (file) void uploadOptionImage(index, file)
+                        event.target.value = ''
+                      }}
+                    />
+                  </label>
                   {options.length > 2 && (
                     <Button
                       type="button"
@@ -772,13 +820,22 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
                       <Trash2 size={14} />
                     </Button>
                   )}
+                  </div>
+                  {option.image_preview && (
+                    <div className="mt-2 flex items-start gap-2">
+                      <img src={option.image_preview} alt={`Вариант ${index + 1}`} className="max-h-32 max-w-full rounded-md border border-border" />
+                      <Button type="button" variant="ghost" size="sm" onClick={() => removeOptionImage(index)} aria-label="Удалить скриншот">
+                        <Trash2 size={14} />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ))}
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setOptions((prev) => [...prev, { text: '', is_correct: false }])}
+                onClick={() => setOptions((prev) => [...prev, { text: '', is_correct: false, image_file_id: null, image_preview: null }])}
               >
                 <PlusCircle size={14} />
                 {t('option')}
@@ -822,7 +879,10 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
                     {q.options.map((o) => (
                       <div key={o.id} className="flex items-center gap-2 rounded-md bg-surface px-3 py-2 text-sm">
                         {o.is_correct ? <CheckCircle2 size={14} className="text-success" /> : <span className="size-3 rounded-full border border-border" />}
-                        <span>{o.text}</span>
+                        <div className="min-w-0">
+                          {o.text && <span>{o.text}</span>}
+                          {o.image_file_id && <img src={getFileUrl(o.image_file_id)} alt={o.text || 'Вариант ответа'} className="mt-2 max-h-40 rounded-md border border-border" />}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -946,7 +1006,10 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                       return (
                         <div key={option.id} className="flex items-center gap-2 rounded-md bg-surface px-3 py-2 text-sm">
                           {option.is_correct ? <CheckCircle2 size={14} className="text-success" /> : <span className="size-3 rounded-full border border-border" />}
-                          <span className={selected ? 'font-semibold text-foreground' : 'text-muted'}>{option.text}</span>
+                          <div className={selected ? 'font-semibold text-foreground' : 'text-muted'}>
+                            {option.text && <span>{option.text}</span>}
+                            {option.image_file_id && <img src={getFileUrl(option.image_file_id)} alt={option.text || 'Вариант ответа'} className="mt-2 max-h-40 rounded-md border border-border" />}
+                          </div>
                         </div>
                       )
                     })}
@@ -1020,14 +1083,17 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                 {(q.type === 'single' || q.type === 'multiple') && (
                   <div className="mt-3 grid gap-2">
                     {q.options.map((option) => (
-                      <label key={option.id} className="flex items-center gap-2 rounded-md bg-surface px-3 py-2 text-sm">
+                      <label key={option.id} className="flex items-start gap-2 rounded-md bg-surface px-3 py-2 text-sm">
                         <input
                           type={q.type === 'single' ? 'radio' : 'checkbox'}
                           name={`question-${q.id}`}
                           checked={answers[q.id]?.selected_option_ids.includes(option.id) ?? false}
                           onChange={(e) => setChoice(q, option.id, e.target.checked)}
                         />
-                        {option.text}
+                        <div className="min-w-0">
+                          {option.text && <span>{option.text}</span>}
+                          {option.image_file_id && <img src={getFileUrl(option.image_file_id)} alt={option.text || 'Вариант ответа'} className="mt-2 max-h-56 max-w-full rounded-md border border-border" />}
+                        </div>
                       </label>
                     ))}
                   </div>
