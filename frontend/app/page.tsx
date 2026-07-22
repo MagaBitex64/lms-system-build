@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
+import { api } from '@/lib/api'
 import {
   ArrowRight, Atom, BarChart3, BookOpen, Bot, CalendarCheck, Check,
   ChevronDown, ChevronLeft, ChevronRight, Clock3, ExternalLink, FlaskConical, GraduationCap, History, Laptop,
@@ -188,18 +189,38 @@ function BranchSection() {
 function LeadFormSection() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [sent, setSent] = useState(false)
-  function submit(event: FormEvent<HTMLFormElement>) {
+  const [busy, setBusy] = useState(false)
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    if (busy) return
+    setSent(false)
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
     const next: Record<string, string> = {}
     if (!String(form.get('name') || '').trim()) next.name = 'Аты-жөніңізді енгізіңіз'
     if (!String(form.get('phone') || '').trim()) next.phone = 'Телефон нөмірін енгізіңіз'
     if (!String(form.get('course') || '').trim()) next.course = 'Курсты таңдаңыз'
     setErrors(next)
     if (Object.keys(next).length === 0) {
-      // TODO: Connect this form to the lead API when an endpoint is available.
-      setSent(true)
-      event.currentTarget.reset()
+      setBusy(true)
+      setSent(false)
+      try {
+        await api('/leads', {
+          body: {
+            name: String(form.get('name') || '').trim(),
+            phone: String(form.get('phone') || '').trim(),
+            course: String(form.get('course') || '').trim(),
+            branch: 'Шымкент, Төле би, 32А',
+          },
+        })
+        setSent(true)
+        formElement.reset()
+      } catch {
+        setErrors({ form: 'Өтінімді жіберу мүмкін болмады. Қайтадан көріңіз.' })
+        window.alert('Өтінімді жіберу мүмкін болмады. Қайтадан көріңіз.')
+      } finally {
+        setBusy(false)
+      }
     }
   }
   return <section id="contact" className={`${styles.section} ${styles.contact}`}><div className={styles.contactCopy}><span className={styles.badgeDark}>БІРІНШІ ҚАДАМ</span><h2>Кеңес алуға өтінім қалдырыңыз</h2><p>Менеджеріміз сізбен хабарласып, оқу тәсілі, курс мазмұны мен филиал туралы сұрақтарыңызға жауап береді.</p><ul><li><Check /> Деңгейіңізге сай дайындық бағыты</li><li><Check /> Өзіңізге ыңғайлы оқу тәсілі</li><li><Check /> Алғашқы апта тегін</li></ul><a className={styles.whatsappButton} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp арқылы жазылу</a></div><form className={styles.form} onSubmit={submit} noValidate><label>Аты-жөніңіз<input name="name" placeholder="Аты-жөніңізді жазыңыз" />{errors.name && <small>{errors.name}</small>}</label><label>Телефон нөміріңіз<input name="phone" type="tel" placeholder="+7 (___) ___-__-__" />{errors.phone && <small>{errors.phone}</small>}</label><label>Қызықтырған курс<select name="course" defaultValue=""><option value="" disabled>Курсты таңдаңыз</option>{courses.map(course => <option key={course.title}>{course.title}</option>)}</select>{errors.course && <small>{errors.course}</small>}</label><label>Филиал<input value="Шымкент, Төле би, 32А" readOnly /></label><button className={styles.primaryButton}>Өтінім қалдыру <ArrowRight size={18} /></button>{sent && <p className={styles.success}><Check /> Өтініміңіз қабылданды! Менеджеріміз жақын арада хабарласады.</p>}</form></section>

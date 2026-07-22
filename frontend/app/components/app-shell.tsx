@@ -12,11 +12,11 @@ import {
   Search,
   Menu,
   LogOut,
+  ClipboardList,
   X,
   Home,
   Settings,
   BarChart3,
-  ChevronDown,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
@@ -64,6 +64,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
     nav.push({ href: '/teacher', label: 'myCourses', icon: <GraduationCap size={20} /> })
     nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
     nav.push({ href: '/admin', label: 'adminPanel', icon: <Users size={20} /> })
+    nav.push({ href: '/admin/leads', label: 'leadRequests', icon: <ClipboardList size={20} /> })
   }
 
   const roleLabel: TKey =
@@ -97,7 +98,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
       {/* Navigation */}
       <nav className="flex flex-1 flex-col gap-1 px-4 py-4" aria-label="Негізгі навигация">
         {nav.map((n) => {
-          const active = pathname === n.href || pathname.startsWith(n.href + '/')
+          const active = pathname === n.href || (n.href !== '/admin' && pathname.startsWith(n.href + '/'))
           return (
             <Link
               key={n.href}
@@ -192,10 +193,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
 
             {/* Right: Profile */}
             <div className="flex items-center justify-end">
-              <button
-                className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-primary-extra-light focus:outline-none focus:ring-2 focus:ring-primary/20"
-                aria-label="Профиль"
-              >
+              <div className="flex items-center gap-2.5 px-2.5 py-1.5">
                 {/* Avatar */}
                 <Avatar name={user.full_name} className="bg-primary-soft text-primary flex-shrink-0" size="sm" />
                 
@@ -205,12 +203,9 @@ function AuthedShell({ children }: { children: ReactNode }) {
                   <p className="truncate text-xs text-muted leading-tight">{t(roleLabel)}</p>
                 </div>
                 
-                {/* Chevron - Hidden on mobile */}
-                <ChevronDown className="hidden sm:block flex-shrink-0 text-muted" size={16} />
-                
                 {/* Avatar only - Visible on mobile */}
                 <div className="sm:hidden flex-shrink-0" />
-              </button>
+              </div>
             </div>
           </div>
         </header>

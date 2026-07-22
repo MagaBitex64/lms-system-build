@@ -25,6 +25,7 @@ const dictionaries = {
     profile: 'Профиль',
     users: 'Пайдаланушылар',
     adminPanel: 'Әкімші панелі',
+    leadRequests: 'Кеңес өтінімдері',
     adminPanelHint: 'Оқушыларды, мұғалімдерді және оқу топтарын басқарыңыз.',
     enrollmentRequests: 'Курсқа жазылу өтінімдері',
     statistics: 'Статистика',
@@ -228,7 +229,6 @@ const dictionaries = {
     resources: 'Ресурстар',
     noMaterials: 'Материал жоқ',
     open: 'Ашық',
-    statistics: 'Статистика',
     totalGroups: 'Барлық топтар',
     // Course deletion
     courseOptions: 'Параметрлер',
@@ -242,8 +242,6 @@ const dictionaries = {
     courseDeleteError: 'Курсты жою кезінде қате пайда болды',
     noPermission: 'Бұл курсты жоюға құқығыңыз жоқ',
     courseNotFound: 'Курс табылмады немесе бұрын жойылған',
-    serverError: 'Сервермен байланысу мүмкін болмады. Кейінірек қайталап көріңіз.',
-    cancel: 'Бас тарту',
     deleting: 'Жойылуда...',
   },
 } as const
