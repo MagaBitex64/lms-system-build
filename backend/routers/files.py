@@ -44,10 +44,18 @@ async def get_user_from_token(token: str | None):
         if user_id is None:
             return None
         pool = await get_pool()
-        user = await pool.fetchrow("SELECT * FROM users WHERE id = $1", int(user_id))
+        user = await pool.fetchrow(
+            """
+            SELECT id, email, full_name, role, is_blocked, created_at
+            FROM users
+            WHERE id = $1 AND NOT is_blocked
+            """,
+            int(user_id),
+        )
         return dict(user) if user else None
     except Exception:
         return None
+
 
 async def get_optional_user(request: Request) -> dict | None:
     if not request.headers.get("Authorization", "").startswith("Bearer "):
@@ -56,6 +64,51 @@ async def get_optional_user(request: Request) -> dict | None:
         return await get_current_user(request)
     except HTTPException:
         return None
+
+
+async def teacher_can_access_file(pool, file_id: int, teacher_id: int) -> bool:
+    """Allow teachers to read only files connected to courses they own."""
+    return bool(
+        await pool.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM lesson_materials lm
+                JOIN course_items ci ON ci.id = lm.lesson_id
+                JOIN courses c ON c.id = ci.course_id
+                WHERE lm.file_id = $1 AND c.teacher_id = $2
+
+                UNION ALL
+
+                SELECT 1
+                FROM quiz_questions qq
+                JOIN course_items ci ON ci.id = qq.quiz_id
+                JOIN courses c ON c.id = ci.course_id
+                WHERE qq.image_file_id = $1 AND c.teacher_id = $2
+
+                UNION ALL
+
+                SELECT 1
+                FROM question_options qo
+                JOIN quiz_questions qq ON qq.id = qo.question_id
+                JOIN course_items ci ON ci.id = qq.quiz_id
+                JOIN courses c ON c.id = ci.course_id
+                WHERE qo.image_file_id = $1 AND c.teacher_id = $2
+
+                UNION ALL
+
+                SELECT 1
+                FROM submission_files sf
+                JOIN homework_submissions hs ON hs.id = sf.submission_id
+                JOIN course_items ci ON ci.id = hs.homework_id
+                JOIN courses c ON c.id = ci.course_id
+                WHERE sf.file_id = $1 AND c.teacher_id = $2
+            )
+            """,
+            file_id,
+            teacher_id,
+        )
+    )
 
 
 @router.get("/{file_id}/download")
@@ -79,8 +132,13 @@ async def download_file(
 
     user_id = user["id"]
     user_role = user["role"]
-    
-    allowed = user_role in ("admin", "teacher") or f["owner_id"] == user_id
+
+    allowed = user_role == "admin" or f["owner_id"] == user_id
+    if not allowed and user_role == "teacher":
+        # Teachers may read student submissions and course assets only inside
+        # courses assigned to them. A teacher role alone grants no global access.
+        allowed = await teacher_can_access_file(pool, file_id, user_id)
+
     if not allowed and user_role == "student":
         # Student may download files attached as lesson materials / question images
         # in courses they are enrolled in, or files of their own submissions.
