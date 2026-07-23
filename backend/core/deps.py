@@ -13,11 +13,17 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     pool = await get_pool()
     user = await pool.fetchrow(
-        "SELECT id, email, full_name, role, is_blocked, created_at FROM users WHERE id = $1",
+        """
+        SELECT id, email, full_name, role, is_blocked, auth_version, created_at
+        FROM users
+        WHERE id = $1
+        """,
         int(payload["sub"]),
     )
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
+    if payload.get("ver") != user["auth_version"]:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
     if user["is_blocked"]:
         raise HTTPException(status_code=403, detail="Account is blocked")
     return dict(user)

@@ -17,11 +17,12 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token(user_id: int, role: str) -> str:
+def create_access_token(user_id: int, role: str, auth_version: int) -> str:
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {
         "sub": str(user_id),
         "role": role,
+        "ver": auth_version,
         "iat": now,
         "exp": now + datetime.timedelta(minutes=JWT_EXPIRES_MINUTES),
     }

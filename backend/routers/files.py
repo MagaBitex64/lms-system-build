@@ -46,13 +46,15 @@ async def get_user_from_token(token: str | None):
         pool = await get_pool()
         user = await pool.fetchrow(
             """
-            SELECT id, email, full_name, role, is_blocked, created_at
+            SELECT id, email, full_name, role, is_blocked, auth_version, created_at
             FROM users
             WHERE id = $1 AND NOT is_blocked
             """,
             int(user_id),
         )
-        return dict(user) if user else None
+        if user is None or payload.get("ver") != user["auth_version"]:
+            return None
+        return dict(user)
     except Exception:
         return None
 

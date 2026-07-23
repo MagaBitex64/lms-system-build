@@ -181,8 +181,9 @@ async def update_user(user_id: int, data: UserUpdateIn, user: dict = Depends(req
               password_hash = $2,
               full_name = $3,
               role = $4,
-              is_blocked = $5
-            WHERE id = $6
+              is_blocked = $5,
+              auth_version = auth_version + $6
+            WHERE id = $7
             RETURNING id, email, full_name, role, is_blocked, created_at
             """,
             data.email.lower() if data.email else existing["email"],
@@ -190,6 +191,7 @@ async def update_user(user_id: int, data: UserUpdateIn, user: dict = Depends(req
             data.full_name.strip() if data.full_name else existing["full_name"],
             data.role or existing["role"],
             existing["is_blocked"] if data.is_blocked is None else data.is_blocked,
+            1 if data.password else 0,
             user_id,
         )
     except Exception as exc:

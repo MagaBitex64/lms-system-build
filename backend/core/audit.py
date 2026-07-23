@@ -69,13 +69,15 @@ async def get_audit_actor(authorization: str) -> dict[str, Any] | None:
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        SELECT id, email, full_name, role
+        SELECT id, email, full_name, role, auth_version
         FROM users
         WHERE id = $1 AND role IN ('teacher', 'admin') AND NOT is_blocked
         """,
         int(payload["sub"]),
     )
-    return dict(row) if row else None
+    if row is None or payload.get("ver") != row["auth_version"]:
+        return None
+    return dict(row)
 
 
 def audit_entity_id(path_params: dict[str, Any]) -> str | None:

@@ -23,7 +23,7 @@ import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
 import { Spinner, Avatar, cx } from './ui'
 
-const PUBLIC_ROUTES = ['/', '/login']
+const PUBLIC_ROUTES = ['/', '/login', '/forgot-password', '/reset-password']
 
 type NavItem = { href: string; label: TKey; icon: ReactNode }
 

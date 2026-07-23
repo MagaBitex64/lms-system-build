@@ -2,11 +2,11 @@
 
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Mail, LockKeyhole, Eye, EyeOff } from 'lucide-react'
 import Image from 'next/image'
 import { useAuth } from '@/lib/auth'
 import { useI18n } from '@/lib/i18n'
-import { Button } from '@/components/ui'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -200,16 +200,12 @@ export default function LoginPage() {
                     {t('rememberMe')}
                   </span>
                 </label>
-                <a
-                  href="#"
+                <Link
+                  href="/forgot-password"
                   className="text-sm text-primary hover:text-primary-hover transition-colors font-medium"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    // Handle forgot password
-                  }}
                 >
                   {t('forgotPassword')}
-                </a>
+                </Link>
               </div>
 
               {/* Error message */}
