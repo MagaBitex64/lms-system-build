@@ -37,6 +37,26 @@ CREATE TABLE IF NOT EXISTS lead_requests (
 CREATE INDEX IF NOT EXISTS idx_lead_requests_status_created
     ON lead_requests(status, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id BIGSERIAL PRIMARY KEY,
+    actor_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    actor_name TEXT NOT NULL,
+    actor_email TEXT NOT NULL,
+    actor_role TEXT NOT NULL CHECK (actor_role IN ('teacher','admin')),
+    action TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT,
+    summary TEXT NOT NULL,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created
+    ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_created
+    ON audit_logs(actor_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created
+    ON audit_logs(action, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS files (
     id BIGSERIAL PRIMARY KEY,
     owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

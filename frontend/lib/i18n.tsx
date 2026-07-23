@@ -26,6 +26,7 @@ const dictionaries = {
     users: 'Пайдаланушылар',
     adminPanel: 'Әкімші панелі',
     leadRequests: 'Кеңес өтінімдері',
+    auditLog: 'Әрекеттер журналы',
     adminPanelHint: 'Оқушыларды, мұғалімдерді және оқу топтарын басқарыңыз.',
     enrollmentRequests: 'Курсқа жазылу өтінімдері',
     statistics: 'Статистика',

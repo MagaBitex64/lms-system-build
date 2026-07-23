@@ -13,6 +13,7 @@ import {
   Menu,
   LogOut,
   ClipboardList,
+  History,
   X,
   Home,
   Settings,
@@ -71,6 +72,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
     nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
     nav.push({ href: '/admin', label: 'adminPanel', icon: <Users size={20} /> })
     nav.push({ href: '/admin/leads', label: 'leadRequests', icon: <ClipboardList size={20} /> })
+    nav.push({ href: '/admin/audit-logs', label: 'auditLog', icon: <History size={20} /> })
   }
 
   const roleLabel: TKey =
