@@ -8,6 +8,46 @@
 @media(max-width:780px){.resultsGrid{grid-template-columns:1fr}}
 .whatsappButton{min-height:52px;padding:0 22px;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;gap:9px;background:#25d366;color:#073d22!important;font-size:13px;font-weight:850;border:1px solid rgba(255,255,255,.3);box-shadow:0 13px 28px rgba(37,211,102,.25);transition:transform .2s,background .2s,box-shadow .2s}.whatsappButton:hover{background:#3be076;transform:translateY(-2px);box-shadow:0 17px 34px rgba(37,211,102,.34)}.whatsappButton:focus-visible{outline:3px solid rgba(37,211,102,.35);outline-offset:3px}.whatsappButton svg{width:21px;height:21px;flex:0 0 auto}.heroWhatsapp{width:100%;max-width:256px;background:#25d366}.heroActions{max-width:560px}.heroActions .primaryButton,.heroActions .ghostButton{flex:1}.teacherSubject{font-weight:750!important;color:#005f7a!important}.teacherDescription{min-height:63px;margin-top:9px!important;font-size:11px!important;line-height:1.65!important}.branchMap{display:block;color:inherit;transition:transform .25s,box-shadow .25s}.branchMap:hover{transform:scale(.99);box-shadow:inset 0 0 0 2px rgba(0,95,122,.16)}.mapLabel{display:flex;align-items:center;gap:7px}.address{color:inherit;border-radius:14px;padding:10px;margin-left:-10px;transition:background .2s}.address:hover{background:#eaf4f6}.address>svg:last-child{margin-left:auto;width:16px}.branchActions .whatsappButton{flex:1}.contactCopy>.whatsappButton{margin-top:3px}.footerBrand>.footerWhatsapp{width:max-content;min-height:42px;margin-top:14px;padding:0 16px;font-size:11px;color:#073d22!important}.resultCard{transition:transform .25s,box-shadow .25s}.resultCard:hover{transform:translateY(-5px);box-shadow:0 22px 44px rgba(15,23,42,.1)}.resultText span{display:block;min-height:32px;line-height:1.45;color:#005f7a;font-weight:700}.primaryButton,.ghostButton,.outlineButton,.nav .navCta{transition:transform .2s,box-shadow .2s,background .2s}.primaryButton:hover,.ghostButton:hover,.outlineButton:hover,.nav .navCta:hover{transform:translateY(-2px)}
 @media(max-width:780px){.heroWhatsapp{max-width:none}.heroActions .primaryButton,.heroActions .ghostButton{flex:auto}.branchActions .whatsappButton{width:100%}.teacherDescription{min-height:0}.footerBrand>.footerWhatsapp{width:100%}}
+
+/* Keep the hero calls to action visually balanced at every width. */
+.heroActions{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  max-width:560px;
+}
+.heroActions .primaryButton,
+.heroActions .ghostButton,
+.heroActions .heroWhatsapp{
+  width:100%;
+  max-width:none;
+  min-height:54px;
+  padding:0 20px;
+  line-height:1.2;
+  white-space:nowrap;
+}
+.heroActions .heroWhatsapp{
+  grid-column:1/-1;
+}
+
+@media(max-width:780px){
+  .heroActions{
+    grid-template-columns:1fr;
+  }
+  .heroActions .heroWhatsapp{
+    grid-column:auto;
+  }
+}
+
+@media(max-width:390px){
+  .heroActions .primaryButton,
+  .heroActions .ghostButton,
+  .heroActions .heroWhatsapp{
+    padding-right:14px;
+    padding-left:14px;
+    font-size:13px;
+  }
+}
 .teachersSection{overflow:hidden}.teachersHeader{display:flex;justify-content:space-between;gap:40px;align-items:flex-end;margin-bottom:34px}.teachersHeader .sectionHead{margin-bottom:0}.subjectPills{max-width:400px;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:7px}.subjectPills span{padding:7px 10px;border-radius:999px;background:#fff;border:1px solid #dce8eb;color:#41606a;font-size:9px;font-weight:750}.teachersCarousel{max-width:1172px;overflow:hidden;margin:0 auto;padding:6px 0 18px}.teachersTrack{display:flex;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain;scrollbar-width:none;padding:3px}.teachersTrack::-webkit-scrollbar{display:none}.teacherCard{flex:0 0 calc((100% - 48px)/4);min-width:0;background:#fff;border:1px solid rgba(0,95,122,.12);border-radius:29px;overflow:hidden;scroll-snap-align:start;display:flex;flex-direction:column;box-shadow:0 10px 28px rgba(15,23,42,.055);transition:transform .25s,box-shadow .25s,border-color .25s}.teacherCard:hover{transform:translateY(-4px);border-color:rgba(0,95,122,.24);box-shadow:0 20px 40px rgba(15,23,42,.11)}.teacherPhoto{height:300px;margin:8px 8px 0;border-radius:22px;overflow:hidden;position:relative;background:#eaf1f2}.teacherPhoto:after{content:"";position:absolute;inset:55% 0 0;background:linear-gradient(180deg,transparent,rgba(3,40,52,.38));pointer-events:none}.teacherPhoto>.picture{width:100%;height:100%}.teacherPhoto>.picture img{object-fit:cover;object-position:center top}.teacherPhoto>span{position:absolute;z-index:1;left:14px;bottom:13px;padding:7px 11px;border-radius:999px;background:#facc15;color:#332a00;font-size:9px;font-weight:850;box-shadow:0 5px 16px rgba(0,0,0,.13)}.teacherBody{padding:21px 20px 22px;display:flex;flex-direction:column;flex:1}.teacherTitle{align-self:flex-start;margin-bottom:10px;padding:6px 9px;border-radius:8px;background:#e9f6f8;color:#005f7a;font-size:9px}.teacherBody h3{min-height:46px;margin:0;font-size:17px;line-height:1.32;letter-spacing:-.015em}.teacherExperience{min-height:36px;display:flex;align-items:flex-start;gap:6px;margin:11px 0 9px;color:#005f7a;font-size:10px;font-weight:750;line-height:1.45}.teacherExperience svg{flex:0 0 auto;margin-top:1px}.teacherBody .teacherDescription{min-height:66px;margin:0!important;color:#64748b;font-size:11px!important;line-height:1.55!important;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.teacherBody>a{display:inline-flex;align-items:center;gap:7px;color:#005f7a;font-size:11px;font-weight:850;margin-top:auto;padding-top:18px}.carouselControls{max-width:1172px;margin:10px auto 0;display:flex;align-items:center;justify-content:space-between}.carouselControls>span{color:#64748b;font-size:10px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}.carouselControls>div{display:flex;gap:9px}.carouselControls button{width:48px;height:48px;border:1px solid #cfdee2;border-radius:50%;background:#fff;color:#005f7a;display:grid;place-items:center;transition:background .2s,color .2s,transform .2s,opacity .2s;box-shadow:0 7px 18px rgba(15,23,42,.05)}.carouselControls button:not(:disabled):hover{background:#005f7a;color:#fff;transform:translateY(-2px)}.carouselControls button:disabled{opacity:.3;cursor:not-allowed}.carouselControls svg{width:19px}
 @media(max-width:1050px){.teachersHeader{align-items:flex-start}.subjectPills{max-width:300px}.teacherCard{flex-basis:calc((100% - 16px)/2)}.teacherPhoto{height:320px}.teacherBody h3{min-height:auto}.teacherBody .teacherDescription{min-height:52px}}
 @media(max-width:780px){.teachersHeader{display:block}.subjectPills{max-width:none;justify-content:flex-start;margin-top:22px}.teachersCarousel{overflow:visible}.teachersTrack{margin-right:-18px;padding-right:18px}.teacherCard{flex-basis:calc(100% - 38px)}.teacherPhoto{height:310px}.carouselControls{margin-top:5px}.carouselControls button{width:44px;height:44px}.teacherBody .teacherDescription{min-height:52px}}
