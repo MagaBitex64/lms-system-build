@@ -11,7 +11,8 @@ import { Badge, Button, Card, Input, PageHeader, Spinner, EmptyState } from '@/c
 
 type Result = {
   id: number
-  title: string
+  title?: string
+  label?: string
   description?: string
   course_title?: string
   course_id?: number
@@ -84,9 +85,10 @@ function SearchContent() {
               {group.items.length ? (
                 <div className="space-y-2">
                   {group.items.map((item) => {
+                    const itemTitle = item.title || item.label || t('noResults')
                     const inner = (
                       <Card interactive={!!(group.key === 'courses' || item.course_id)} className="py-3.5">
-                        <p className="font-medium text-foreground">{item.title}</p>
+                        <p className="font-medium text-foreground">{itemTitle}</p>
                         <p className="mt-0.5 truncate text-sm text-muted">
                           {item.teacher_name || item.course_title || item.description || ''}
                         </p>

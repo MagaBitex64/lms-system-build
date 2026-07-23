@@ -22,9 +22,9 @@ export function useAuth() {
 
   const user = error ? undefined : data
 
-  async function login(email: string, password: string) {
+  async function login(email: string, password: string, remember = false) {
     const res = await api<{ token: string; user: User }>('/auth/login', { body: { email, password } })
-    setToken(res.token)
+    setToken(res.token, remember)
     await mutate(res.user, { revalidate: false })
     return res.user
   }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import Image from 'next/image'
@@ -41,6 +41,12 @@ function AuthedShell({ children }: { children: ReactNode }) {
   const router = useRouter()
   const [menuOpen, setMenuOpen] = useState(false)
   const [q, setQ] = useState('')
+
+  function onSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const query = q.trim()
+    router.push(query ? `/search?q=${encodeURIComponent(query)}` : '/search')
+  }
 
   if (isLoading) return <Spinner className="mt-40" />
   if (!user) {
@@ -177,18 +183,29 @@ function AuthedShell({ children }: { children: ReactNode }) {
               </button>
 
               {/* Search */}
-              <div className="hidden sm:flex flex-1 max-w-md items-center">
+              <form
+                className="hidden sm:flex flex-1 max-w-md items-center"
+                onSubmit={onSearchSubmit}
+                role="search"
+              >
                 <div className="relative w-full">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" size={18} />
+                  <button
+                    type="submit"
+                    aria-label={t('search')}
+                    className="absolute left-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface hover:text-primary"
+                  >
+                    <Search size={18} />
+                  </button>
                   <input
-                    type="text"
+                    type="search"
+                    name="q"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
                     placeholder={t('searchPlaceholder')}
                     className="w-full h-10 pl-10 pr-4 rounded-lg border border-border bg-surface-muted text-foreground placeholder:text-muted/60 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                   />
                 </div>
-              </div>
+              </form>
             </div>
 
             {/* Right: Profile */}

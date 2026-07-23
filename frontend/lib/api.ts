@@ -5,13 +5,17 @@ const TOKEN_KEY = 'lms_token'
 
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null
-  return window.localStorage.getItem(TOKEN_KEY)
+  return window.sessionStorage.getItem(TOKEN_KEY) ?? window.localStorage.getItem(TOKEN_KEY)
 }
 
-export function setToken(token: string | null) {
+export function setToken(token: string | null, remember = false) {
   if (typeof window === 'undefined') return
-  if (token) window.localStorage.setItem(TOKEN_KEY, token)
-  else window.localStorage.removeItem(TOKEN_KEY)
+  window.sessionStorage.removeItem(TOKEN_KEY)
+  window.localStorage.removeItem(TOKEN_KEY)
+  if (token) {
+    const storage = remember ? window.localStorage : window.sessionStorage
+    storage.setItem(TOKEN_KEY, token)
+  }
 }
 
 export class ApiError extends Error {

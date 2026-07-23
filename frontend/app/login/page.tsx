@@ -42,7 +42,7 @@ export default function LoginPage() {
 
     setBusy(true)
     try {
-      await login(email, password)
+      await login(email, password, rememberMe)
       router.replace('/dashboard')
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : t('errorOccurred')
