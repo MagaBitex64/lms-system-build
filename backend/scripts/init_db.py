@@ -268,6 +268,66 @@ CREATE TABLE IF NOT EXISTS item_student_access (
     PRIMARY KEY (item_id, student_id)
 );
 CREATE INDEX IF NOT EXISTS idx_item_student_access_student ON item_student_access(student_id);
+
+CREATE TABLE IF NOT EXISTS ent_questions (
+    id BIGSERIAL PRIMARY KEY,
+    subject TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    explanation TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ent_questions_subject ON ent_questions(subject);
+
+CREATE TABLE IF NOT EXISTS ent_options (
+    id BIGSERIAL PRIMARY KEY,
+    question_id BIGINT NOT NULL REFERENCES ent_questions(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    is_correct BOOLEAN NOT NULL DEFAULT FALSE,
+    position INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_ent_options_question ON ent_options(question_id);
+
+CREATE TABLE IF NOT EXISTS ent_trial_accesses (
+    id BIGSERIAL PRIMARY KEY,
+    granted_by_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    combination TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK (target_type IN ('all','group','student')),
+    group_id BIGINT REFERENCES groups(id) ON DELETE CASCADE,
+    student_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ent_accesses_student ON ent_trial_accesses(student_id);
+CREATE INDEX IF NOT EXISTS idx_ent_accesses_group   ON ent_trial_accesses(group_id);
+
+CREATE TABLE IF NOT EXISTS ent_trial_attempts (
+    id BIGSERIAL PRIMARY KEY,
+    access_id BIGINT NOT NULL REFERENCES ent_trial_accesses(id) ON DELETE CASCADE,
+    student_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    combination TEXT NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    submitted_at TIMESTAMPTZ,
+    kaz_history_score NUMERIC(5,2) NOT NULL DEFAULT 0,
+    reading_score     NUMERIC(5,2) NOT NULL DEFAULT 0,
+    math_score        NUMERIC(5,2) NOT NULL DEFAULT 0,
+    subject1_score    NUMERIC(5,2) NOT NULL DEFAULT 0,
+    subject2_score    NUMERIC(5,2) NOT NULL DEFAULT 0,
+    total_score       NUMERIC(6,2) NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'in_progress'
+        CHECK (status IN ('in_progress','submitted')),
+    UNIQUE (access_id, student_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ent_attempts_student ON ent_trial_attempts(student_id);
+
+CREATE TABLE IF NOT EXISTS ent_trial_answers (
+    id BIGSERIAL PRIMARY KEY,
+    attempt_id  BIGINT NOT NULL REFERENCES ent_trial_attempts(id) ON DELETE CASCADE,
+    question_id BIGINT NOT NULL REFERENCES ent_questions(id) ON DELETE CASCADE,
+    selected_option_id BIGINT REFERENCES ent_options(id) ON DELETE SET NULL,
+    is_correct BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_ent_answers_attempt ON ent_trial_answers(attempt_id);
 """
 
 MIGRATIONS = [

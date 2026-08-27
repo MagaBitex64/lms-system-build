@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from 'react'
 import useSWR from 'swr'
-import { BookOpen, Check, GraduationCap, Pencil, PlusCircle, Search, Trash2, UserMinus, Users, UserPlus, X } from 'lucide-react'
+import { BookOpen, Check, GraduationCap, Pencil, PlusCircle, Search, Trash2, UserMinus, Users, UserPlus, X, ClipboardList } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { api, fetcher } from '@/lib/api'
 import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Field, Input, PageHeader, Select, Spinner } from '../components/ui'
@@ -44,7 +44,7 @@ type TeacherDetail = User & {
   }>
 }
 
-type Tab = 'students' | 'teachers' | 'groups'
+type Tab = 'students' | 'teachers' | 'groups' | 'ent'
 
 export default function AdminDashboard() {
   const { t } = useI18n()
@@ -59,6 +59,7 @@ export default function AdminDashboard() {
           ['students', t('students'), <Users key="students" size={16} />],
           ['teachers', t('teachers'), <GraduationCap key="teachers" size={16} />],
           ['groups', t('groups'), <BookOpen key="groups" size={16} />],
+          ['ent', t('entTrial'), <ClipboardList key="ent" size={16} />],
         ] as const).map(([key, label, icon]) => (
           <button
             key={key}
@@ -76,6 +77,7 @@ export default function AdminDashboard() {
       {tab === 'students' && <StudentsTab />}
       {tab === 'teachers' && <TeachersTab />}
       {tab === 'groups' && <GroupsTab />}
+      {tab === 'ent' && <EntTrialTab />}
     </div>
   )
 }
@@ -647,3 +649,241 @@ function Metric({ label, value }: { label: string; value: string | number }) {
     </div>
   )
 }
+
+function EntTrialTab() {
+  const { t } = useI18n()
+  const [subject, setSubject] = useState('kaz_history')
+  const [combo, setCombo] = useState('infmat')
+  const [targetType, setTargetType] = useState<'all'|'group'|'student'>('all')
+  const [targetId, setTargetId] = useState<string>('')
+  const [expiresAt, setExpiresAt] = useState<string>('')
+  const [studentQuery, setStudentQuery] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  
+  const subjectsReq = useSWR<{ [key: string]: number }>('/ent-trial/admin/subjects', fetcher)
+  const questionsReq = useSWR<{ items: any[] }>(`/ent-trial/admin/questions?subject=${subject}&per_page=100`, fetcher)
+  const accessesReq = useSWR<{ items: any[] }>('/ent-trial/admin/accesses', fetcher)
+  const groupsReq = useSWR<{ items: Group[] }>('/admin/groups?per_page=100', fetcher)
+  const searchReq = useSWR<{ items: User[] }>(
+    targetType === 'student' && studentQuery.trim() ? `/admin/users?role=student&q=${encodeURIComponent(studentQuery)}` : null,
+    fetcher
+  )
+
+  const ENT_SUBJECTS = [
+    { id: 'kaz_history', label: t('subjectKazHistory') },
+    { id: 'reading', label: t('subjectReading') },
+    { id: 'math_literacy', label: t('subjectMathLiteracy') },
+    { id: 'informatics', label: t('subjectInformatics') },
+    { id: 'mathematics', label: t('subjectMathematics') },
+    { id: 'physics', label: t('subjectPhysics') },
+    { id: 'chemistry', label: t('subjectChemistry') },
+    { id: 'biology', label: t('subjectBiology') },
+    { id: 'geography', label: t('subjectGeography') },
+  ]
+
+  const ENT_COMBOS = [
+    { id: 'infmat', label: t('comboInfomat') },
+    { id: 'phymat', label: t('comboPhymat') },
+    { id: 'biochem', label: t('comboBiochem') },
+    { id: 'chemphi', label: t('comboChemphi') },
+    { id: 'matgeo', label: t('comboMatgeo') },
+  ]
+
+  async function addQuestion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    setError(null)
+    
+    const prompt = String(form.get('prompt') || '')
+    const explanation = String(form.get('explanation') || '')
+    const correctIdx = Number(form.get('correct_idx'))
+    
+    const options = [
+      { text: String(form.get('opt0') || ''), is_correct: correctIdx === 0 },
+      { text: String(form.get('opt1') || ''), is_correct: correctIdx === 1 },
+      { text: String(form.get('opt2') || ''), is_correct: correctIdx === 2 },
+      { text: String(form.get('opt3') || ''), is_correct: correctIdx === 3 },
+    ]
+    
+    try {
+      await api('/ent-trial/admin/questions', {
+        body: { subject, prompt, explanation, options },
+      })
+      event.currentTarget.reset()
+      await questionsReq.mutate()
+      await subjectsReq.mutate()
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  async function deleteQuestion(id: number) {
+    if (!window.confirm(t('confirmDelete'))) return
+    await api(`/ent-trial/admin/questions/${id}`, { method: 'DELETE' })
+    await questionsReq.mutate()
+    await subjectsReq.mutate()
+  }
+
+  async function grantAccess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+    try {
+      await api('/ent-trial/admin/accesses', {
+        body: {
+          combination: combo,
+          target_type: targetType,
+          group_id: targetType === 'group' ? Number(targetId) : undefined,
+          student_id: targetType === 'student' ? Number(targetId) : undefined,
+          expires_at: expiresAt ? new Date(expiresAt).toISOString() : undefined,
+        }
+      })
+      await accessesReq.mutate()
+      setTargetId('')
+      setStudentQuery('')
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  async function revokeAccess(id: number) {
+    if (!window.confirm(t('confirmDelete'))) return
+    await api(`/ent-trial/admin/accesses/${id}`, { method: 'DELETE' })
+    await accessesReq.mutate()
+  }
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+      {/* Question Bank */}
+      <Card className="space-y-4">
+        <h2 className="text-base font-semibold">{t('entQuestionBank')}</h2>
+        
+        <Select value={subject} onChange={(e) => setSubject(e.target.value)}>
+          {ENT_SUBJECTS.map(s => (
+            <option key={s.id} value={s.id}>
+              {s.label} ({subjectsReq.data?.[s.id] || 0} {t('questionsCount')})
+            </option>
+          ))}
+        </Select>
+
+        <form onSubmit={addQuestion} className="space-y-3 rounded-lg border border-border bg-surface-muted p-4">
+          <Field label={t('question')}><Input name="prompt" required /></Field>
+          <div className="space-y-2">
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className="flex items-center gap-2">
+                <input type="radio" name="correct_idx" value={i} required className="h-4 w-4 shrink-0 text-primary" defaultChecked={i === 0} />
+                <Input name={`opt${i}`} placeholder={`${t('option')} ${i + 1}`} required />
+              </div>
+            ))}
+          </div>
+          <Field label={t('explanation')}><Input name="explanation" /></Field>
+          {error && <ErrorState message={error} />}
+          <Button type="submit"><PlusCircle size={16} />{t('addQuestion')}</Button>
+        </form>
+
+        <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2">
+          {questionsReq.isLoading ? <Spinner /> : questionsReq.data?.items?.map(q => (
+            <div key={q.id} className="rounded-lg border border-border p-3 text-sm relative">
+              <button onClick={() => deleteQuestion(q.id)} className="absolute right-2 top-2 text-muted hover:text-danger"><Trash2 size={16} /></button>
+              <p className="font-medium pr-6">{q.prompt}</p>
+              <ul className="mt-2 space-y-1">
+                {q.options.map((o: any) => (
+                  <li key={o.id} className={o.is_correct ? 'font-semibold text-success' : 'text-muted'}>
+                    • {o.text}
+                  </li>
+                ))}
+              </ul>
+              {q.explanation && <p className="mt-2 text-xs italic text-muted">{q.explanation}</p>}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Accesses */}
+      <Card className="space-y-4">
+        <h2 className="text-base font-semibold">{t('entAccesses')}</h2>
+        
+        <form onSubmit={grantAccess} className="space-y-3 rounded-lg border border-border bg-surface-muted p-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t('combination')}>
+              <Select value={combo} onChange={(e) => setCombo(e.target.value)}>
+                {ENT_COMBOS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </Select>
+            </Field>
+            <Field label={t('targetType')}>
+              <Select value={targetType} onChange={(e) => { setTargetType(e.target.value as any); setTargetId(''); setStudentQuery(''); }}>
+                <option value="all">{t('allStudents')}</option>
+                <option value="group">{t('specificGroup')}</option>
+                <option value="student">{t('specificStudent')}</option>
+              </Select>
+            </Field>
+          </div>
+
+          {targetType === 'group' && (
+            <Field label={t('groups')}>
+              <Select value={targetId} onChange={(e) => setTargetId(e.target.value)} required>
+                <option value="">{t('selectGroup')}</option>
+                {groupsReq.data?.items?.map((g: any) => (
+                  <option key={g.id} value={g.id}>{g.code} - {g.title}</option>
+                ))}
+              </Select>
+            </Field>
+          )}
+
+          {targetType === 'student' && (
+            <div className="space-y-2">
+              <Field label={t('students')}>
+                <div className="relative">
+                  <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                  <Input className="pl-9" value={studentQuery} onChange={(e) => setStudentQuery(e.target.value)} placeholder={t('searchByName')} />
+                </div>
+              </Field>
+              {studentQuery.trim() && (
+                <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
+                  {searchReq.data?.items?.map(student => (
+                    <button
+                      key={student.id}
+                      type="button"
+                      onClick={() => { setTargetId(String(student.id)); setStudentQuery(student.full_name); }}
+                      className={`flex w-full items-center justify-between gap-3 border-b border-border px-3 py-2 text-left last:border-b-0 hover:bg-surface-muted ${targetId === String(student.id) ? 'bg-primary-soft' : ''}`}
+                    >
+                      <span className="text-sm font-medium">{student.full_name} ({student.email})</span>
+                      {targetId === String(student.id) && <Check size={16} className="text-primary" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <Field label={t('expiresAt')} hint={t('noExpiry')}>
+            <Input type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+          </Field>
+          
+          <Button type="submit" disabled={targetType !== 'all' && !targetId}><Check size={16} />{t('grantAccess')}</Button>
+        </form>
+
+        <div className="space-y-2">
+          {accessesReq.isLoading ? <Spinner /> : accessesReq.data?.items?.map(a => (
+            <div key={a.id} className="rounded-lg border border-border p-3 flex justify-between items-center text-sm">
+              <div>
+                <p className="font-semibold">{ENT_COMBOS.find(c => c.id === a.combination)?.label}</p>
+                <p className="text-muted">
+                  {t('targetType')}: {
+                    a.target_type === 'all' ? t('allStudents') :
+                    a.target_type === 'group' ? a.group_code :
+                    a.student_name
+                  }
+                </p>
+                {a.expires_at && <p className="text-xs text-muted mt-1">{t('expiresAt')}: {new Date(a.expires_at).toLocaleString()}</p>}
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="danger" onClick={() => revokeAccess(a.id)}>{t('revokeAccess')}</Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  )
+}
+

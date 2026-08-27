@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.audit import IMPORTANT_ACTIONS, audit_entity_id, get_audit_actor, record_audit_log
-from routers import admin, audit, auth, courses, enrollments, files, grades, homework, leads, quizzes, search
+from routers import admin, audit, auth, courses, enrollments, ent_trial, files, grades, homework, leads, quizzes, search
 
 app = FastAPI(title="Phenomenon School LMS API", version="1.0.0")
 logger = logging.getLogger(__name__)
@@ -66,6 +66,7 @@ app.include_router(admin.router)
 app.include_router(leads.router)
 app.include_router(leads.admin_router)
 app.include_router(search.router)
+app.include_router(ent_trial.router)
 app.include_router(audit.router)
 
 

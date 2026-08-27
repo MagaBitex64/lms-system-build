@@ -60,6 +60,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
   
   if (user.role === 'student') {
     nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
+    nav.push({ href: '/ent-trial', label: 'entTrial', icon: <ClipboardList size={20} /> })
   }
   
   if (user.role === 'teacher') {
