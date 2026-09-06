@@ -83,7 +83,7 @@ export default function EntTrialListPage() {
 
   async function handleStart(accessId: number) {
     try {
-      const res = await api(`/ent-trial/accesses/${accessId}/start`, { method: 'POST' })
+      const res = await api<{ attempt_id?: number }>(`/ent-trial/accesses/${accessId}/start`, { method: 'POST' })
       if (res.attempt_id) router.push(`/ent-trial/${res.attempt_id}`)
     } catch (err: any) {
       alert(err.message)
@@ -122,6 +122,7 @@ export default function EntTrialListPage() {
 
   async function handleGrantAccess(e: FormEvent) {
     e.preventDefault()
+    if (!accessVarId) return alert('Вариантты таңдаңыз')
     try {
       await api('/ent-trial/admin/accesses', {
         method: 'POST',
@@ -165,8 +166,8 @@ export default function EntTrialListPage() {
         <div className="flex flex-wrap gap-2 border-b border-border pb-1">
           {([
             ['variants', 'Варианттар', <Layers key="v" size={16} />],
-            ['edit_variant', 'Сұрақтарды басқару', <Edit key="e" size={16} />],
             ['grant_access', 'Рұқсаттар', <Users key="a" size={16} />],
+            ['edit_variant', 'Редактировать вариант', <Edit key="e" size={16} />],
           ] as const).map(([key, label, icon]) => (
             <button
               key={key}
@@ -249,7 +250,7 @@ export default function EntTrialListPage() {
           </div>
         )}
 
-        {/* TAB 2: Edit Variant Questions */}
+        {/* TAB 3: Edit Variant Questions */}
         {adminTab === 'edit_variant' && (
           <VariantEditor
             variantId={editingVariantId}
@@ -258,7 +259,7 @@ export default function EntTrialListPage() {
           />
         )}
 
-        {/* TAB 3: Grant Access */}
+        {/* TAB 2: Grant Access */}
         {adminTab === 'grant_access' && (
           <div className="grid gap-6 lg:grid-cols-[400px_1fr]">
             <Card className="p-6 space-y-4 h-fit">
@@ -266,7 +267,7 @@ export default function EntTrialListPage() {
               <form onSubmit={handleGrantAccess} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Вариантты таңдаңыз</label>
-                  <select value={accessVarId} onChange={(e) => {
+                  <select required value={accessVarId} onChange={(e) => {
                     const id = e.target.value ? Number(e.target.value) : ''
                     setAccessVarId(id)
                     const found = variants.find(v => v.id === id)
@@ -274,7 +275,9 @@ export default function EntTrialListPage() {
                   }} className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground">
                     <option value="">Таңдаңыз...</option>
                     {variants.map((v) => (
-                      <option key={v.id} value={v.id}>{v.title} ({v.question_count} сұрақ)</option>
+                      <option key={v.id} value={v.id}>
+                        {v.title} — {COMBO_LABELS[v.combination] || v.combination} ({v.question_count} сұрақ)
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -311,7 +314,7 @@ export default function EntTrialListPage() {
                   </div>
                 )}
 
-                <Button type="submit" variant="primary" className="w-full py-2.5">
+                <Button type="submit" variant="primary" className="w-full py-2.5" disabled={!accessVarId}>
                   <CheckCircle size={16} /> Рұқсат Беру
                 </Button>
               </form>
@@ -515,10 +518,12 @@ function VariantEditor({ variantId, variants, onSelectVariant }: {
         <h2 className="text-lg font-bold">Вариантты таңдаңыз</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {variants.map(v => (
-            <Card key={v.id} className="p-4 cursor-pointer hover:border-primary transition-colors" onClick={() => onSelectVariant(v.id)}>
-              <h3 className="font-bold">{v.title}</h3>
-              <p className="text-xs text-muted">{v.question_count} сұрақ • {COMBO_LABELS[v.combination]}</p>
-            </Card>
+            <button key={v.id} type="button" className="text-left" onClick={() => onSelectVariant(v.id)}>
+              <Card interactive className="h-full p-4">
+                <h3 className="font-bold">{v.title}</h3>
+                <p className="text-xs text-muted">{v.question_count} сұрақ • {COMBO_LABELS[v.combination]}</p>
+              </Card>
+            </button>
           ))}
         </div>
         {variants.length === 0 && <EmptyState icon={<Layers size={36} />} title="Алдымен вариант жасаңыз" />}

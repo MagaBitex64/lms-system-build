@@ -20,6 +20,15 @@ import asyncpg
 from core.config import DATABASE_URL
 
 
+COMBINATIONS = {
+    "infmat": ["informatics", "mathematics"],
+    "phymat": ["physics", "mathematics"],
+    "biochem": ["biology", "chemistry"],
+    "chemphi": ["chemistry", "physics"],
+    "matgeo": ["mathematics", "geography"],
+}
+
+
 def make_single(subject, prompt, options, correct_idx=0, explanation=""):
     """Create a single_choice question dict."""
     opts = []

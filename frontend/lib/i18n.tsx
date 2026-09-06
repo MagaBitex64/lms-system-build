@@ -259,7 +259,6 @@ const dictionaries = {
     expiresAt: 'Мерзімі',
     noExpiry: 'Мерзімсіз',
     questionsCount: 'сұрақ',
-    addQuestion: 'Сұрақ қосу',
     entResults: 'ЕНТ нәтижелері',
     comboInfomat: 'Информатика-Математика',
     comboPhymat: 'Физика-Математика',
