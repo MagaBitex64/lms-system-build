@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
 
 from core.db import get_pool
-from core.deps import require_admin
+from core.deps import require_admin, require_teacher
 from core.security import hash_password
 from routers.grades import compute_student_course_grade
 
@@ -256,7 +256,7 @@ async def list_groups(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=100),
     q: str = Query("", max_length=200),
-    user: dict = Depends(require_admin),
+    user: dict = Depends(require_teacher),
 ):
     pool = await get_pool()
     offset = (page - 1) * per_page

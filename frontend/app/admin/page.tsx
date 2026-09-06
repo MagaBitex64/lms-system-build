@@ -44,7 +44,7 @@ type TeacherDetail = User & {
   }>
 }
 
-type Tab = 'students' | 'teachers' | 'groups' | 'ent'
+type Tab = 'students' | 'teachers' | 'groups'
 
 export default function AdminDashboard() {
   const { t } = useI18n()
@@ -59,7 +59,6 @@ export default function AdminDashboard() {
           ['students', t('students'), <Users key="students" size={16} />],
           ['teachers', t('teachers'), <GraduationCap key="teachers" size={16} />],
           ['groups', t('groups'), <BookOpen key="groups" size={16} />],
-          ['ent', t('entTrial'), <ClipboardList key="ent" size={16} />],
         ] as const).map(([key, label, icon]) => (
           <button
             key={key}
@@ -77,7 +76,6 @@ export default function AdminDashboard() {
       {tab === 'students' && <StudentsTab />}
       {tab === 'teachers' && <TeachersTab />}
       {tab === 'groups' && <GroupsTab />}
-      {tab === 'ent' && <EntTrialTab />}
     </div>
   )
 }

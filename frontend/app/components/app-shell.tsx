@@ -71,6 +71,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
   if (user.role === 'admin') {
     nav.push({ href: '/teacher', label: 'myCourses', icon: <GraduationCap size={20} /> })
     nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
+    nav.push({ href: '/ent-trial', label: 'entTrial', icon: <ClipboardList size={20} /> })
     nav.push({ href: '/admin', label: 'adminPanel', icon: <Users size={20} /> })
     nav.push({ href: '/admin/leads', label: 'leadRequests', icon: <ClipboardList size={20} /> })
     nav.push({ href: '/admin/audit-logs', label: 'auditLog', icon: <History size={20} /> })

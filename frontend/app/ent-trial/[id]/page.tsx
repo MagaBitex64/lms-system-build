@@ -5,14 +5,12 @@ import { useParams, useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import { fetcher, api } from '@/lib/api'
 import { Button, Spinner, ErrorState, cx } from '@/components/ui'
-import { Check, ChevronRight, Clock, HelpCircle } from 'lucide-react'
+import { Check, Clock, FileText, Image as ImageIcon, HelpCircle } from 'lucide-react'
 
-// Backend structure:
-// attempts/{id} returns: { questions: { subjectName: [ {question_id, prompt, options: [...], selected_option_id} ] } }
 export default function EntTestPage() {
   const { id } = useParams()
   const router = useRouter()
-  const { data, error, isLoading, mutate } = useSWR<any>(`/ent-trial/attempts/${id}`, fetcher, { revalidateOnFocus: false })
+  const { data, error, isLoading } = useSWR<any>(`/ent-trial/attempts/${id}`, fetcher, { revalidateOnFocus: false })
   
   const [activeSubject, setActiveSubject] = useState<string | null>(null)
   const [answers, setAnswers] = useState<Record<number, number>>({})
@@ -21,11 +19,9 @@ export default function EntTestPage() {
   useEffect(() => {
     if (data?.questions && !activeSubject) {
       const keys = Object.keys(data.questions)
-      // prioritize kaz_history
       if (keys.includes('kaz_history')) setActiveSubject('kaz_history')
       else if (keys.length > 0) setActiveSubject(keys[0])
       
-      // Load initial answers
       const initial: Record<number, number> = {}
       for (const subj of keys) {
         for (const q of data.questions[subj]) {
@@ -101,7 +97,7 @@ export default function EntTestPage() {
       <div className="flex items-center justify-between border-b border-border bg-surface px-6 py-4 shadow-sm">
         <div>
           <h1 className="text-xl font-bold">ЕНТ Сынақ тесті</h1>
-          <p className="text-sm text-muted">{data.combination} бейіні</p>
+          <p className="text-sm text-muted">{data.combination} бейіндік комбинациясы</p>
         </div>
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2 rounded-lg bg-surface-muted px-4 py-2 text-lg font-mono font-semibold text-foreground">
@@ -140,11 +136,10 @@ export default function EntTestPage() {
                 )}>
                   {answered} / {total} сұрақ
                 </span>
-                {/* Progress bar mini */}
                 <div className="h-1 w-full bg-black/10 rounded-full mt-1 overflow-hidden">
                   <div 
                     className={cx("h-full rounded-full transition-all", activeSubject === subj ? "bg-white" : "bg-primary")} 
-                    style={{ width: `${(answered/total)*100}%` }}
+                    style={{ width: `${total ? (answered/total)*100 : 0}%` }}
                   />
                 </div>
               </button>
@@ -158,15 +153,52 @@ export default function EntTestPage() {
             <h2 className="text-2xl font-bold border-b border-border pb-4">{subjectNames[activeSubject || '']}</h2>
             
             {currentQuestions.map((q: any, i: number) => (
-              <div key={q.question_id} className="bg-surface rounded-2xl border border-border p-6 shadow-sm">
-                <div className="flex gap-4 mb-4">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary font-bold">
-                    {i + 1}
+              <div key={q.question_id} className="bg-surface rounded-2xl border border-border p-6 shadow-sm space-y-4">
+                {/* Header tag */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary font-bold">
+                      {i + 1}
+                    </span>
+                    {q.question_type === 'context' && (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                        <FileText size={14} /> Мәтінге негізделген контекст
+                      </span>
+                    )}
+                    {q.question_type === 'image' && (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                        <ImageIcon size={14} /> Суретті сұрақ
+                      </span>
+                    )}
                   </div>
-                  <p className="text-lg font-medium whitespace-pre-wrap mt-0.5">{q.prompt}</p>
                 </div>
+
+                {/* Context Reading Passage */}
+                {q.context_text && (
+                  <div className="p-4 rounded-xl bg-surface-muted border border-border text-foreground/90 italic leading-relaxed text-sm">
+                    <p className="font-semibold not-italic text-xs text-muted uppercase tracking-wider mb-1 flex items-center gap-1">
+                      <FileText size={14} /> Контекст / Мәтін:
+                    </p>
+                    {q.context_text}
+                  </div>
+                )}
+
+                {/* Question Image */}
+                {q.image_url && (
+                  <div className="overflow-hidden rounded-xl border border-border bg-black/5 max-h-80 flex items-center justify-center">
+                    <img 
+                      src={q.image_url} 
+                      alt="Question diagram" 
+                      className="max-h-80 object-contain w-full"
+                    />
+                  </div>
+                )}
+
+                {/* Question Prompt */}
+                <p className="text-lg font-medium whitespace-pre-wrap leading-snug">{q.prompt}</p>
                 
-                <div className="space-y-2 pl-12">
+                {/* Options */}
+                <div className="space-y-2 pt-2">
                   {q.options.map((opt: any) => {
                     const isSelected = answers[q.question_id] === opt.id
                     return (

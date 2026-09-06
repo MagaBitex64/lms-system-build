@@ -269,15 +269,30 @@ CREATE TABLE IF NOT EXISTS item_student_access (
 );
 CREATE INDEX IF NOT EXISTS idx_item_student_access_student ON item_student_access(student_id);
 
+CREATE TABLE IF NOT EXISTS ent_variants (
+    id BIGSERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    combination TEXT NOT NULL DEFAULT 'infmat',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS ent_questions (
     id BIGSERIAL PRIMARY KEY,
+    variant_id BIGINT REFERENCES ent_variants(id) ON DELETE CASCADE,
     subject TEXT NOT NULL,
     prompt TEXT NOT NULL,
+    question_type TEXT NOT NULL DEFAULT 'single_choice'
+        CHECK (question_type IN ('single_choice', 'context', 'matching', 'multi_choice')),
+    context_text TEXT NOT NULL DEFAULT '',
+    image_url TEXT NOT NULL DEFAULT '',
     explanation TEXT NOT NULL DEFAULT '',
+    max_points INTEGER NOT NULL DEFAULT 1,
     position INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ent_questions_subject ON ent_questions(subject);
+CREATE INDEX IF NOT EXISTS idx_ent_questions_variant ON ent_questions(variant_id);
 
 CREATE TABLE IF NOT EXISTS ent_options (
     id BIGSERIAL PRIMARY KEY,
@@ -288,9 +303,19 @@ CREATE TABLE IF NOT EXISTS ent_options (
 );
 CREATE INDEX IF NOT EXISTS idx_ent_options_question ON ent_options(question_id);
 
+CREATE TABLE IF NOT EXISTS ent_matching_pairs (
+    id BIGSERIAL PRIMARY KEY,
+    question_id BIGINT NOT NULL REFERENCES ent_questions(id) ON DELETE CASCADE,
+    left_text TEXT NOT NULL,
+    right_text TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_ent_matching_question ON ent_matching_pairs(question_id);
+
 CREATE TABLE IF NOT EXISTS ent_trial_accesses (
     id BIGSERIAL PRIMARY KEY,
     granted_by_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    variant_id BIGINT REFERENCES ent_variants(id) ON DELETE CASCADE,
     combination TEXT NOT NULL,
     target_type TEXT NOT NULL CHECK (target_type IN ('all','group','student')),
     group_id BIGINT REFERENCES groups(id) ON DELETE CASCADE,
@@ -305,6 +330,7 @@ CREATE TABLE IF NOT EXISTS ent_trial_attempts (
     id BIGSERIAL PRIMARY KEY,
     access_id BIGINT NOT NULL REFERENCES ent_trial_accesses(id) ON DELETE CASCADE,
     student_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    variant_id BIGINT REFERENCES ent_variants(id) ON DELETE CASCADE,
     combination TEXT NOT NULL,
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     submitted_at TIMESTAMPTZ,
@@ -325,12 +351,29 @@ CREATE TABLE IF NOT EXISTS ent_trial_answers (
     attempt_id  BIGINT NOT NULL REFERENCES ent_trial_attempts(id) ON DELETE CASCADE,
     question_id BIGINT NOT NULL REFERENCES ent_questions(id) ON DELETE CASCADE,
     selected_option_id BIGINT REFERENCES ent_options(id) ON DELETE SET NULL,
+    selected_option_ids BIGINT[] NOT NULL DEFAULT '{}',
+    matching_answer JSONB NOT NULL DEFAULT '{}'::jsonb,
+    points_earned NUMERIC(4,2) NOT NULL DEFAULT 0,
     is_correct BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE INDEX IF NOT EXISTS idx_ent_answers_attempt ON ent_trial_answers(attempt_id);
 """
 
 MIGRATIONS = [
+    "CREATE TABLE IF NOT EXISTS ent_variants (id BIGSERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', combination TEXT NOT NULL DEFAULT 'infmat', created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS variant_id BIGINT REFERENCES ent_variants(id) ON DELETE CASCADE",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS question_type TEXT NOT NULL DEFAULT 'single_choice'",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS context_text TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS max_points INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS variant_id BIGINT REFERENCES ent_variants(id) ON DELETE CASCADE",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS variant_id BIGINT REFERENCES ent_variants(id) ON DELETE CASCADE",
+    "CREATE TABLE IF NOT EXISTS ent_matching_pairs (id BIGSERIAL PRIMARY KEY, question_id BIGINT NOT NULL REFERENCES ent_questions(id) ON DELETE CASCADE, left_text TEXT NOT NULL, right_text TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0)",
+    "CREATE INDEX IF NOT EXISTS idx_ent_matching_question ON ent_matching_pairs(question_id)",
+    "ALTER TABLE ent_trial_answers ADD COLUMN IF NOT EXISTS selected_option_ids BIGINT[] NOT NULL DEFAULT '{}'",
+    "ALTER TABLE ent_trial_answers ADD COLUMN IF NOT EXISTS matching_answer JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE ent_trial_answers ADD COLUMN IF NOT EXISTS points_earned NUMERIC(4,2) NOT NULL DEFAULT 0",
+    "UPDATE ent_questions SET question_type = 'single_choice' WHERE question_type = 'quiz'",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_version INTEGER NOT NULL DEFAULT 0",
     "UPDATE users SET role = 'student' WHERE role = 'guest'",
     "ALTER TABLE users ALTER COLUMN role SET DEFAULT 'student'",
@@ -409,9 +452,17 @@ MIGRATIONS = [
 async def main() -> None:
     conn = await asyncpg.connect(dsn=DATABASE_URL)
     try:
+        for migration in MIGRATIONS:
+            try:
+                await conn.execute(migration)
+            except Exception as e:
+                pass
         await conn.execute(SCHEMA)
         for migration in MIGRATIONS:
-            await conn.execute(migration)
+            try:
+                await conn.execute(migration)
+            except Exception as e:
+                pass
         print("Schema initialized successfully.")
     finally:
         await conn.close()
