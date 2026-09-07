@@ -1,4 +1,4 @@
-"""Seed 2 full ENT trial variants with real ENT structure.
+"""Archived examples from the legacy ENT format (not valid examination variants).
 
 Each variant: 120 questions, 140 max points
 - kaz_history: 20 single_choice (20 pts)
@@ -7,7 +7,7 @@ Each variant: 120 questions, 140 max points
 - profile1: 25 single + 5 context + 5 matching + 5 multi = 40 questions (50 pts)
 - profile2: 25 single + 5 context + 5 matching + 5 multi = 40 questions (50 pts)
 
-Run: python -m scripts.seed_ent
+Database writes are disabled; use the structured editor at /ent-trial.
 """
 
 import asyncio
@@ -371,80 +371,11 @@ VARIANTS = [
 
 
 async def main():
-    conn = await asyncpg.connect(dsn=DATABASE_URL)
-    try:
-        # Clean old data
-        await conn.execute("DELETE FROM ent_trial_answers")
-        await conn.execute("DELETE FROM ent_trial_attempts")
-        await conn.execute("DELETE FROM ent_trial_accesses")
-        await conn.execute("DELETE FROM ent_matching_pairs")
-        await conn.execute("DELETE FROM ent_options")
-        await conn.execute("DELETE FROM ent_questions")
-        await conn.execute("DELETE FROM ent_variants")
-        
-        for vi, var_data in enumerate(VARIANTS):
-            variant_id = await conn.fetchval(
-                "INSERT INTO ent_variants (title, description, combination) VALUES ($1, $2, $3) RETURNING id",
-                var_data["title"], var_data["description"], var_data["combination"]
-            )
-            print(f"Created variant: {var_data['title']} (id={variant_id})")
-            
-            combo = var_data["combination"]
-            subj1, subj2 = COMBINATIONS[combo]
-            
-            # Build all questions
-            all_questions = []
-            all_questions.extend(variant1_kaz_history())
-            all_questions.extend(variant1_reading())
-            all_questions.extend(variant1_math_literacy())
-            all_questions.extend(make_profile_questions(subj1, vi + 1))
-            all_questions.extend(make_profile_questions(subj2, vi + 1))
-            
-            pos_counters = {}
-            for q in all_questions:
-                subj = q["subject"]
-                pos = pos_counters.get(subj, 0)
-                pos_counters[subj] = pos + 1
-                
-                q_id = await conn.fetchval(
-                    """
-                    INSERT INTO ent_questions (variant_id, subject, prompt, question_type, context_text, image_url, explanation, max_points, position)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id
-                    """,
-                    variant_id,
-                    q["subject"],
-                    q["prompt"],
-                    q["question_type"],
-                    q.get("context_text", ""),
-                    q.get("image_url", ""),
-                    q.get("explanation", ""),
-                    q.get("max_points", 1),
-                    pos
-                )
-                
-                # Insert options
-                for oi, opt in enumerate(q.get("options", [])):
-                    await conn.execute(
-                        "INSERT INTO ent_options (question_id, text, is_correct, position) VALUES ($1, $2, $3, $4)",
-                        q_id, opt["text"], opt["is_correct"], oi
-                    )
-                
-                # Insert matching pairs
-                for pi, pair in enumerate(q.get("matching_pairs", [])):
-                    await conn.execute(
-                        "INSERT INTO ent_matching_pairs (question_id, left_text, right_text, position) VALUES ($1, $2, $3, $4)",
-                        q_id, pair["left_text"], pair["right_text"], pi
-                    )
-            
-            # Count questions by subject
-            for subj, count in pos_counters.items():
-                print(f"  {subj}: {count} questions")
-            print(f"  Total: {sum(pos_counters.values())} questions")
-        
-        print("\nSeed completed successfully!")
-        
-    finally:
-        await conn.close()
+    raise SystemExit(
+        "Legacy ENT seeding is disabled: it used to delete all attempts and created "
+        "non-compliant variants. Existing source examples are preserved in this file. "
+        "Create variants in /ent-trial; see docs/ent-rules.md."
+    )
 
 
 if __name__ == "__main__":

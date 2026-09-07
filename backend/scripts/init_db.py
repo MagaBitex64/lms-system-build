@@ -449,6 +449,45 @@ MIGRATIONS = [
 ]
 
 
+ENT_MIGRATIONS = [
+    "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS extra_time_minutes INTEGER NOT NULL DEFAULT 0 CHECK (extra_time_minutes IN (0,40))",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS difficulty TEXT",
+    "ALTER TABLE ent_matching_pairs ADD COLUMN IF NOT EXISTS correct_option_position INTEGER",
+    "CREATE TABLE IF NOT EXISTS ent_contexts (id BIGSERIAL PRIMARY KEY, variant_id BIGINT NOT NULL REFERENCES ent_variants(id) ON DELETE CASCADE, subject TEXT NOT NULL, start_position INTEGER NOT NULL, content TEXT NOT NULL DEFAULT '', UNIQUE(variant_id, subject, start_position))",
+    "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS snapshot JSONB",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS responses JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS response_revision INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ",
+    "UPDATE ent_trial_attempts SET deadline_at = started_at + interval '240 minutes' WHERE deadline_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_ent_attempts_deadline ON ent_trial_attempts(deadline_at) WHERE status = 'in_progress'",
+    "ALTER TABLE ent_variants ADD COLUMN IF NOT EXISTS exam_mode TEXT NOT NULL DEFAULT 'full' CHECK (exam_mode IN ('full','single'))",
+    "ALTER TABLE ent_variants ADD COLUMN IF NOT EXISTS single_subject TEXT",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS context_mode TEXT NOT NULL DEFAULT 'shared' CHECK (context_mode IN ('shared','addendum','override'))",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS context_override TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS image_file_id BIGINT REFERENCES files(id) ON DELETE SET NULL",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS image_placement TEXT NOT NULL DEFAULT 'after' CHECK (image_placement IN ('before','after','marker'))",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS image_width INTEGER NOT NULL DEFAULT 640 CHECK (image_width BETWEEN 120 AND 1200)",
+    "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS image_alt TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS proctor_session_id TEXT",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS proctor_status TEXT NOT NULL DEFAULT 'pending' CHECK (proctor_status IN ('pending','active','legacy','finished','terminated'))",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS proctor_violations INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS proctor_last_seen_at TIMESTAMPTZ",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS scores_by_subject JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "UPDATE ent_trial_attempts SET proctor_status='legacy',activated_at=started_at WHERE deadline_at IS NOT NULL AND proctor_status='pending'",
+    """CREATE TABLE IF NOT EXISTS ent_proctor_events (
+        id BIGSERIAL PRIMARY KEY,
+        attempt_id BIGINT NOT NULL REFERENCES ent_trial_attempts(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        severity INTEGER NOT NULL DEFAULT 0 CHECK (severity BETWEEN 0 AND 3),
+        details JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_ent_proctor_events_attempt ON ent_proctor_events(attempt_id,created_at DESC)",
+]
+
+
 async def main() -> None:
     conn = await asyncpg.connect(dsn=DATABASE_URL)
     try:
@@ -463,6 +502,9 @@ async def main() -> None:
                 await conn.execute(migration)
             except Exception as e:
                 pass
+        async with conn.transaction():
+            for migration in ENT_MIGRATIONS:
+                await conn.execute(migration)
         print("Schema initialized successfully.")
     finally:
         await conn.close()

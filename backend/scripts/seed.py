@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import asyncpg
 
 from core.config import DATABASE_URL
+from core.ent_demo import seed_demo_ent
 from core.security import hash_password
 
 PASSWORD = "Phenomenon1!"
@@ -397,7 +398,7 @@ async def seed() -> None:
         await course_group(c_geo, bg1)
         await course_group(c_geo, dt1)
 
-        _ = admin
+        await seed_demo_ent(conn, admin)
 
         print("Seed complete.")
         print(f"All accounts use password: {PASSWORD}")

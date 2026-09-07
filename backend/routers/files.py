@@ -208,6 +208,15 @@ async def download_file(
             user_id,
         )
         allowed = row is not None
+        if not allowed:
+            # ENT images are frozen into the student's authorized attempt snapshot.
+            # This keeps an image private until that exact student receives the test.
+            allowed = bool(await pool.fetchval(
+                """SELECT 1 FROM ent_trial_attempts a
+                CROSS JOIN LATERAL jsonb_array_elements(COALESCE(a.snapshot->'questions','[]'::jsonb)) q
+                WHERE a.student_id=$2 AND q->>'image_file_id'=$1::text LIMIT 1""",
+                file_id, user_id,
+            ))
     if not allowed:
         raise HTTPException(status_code=403, detail="You cannot access this file")
 

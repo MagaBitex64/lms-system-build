@@ -9,39 +9,8 @@ import { Card, Button, Spinner, ErrorState, EmptyState, Badge, PageHeader } from
 import { ClipboardList, ArrowRight, Plus, Trash2, CheckCircle, Users, Layers, Award, Edit, ChevronDown, FileText, Shuffle, ListChecks } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
-const COMBO_LABELS: Record<string, string> = {
-  infmat: 'Информатика - Математика',
-  phymat: 'Физика - Математика',
-  biochem: 'Биология - Химия',
-  chemphi: 'Химия - Физика',
-  matgeo: 'Математика - География',
-}
-
-const SUBJECT_LABELS: Record<string, string> = {
-  kaz_history: 'Қазақстан тарихы',
-  reading: 'Оқу сауаттылығы',
-  math_literacy: 'Мат. сауаттылық',
-  informatics: 'Информатика',
-  mathematics: 'Математика',
-  physics: 'Физика',
-  chemistry: 'Химия',
-  biology: 'Биология',
-  geography: 'География',
-}
-
-const QUESTION_TYPE_LABELS: Record<string, string> = {
-  single_choice: '1 дұрыс жауап (4-тен)',
-  context: 'Контексттік (мәтінге негізделген)',
-  matching: 'Сәйкестендіру',
-  multi_choice: 'Бірнеше дұрыс жауап (6-дан)',
-}
-
-const QUESTION_TYPE_ICONS: Record<string, any> = {
-  single_choice: <CheckCircle size={14} />,
-  context: <FileText size={14} />,
-  matching: <Shuffle size={14} />,
-  multi_choice: <ListChecks size={14} />,
-}
+import VariantEditor from '@/components/ent-variant-editor'
+import { type Rules } from '@/lib/ent'
 
 export default function EntTrialListPage() {
   const { t } = useI18n()
@@ -49,19 +18,27 @@ export default function EntTrialListPage() {
   const router = useRouter()
   const isAdmin = user?.role === 'admin'
   const isStudent = user?.role === 'student'
+  const { data: rulesData } = useSWR<Rules>(user ? '/ent-trial/rules' : null, fetcher)
+  const COMBO_LABELS: Record<string, string> = Object.fromEntries(Object.entries(rulesData?.combinations ?? {}).map(([key, subjects]) => [key, subjects.map(s => rulesData?.subject_labels[s] ?? s).join(' – ')]))
 
   const { data: accessesData, error: accessesError, isLoading: accessesLoading, mutate: mutateAccesses } = useSWR<{ items: any[] }>(isStudent ? '/ent-trial/my-accesses' : null, fetcher)
-  const { data: variantsData, isLoading: variantsLoading, mutate: mutateVariants } = useSWR<{ items: any[] }>('/ent-trial/variants', fetcher)
+  const { data: variantsData, isLoading: variantsLoading, mutate: mutateVariants } = useSWR<{ items: any[] }>(isAdmin ? '/ent-trial/variants' : null, fetcher)
   const { data: allAccessesData, mutate: mutateAdminAccesses } = useSWR<{ items: any[] }>(isAdmin ? '/ent-trial/admin/accesses' : null, fetcher)
   const { data: groupsData } = useSWR<{ items: any[] }>(isAdmin ? '/admin/groups?per_page=100' : null, fetcher)
 
   const [adminTab, setAdminTab] = useState<'variants' | 'grant_access' | 'edit_variant'>('variants')
   const [editingVariantId, setEditingVariantId] = useState<number | null>(null)
+  const [resultsAccessId, setResultsAccessId] = useState<number | null>(null)
+  const [proctorAttemptId, setProctorAttemptId] = useState<number | null>(null)
+  const { data: resultsData } = useSWR<{ items: any[] }>(isAdmin && resultsAccessId ? `/ent-trial/admin/accesses/${resultsAccessId}/results` : null, fetcher)
+  const { data: proctorData } = useSWR<{ items: any[] }>(isAdmin && proctorAttemptId ? `/ent-trial/admin/attempts/${proctorAttemptId}/proctor-events` : null, fetcher)
 
   // Form states for creating variant
   const [newVarTitle, setNewVarTitle] = useState('')
   const [newVarDesc, setNewVarDesc] = useState('')
   const [newVarCombo, setNewVarCombo] = useState('infmat')
+  const [newVarMode, setNewVarMode] = useState<'full' | 'single'>('full')
+  const [newVarSubject, setNewVarSubject] = useState('kaz_history')
 
   // Form states for granting access
   const [accessVarId, setAccessVarId] = useState<number | ''>('')
@@ -69,6 +46,7 @@ export default function EntTrialListPage() {
   const [accessTarget, setAccessTarget] = useState<'all' | 'group' | 'student'>('all')
   const [accessGroupId, setAccessGroupId] = useState<number | ''>('')
   const [accessStudentId, setAccessStudentId] = useState<number | ''>('')
+  const [extraTime, setExtraTime] = useState(false)
 
   if (user?.role === 'teacher') {
     return <ErrorState message="Мұғалімдерге бұл бетке кіруге рұқсат жоқ." />
@@ -96,7 +74,7 @@ export default function EntTrialListPage() {
     try {
       await api('/ent-trial/admin/variants', {
         method: 'POST',
-        body: { title: newVarTitle, description: newVarDesc, combination: newVarCombo }
+        body: { title: newVarTitle, description: newVarDesc, combination: newVarCombo, exam_mode: newVarMode, single_subject: newVarMode === 'single' ? newVarSubject : null }
       })
       setNewVarTitle('')
       setNewVarDesc('')
@@ -132,6 +110,7 @@ export default function EntTrialListPage() {
           target_type: accessTarget,
           group_id: accessTarget === 'group' && accessGroupId ? Number(accessGroupId) : null,
           student_id: accessTarget === 'student' && accessStudentId ? Number(accessStudentId) : null,
+          extra_time_minutes: accessTarget === 'student' && extraTime ? 40 : 0,
         }
       })
       alert('Рұқсат берілді!')
@@ -201,6 +180,18 @@ export default function EntTrialListPage() {
                     className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground h-20" />
                 </div>
                 <div>
+                  <label className="block text-sm font-medium mb-1">Тест форматы</label>
+                  <select value={newVarMode} onChange={(e) => setNewVarMode(e.target.value as 'full' | 'single')}
+                    className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground">
+                    <option value="full">Толық ҰБТ · 5 пән</option><option value="single">Бір пән бойынша тест</option>
+                  </select>
+                </div>
+                {newVarMode === 'single' ? <div>
+                  <label className="block text-sm font-medium mb-1">Пән</label>
+                  <select value={newVarSubject} onChange={(e) => setNewVarSubject(e.target.value)} className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground">
+                    {Object.entries(rulesData?.subject_labels ?? {}).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                  </select>
+                </div> : <div>
                   <label className="block text-sm font-medium mb-1">Бейіндік комбинация</label>
                   <select value={newVarCombo} onChange={(e) => setNewVarCombo(e.target.value)}
                     className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground">
@@ -208,7 +199,7 @@ export default function EntTrialListPage() {
                       <option key={k} value={k}>{v}</option>
                     ))}
                   </select>
-                </div>
+                </div>}
                 <Button type="submit" variant="primary" className="w-full py-2.5">
                   <Plus size={16} /> Вариант құру
                 </Button>
@@ -233,8 +224,8 @@ export default function EntTrialListPage() {
                         </Button>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Badge tone="primary">{COMBO_LABELS[v.combination] || v.combination}</Badge>
-                        <Badge>{v.question_count} сұрақ</Badge>
+                        <Badge tone="primary">{v.exam_mode === 'single' ? rulesData?.subject_labels[v.single_subject] : COMBO_LABELS[v.combination] || v.combination}</Badge>
+                        <Badge>{v.question_count} сұрақ · {v.max_score} балл · {Math.round(v.duration_seconds / 60)} мин</Badge><Badge tone={v.ready ? 'success' : 'warning'}>{v.ready ? 'Дайын' : 'Толықтыру қажет'}</Badge>
                       </div>
                       <Button variant="secondary" size="sm" className="w-full" onClick={() => {
                         setEditingVariantId(v.id)
@@ -256,6 +247,7 @@ export default function EntTrialListPage() {
             variantId={editingVariantId}
             variants={variants}
             onSelectVariant={setEditingVariantId}
+            onSaved={() => { void mutateVariants() }}
           />
         )}
 
@@ -275,8 +267,8 @@ export default function EntTrialListPage() {
                   }} className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground">
                     <option value="">Таңдаңыз...</option>
                     {variants.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.title} — {COMBO_LABELS[v.combination] || v.combination} ({v.question_count} сұрақ)
+                      <option key={v.id} value={v.id} disabled={!v.ready}>
+                        {v.title} — {v.exam_mode === 'single' ? rulesData?.subject_labels[v.single_subject] : COMBO_LABELS[v.combination] || v.combination} ({v.question_count} сұрақ · {v.ready ? 'Дайын' : 'Дайын емес'})
                       </option>
                     ))}
                   </select>
@@ -314,7 +306,8 @@ export default function EntTrialListPage() {
                   </div>
                 )}
 
-                <Button type="submit" variant="primary" className="w-full py-2.5" disabled={!accessVarId}>
+                {accessTarget === 'student' && <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={extraTime} onChange={e => setExtraTime(e.target.checked)} className="mt-1" /><span>Қосымша 40 минут (ерекше білім беру қажеттілігіне байланысты құқығы расталған оқушы үшін)</span></label>}
+                <Button type="submit" variant="primary" className="w-full py-2.5" disabled={!accessVarId || !variants.find(v => v.id === accessVarId)?.ready}>
                   <CheckCircle size={16} /> Рұқсат Беру
                 </Button>
               </form>
@@ -332,14 +325,17 @@ export default function EntTrialListPage() {
                       <p className="text-xs text-muted">
                         {a.target_type === 'all' ? 'Барлық студенттерге' : a.target_type === 'group' ? `Топ: ${a.group_title || a.group_code}` : `Студент: ${a.student_name}`}
                       </p>
-                      <p className="text-xs text-muted">Комбинация: {COMBO_LABELS[a.combination] || a.combination}</p>
+                      <p className="text-xs text-muted">{a.exam_mode === 'single' ? `Пән: ${rulesData?.subject_labels[a.single_subject] || a.single_subject}` : `Комбинация: ${COMBO_LABELS[a.combination] || a.combination}`}</p>
                     </div>
-                    <Button variant="danger" size="sm" onClick={() => handleRevokeAccess(a.id)}>
-                      <Trash2 size={14} />
-                    </Button>
+                    <div className="flex gap-2"><Button variant="secondary" size="sm" onClick={() => { setResultsAccessId(resultsAccessId === a.id ? null : a.id); setProctorAttemptId(null) }}>Нәтижелер</Button><Button variant="danger" size="sm" onClick={() => handleRevokeAccess(a.id)}><Trash2 size={14} /></Button></div>
                   </Card>
                 ))
               )}
+              {resultsAccessId && <Card className="space-y-3 p-4"><h3 className="font-bold">Оқушылар нәтижесі және прокторинг</h3>
+                {!resultsData ? <Spinner /> : resultsData.items.length === 0 ? <p className="text-sm text-muted">Бұл рұқсат бойынша тестті әлі ешкім бастаған жоқ.</p> : resultsData.items.map(item => <div key={item.id} className="rounded-xl border border-border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{item.full_name}</p><p className="text-xs text-muted">{item.status === 'submitted' ? `Нәтиже: ${item.total_score}` : 'Тест орындалуда'} · бұзушылық: {item.proctor_violations}/3</p></div><Button size="sm" variant="secondary" onClick={() => setProctorAttemptId(proctorAttemptId === item.id ? null : item.id)}>Прокторинг журналы</Button></div>
+                  {proctorAttemptId === item.id && <div className="mt-3 max-h-52 space-y-2 overflow-auto text-xs">{!proctorData ? <Spinner /> : proctorData.items.length === 0 ? <p className="text-muted">Оқиғалар жоқ.</p> : proctorData.items.map(event => <div key={event.id} className="rounded-lg bg-surface-muted p-2"><b>{event.event_type}</b> · маңыздылық {event.severity} · {new Date(event.created_at).toLocaleString()}</div>)}</div>}
+                </div>)}</Card>}
             </div>
           </div>
         )}
@@ -358,24 +354,27 @@ export default function EntTrialListPage() {
         <div className="grid gap-6 sm:grid-cols-2">
           {accesses.map((a) => {
             const isCompleted = a.attempt_status === 'submitted'
+            const expired = Boolean(a.revoked_at) || (a.expires_at && new Date(a.expires_at) <= new Date())
+            const cannotStart = !a.attempt_id && (expired || !a.variant_ready)
             return (
               <Card key={a.id} className="p-6 flex flex-col justify-between hover:shadow-lg transition-all">
                 <div>
                   <div className="flex justify-between items-start mb-3">
                     <Badge tone={isCompleted ? 'success' : 'primary'}>
-                      {isCompleted ? 'Аяқталған' : 'Жаңа'}
+                      {isCompleted ? 'Аяқталған' : a.attempt_id ? 'Басталған' : expired ? 'Мерзімі аяқталған' : !a.variant_ready ? 'Әкімші толықтыруда' : 'Жаңа'}
                     </Badge>
                   </div>
                   <h3 className="text-xl font-bold mb-1">{a.variant_title || 'Пробтық ЕНТ'}</h3>
                   {a.variant_description && <p className="text-sm text-muted mb-3">{a.variant_description}</p>}
                   <div className="space-y-1 text-sm text-muted">
-                    <p><span className="font-semibold text-foreground">Бейін:</span> {COMBO_LABELS[a.combination] || a.combination}</p>
-                    <p><span className="font-semibold text-foreground">Формат:</span> 120 сұрақ, 140 балл, 210 мин</p>
+                    <p><span className="font-semibold text-foreground">{a.exam_mode === 'single' ? 'Пән:' : 'Бейін:'}</span> {a.exam_mode === 'single' ? rulesData?.subject_labels[a.single_subject] || a.single_subject : COMBO_LABELS[a.combination] || a.combination}</p>
+                    <p><span className="font-semibold text-foreground">Формат:</span> {a.question_count ?? '—'} сұрақ, {a.max_score ?? '—'} балл, {a.duration_seconds ? Math.round(a.duration_seconds / 60) + (a.extra_time_minutes ?? 0) : '—'} мин</p>
+                    <p><span className="font-semibold text-foreground">Бақылау:</span> камера және толық экран міндетті</p>
                   </div>
                   {isCompleted && a.attempt_score !== null && (
                     <div className="mt-4 p-3 bg-success/10 rounded-xl border border-success/20 flex items-center justify-between">
                       <span className="text-sm font-semibold text-success">Нәтиже:</span>
-                      <span className="text-lg font-bold text-success">{a.attempt_score} / 140 балл</span>
+                      <span className="text-lg font-bold text-success">{a.attempt_score} / {a.max_score ?? 140} балл</span>
                     </div>
                   )}
                 </div>
@@ -385,7 +384,7 @@ export default function EntTrialListPage() {
                       Нәтижені көру <ArrowRight size={16} />
                     </Button>
                   ) : (
-                    <Button onClick={() => handleStart(a.id)} variant="primary">
+                    <Button disabled={cannotStart} onClick={() => handleStart(a.id)} variant="primary">
                       {a.attempt_id ? 'Жалғастыру' : 'Бастау'} <ArrowRight size={16} />
                     </Button>
                   )}
@@ -403,332 +402,3 @@ export default function EntTrialListPage() {
 // ===============================================
 // VARIANT EDITOR COMPONENT
 // ===============================================
-
-function VariantEditor({ variantId, variants, onSelectVariant }: {
-  variantId: number | null
-  variants: any[]
-  onSelectVariant: (id: number | null) => void
-}) {
-  const [subject, setSubject] = useState('kaz_history')
-  const [qType, setQType] = useState<string>('single_choice')
-  const [prompt, setPrompt] = useState('')
-  const [contextText, setContextText] = useState('')
-  const [explanation, setExplanation] = useState('')
-  const [options, setOptions] = useState([
-    { text: '', is_correct: true },
-    { text: '', is_correct: false },
-    { text: '', is_correct: false },
-    { text: '', is_correct: false },
-  ])
-  const [matchingPairs, setMatchingPairs] = useState([
-    { left_text: '', right_text: '' },
-    { left_text: '', right_text: '' },
-    { left_text: '', right_text: '' },
-    { left_text: '', right_text: '' },
-    { left_text: '', right_text: '' },
-  ])
-  const [error, setError] = useState<string | null>(null)
-
-  const questionsReq = useSWR<{ items: any[], grouped: any }>(
-    variantId ? `/ent-trial/admin/variants/${variantId}/questions` : null, fetcher
-  )
-
-  const questions = questionsReq.data?.items || []
-  const grouped = questionsReq.data?.grouped || {}
-
-  // Get subjects for current variant
-  const selectedVariant = variants.find(v => v.id === variantId)
-
-  async function handleAddQuestion(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    try {
-      const body: any = {
-        variant_id: variantId,
-        subject,
-        prompt,
-        question_type: qType,
-        context_text: qType === 'context' ? contextText : '',
-        explanation,
-      }
-
-      if (qType === 'single_choice' || qType === 'context') {
-        body.options = options.slice(0, 4)
-      } else if (qType === 'multi_choice') {
-        // For multi_choice, use 6 options
-        body.options = options.slice(0, 6)
-      } else if (qType === 'matching') {
-        body.matching_pairs = matchingPairs.filter(p => p.left_text && p.right_text)
-      }
-
-      await api('/ent-trial/admin/questions', { method: 'POST', body })
-      // Reset form
-      setPrompt('')
-      setContextText('')
-      setExplanation('')
-      setOptions([
-        { text: '', is_correct: true },
-        { text: '', is_correct: false },
-        { text: '', is_correct: false },
-        { text: '', is_correct: false },
-      ])
-      setMatchingPairs([
-        { left_text: '', right_text: '' },
-        { left_text: '', right_text: '' },
-        { left_text: '', right_text: '' },
-        { left_text: '', right_text: '' },
-        { left_text: '', right_text: '' },
-      ])
-      questionsReq.mutate()
-    } catch (err: any) {
-      setError(err.message)
-    }
-  }
-
-  async function handleDeleteQuestion(id: number) {
-    if (!confirm('Сұрақты жоюға сенімдісіз бе?')) return
-    await api(`/ent-trial/admin/questions/${id}`, { method: 'DELETE' })
-    questionsReq.mutate()
-  }
-
-  // Handle option changes for multi_choice (6 options)
-  function initOptionsForType(type: string) {
-    if (type === 'multi_choice') {
-      setOptions([
-        { text: '', is_correct: true },
-        { text: '', is_correct: true },
-        { text: '', is_correct: true },
-        { text: '', is_correct: false },
-        { text: '', is_correct: false },
-        { text: '', is_correct: false },
-      ])
-    } else {
-      setOptions([
-        { text: '', is_correct: true },
-        { text: '', is_correct: false },
-        { text: '', is_correct: false },
-        { text: '', is_correct: false },
-      ])
-    }
-  }
-
-  if (!variantId) {
-    return (
-      <div className="space-y-4">
-        <h2 className="text-lg font-bold">Вариантты таңдаңыз</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {variants.map(v => (
-            <button key={v.id} type="button" className="text-left" onClick={() => onSelectVariant(v.id)}>
-              <Card interactive className="h-full p-4">
-                <h3 className="font-bold">{v.title}</h3>
-                <p className="text-xs text-muted">{v.question_count} сұрақ • {COMBO_LABELS[v.combination]}</p>
-              </Card>
-            </button>
-          ))}
-        </div>
-        {variants.length === 0 && <EmptyState icon={<Layers size={36} />} title="Алдымен вариант жасаңыз" />}
-      </div>
-    )
-  }
-
-  // Subject counts
-  const subjectCounts: Record<string, number> = {}
-  for (const q of questions) {
-    subjectCounts[q.subject] = (subjectCounts[q.subject] || 0) + 1
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Variant header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h2 className="text-lg font-bold">{selectedVariant?.title}</h2>
-          <p className="text-sm text-muted">{COMBO_LABELS[selectedVariant?.combination]} • {questions.length} сұрақ</p>
-        </div>
-        <Button variant="secondary" size="sm" onClick={() => onSelectVariant(null)}>
-          Басқа вариант
-        </Button>
-      </div>
-
-      {/* Subject stats */}
-      <div className="flex flex-wrap gap-2">
-        {Object.entries(subjectCounts).map(([s, c]) => (
-          <Badge key={s} tone="neutral">{SUBJECT_LABELS[s] || s}: {c}</Badge>
-        ))}
-        <Badge tone="primary">Барлығы: {questions.length}</Badge>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[400px_1fr]">
-        {/* Add Question Form */}
-        <Card className="p-5 space-y-4 h-fit">
-          <h3 className="text-base font-bold border-b border-border pb-2">Сұрақ қосу</h3>
-          <form onSubmit={handleAddQuestion} className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium mb-1">Пән</label>
-              <select value={subject} onChange={(e) => setSubject(e.target.value)}
-                className="w-full rounded-lg border border-border p-2 bg-surface text-foreground text-sm">
-                {Object.entries(SUBJECT_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1">Сұрақ типі</label>
-              <select value={qType} onChange={(e) => { setQType(e.target.value); initOptionsForType(e.target.value) }}
-                className="w-full rounded-lg border border-border p-2 bg-surface text-foreground text-sm">
-                {Object.entries(QUESTION_TYPE_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
-              </select>
-            </div>
-
-            {qType === 'context' && (
-              <div>
-                <label className="block text-xs font-medium mb-1">Контекст мәтіні</label>
-                <textarea value={contextText} onChange={(e) => setContextText(e.target.value)}
-                  placeholder="Мәтін, кесте немесе деректер..."
-                  className="w-full rounded-lg border border-border p-2 bg-surface text-foreground text-sm h-24" />
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-medium mb-1">Сұрақ</label>
-              <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} required
-                className="w-full rounded-lg border border-border p-2 bg-surface text-foreground text-sm h-16" />
-            </div>
-
-            {/* Options for single_choice, context, multi_choice */}
-            {(qType === 'single_choice' || qType === 'context' || qType === 'multi_choice') && (
-              <div className="space-y-2">
-                <label className="block text-xs font-medium">
-                  Жауап нұсқалары {qType === 'multi_choice' ? '(1-3 дұрыс, checkbox)' : '(1 дұрыс, radio)'}
-                </label>
-                {options.map((opt, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    {qType === 'multi_choice' ? (
-                      <input type="checkbox" checked={opt.is_correct}
-                        onChange={(e) => {
-                          const newOpts = [...options]
-                          newOpts[i] = { ...newOpts[i], is_correct: e.target.checked }
-                          setOptions(newOpts)
-                        }}
-                        className="h-4 w-4 shrink-0" />
-                    ) : (
-                      <input type="radio" name="correct_opt" checked={opt.is_correct}
-                        onChange={() => {
-                          setOptions(options.map((o, j) => ({ ...o, is_correct: j === i })))
-                        }}
-                        className="h-4 w-4 shrink-0" />
-                    )}
-                    <input type="text" value={opt.text} required
-                      onChange={(e) => {
-                        const newOpts = [...options]
-                        newOpts[i] = { ...newOpts[i], text: e.target.value }
-                        setOptions(newOpts)
-                      }}
-                      placeholder={`Нұсқа ${i + 1}`}
-                      className="flex-1 rounded-lg border border-border p-2 bg-surface text-foreground text-sm" />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Matching pairs */}
-            {qType === 'matching' && (
-              <div className="space-y-2">
-                <label className="block text-xs font-medium">Сәйкестік жұптары (Сол ↔ Оң)</label>
-                {matchingPairs.map((pair, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <input type="text" value={pair.left_text}
-                      onChange={(e) => {
-                        const newPairs = [...matchingPairs]
-                        newPairs[i] = { ...newPairs[i], left_text: e.target.value }
-                        setMatchingPairs(newPairs)
-                      }}
-                      placeholder={`Сол ${i + 1}`}
-                      className="flex-1 rounded-lg border border-border p-2 bg-surface text-foreground text-sm" />
-                    <span className="text-muted">↔</span>
-                    <input type="text" value={pair.right_text}
-                      onChange={(e) => {
-                        const newPairs = [...matchingPairs]
-                        newPairs[i] = { ...newPairs[i], right_text: e.target.value }
-                        setMatchingPairs(newPairs)
-                      }}
-                      placeholder={`Оң ${i + 1}`}
-                      className="flex-1 rounded-lg border border-border p-2 bg-surface text-foreground text-sm" />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-medium mb-1">Түсіндірме (міндетті емес)</label>
-              <input type="text" value={explanation} onChange={(e) => setExplanation(e.target.value)}
-                className="w-full rounded-lg border border-border p-2 bg-surface text-foreground text-sm" />
-            </div>
-
-            {error && <ErrorState message={error} />}
-            <Button type="submit" variant="primary" className="w-full">
-              <Plus size={16} /> Сұрақ қосу
-            </Button>
-          </form>
-        </Card>
-
-        {/* Questions List */}
-        <div className="space-y-4">
-          <h3 className="text-base font-bold">Сұрақтар тізімі</h3>
-          {questionsReq.isLoading ? <Spinner /> : (
-            Object.entries(grouped).length === 0 ? (
-              <EmptyState icon={<ClipboardList size={36} />} title="Сұрақтар жоқ" hint="Сол жақтағы форма арқылы сұрақ қосыңыз" />
-            ) : (
-              Object.entries(grouped).map(([subj, qs]: [string, any]) => (
-                <div key={subj} className="space-y-2">
-                  <h4 className="text-sm font-bold text-primary flex items-center gap-2 border-b border-border pb-1">
-                    {SUBJECT_LABELS[subj] || subj}
-                    <Badge>{(qs as any[]).length}</Badge>
-                  </h4>
-                  <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-                    {(qs as any[]).map((q: any, i: number) => (
-                      <div key={q.id} className="rounded-lg border border-border p-3 text-sm relative bg-surface">
-                        <button onClick={() => handleDeleteQuestion(q.id)}
-                          className="absolute right-2 top-2 text-muted hover:text-danger">
-                          <Trash2 size={14} />
-                        </button>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-mono text-muted">#{i + 1}</span>
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-surface-muted">
-                            {QUESTION_TYPE_ICONS[q.question_type]}
-                            {QUESTION_TYPE_LABELS[q.question_type]}
-                          </span>
-                          {q.max_points > 1 && <Badge tone="primary">{q.max_points} балл</Badge>}
-                        </div>
-                        <p className="font-medium pr-6 text-foreground">{q.prompt}</p>
-                        {q.options?.length > 0 && (
-                          <ul className="mt-1.5 space-y-0.5">
-                            {q.options.map((o: any) => (
-                              <li key={o.id} className={o.is_correct ? 'font-semibold text-success' : 'text-muted'}>
-                                {q.question_type === 'multi_choice' ? (o.is_correct ? '☑' : '☐') : (o.is_correct ? '●' : '○')} {o.text}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        {q.matching_pairs?.length > 0 && (
-                          <div className="mt-1.5 space-y-0.5">
-                            {q.matching_pairs.map((p: any) => (
-                              <p key={p.id} className="text-muted">{p.left_text} ↔ {p.right_text}</p>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}

@@ -3,10 +3,10 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
-COPY . .
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache-dir -r requirements.txt && \
-    sed -i 's/\r$//' entrypoint.sh && \
+COPY . .
+RUN sed -i 's/\r$//' entrypoint.sh && \
     chmod +x entrypoint.sh
 
 EXPOSE 8000

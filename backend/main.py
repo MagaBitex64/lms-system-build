@@ -1,6 +1,8 @@
 import os
 import sys
 import logging
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -10,8 +12,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.audit import IMPORTANT_ACTIONS, audit_entity_id, get_audit_actor, record_audit_log
 from routers import admin, audit, auth, courses, enrollments, ent_trial, files, grades, homework, leads, quizzes, search
 
-app = FastAPI(title="Phenomenon School LMS API", version="1.0.0")
 logger = logging.getLogger(__name__)
+
+
+async def expire_ent_attempts():
+    while True:
+        try:
+            await ent_trial.finalize_expired()
+        except Exception:
+            logger.exception("Failed to finalize expired ENT attempts")
+        await asyncio.sleep(30)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    worker = asyncio.create_task(expire_ent_attempts())
+    try:
+        yield
+    finally:
+        worker.cancel()
+        with suppress(asyncio.CancelledError):
+            await worker
+
+
+app = FastAPI(title="Phenomenon School LMS API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

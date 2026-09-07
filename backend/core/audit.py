@@ -14,6 +14,14 @@ class AuditAction:
 
 
 IMPORTANT_ACTIONS = {
+    "create_ent_variant": AuditAction("ent.variant_create", "ent_variant", "ҰБТ варианты құрылды"),
+    "update_ent_variant": AuditAction("ent.variant_update", "ent_variant", "ҰБТ варианты өзгертілді"),
+    "delete_ent_variant": AuditAction("ent.variant_delete", "ent_variant", "ҰБТ варианты жойылды"),
+    "save_ent_question": AuditAction("ent.question_save", "ent_question", "ҰБТ сұрағы сақталды"),
+    "delete_ent_question": AuditAction("ent.question_delete", "ent_question", "ҰБТ сұрағы жойылды"),
+    "save_ent_context": AuditAction("ent.context_save", "ent_variant", "ҰБТ ортақ контексті сақталды"),
+    "grant_ent_access": AuditAction("ent.access_grant", "ent_access", "ҰБТ рұқсаты берілді"),
+    "revoke_ent_access": AuditAction("ent.access_revoke", "ent_access", "ҰБТ рұқсаты қайтарылды"),
     "create_user": AuditAction("user.create", "user", "Пайдаланушы құрылды"),
     "update_user": AuditAction("user.update", "user", "Пайдаланушы өзгертілді"),
     "delete_user": AuditAction("user.delete", "user", "Пайдаланушы жойылды"),
@@ -47,6 +55,8 @@ IMPORTANT_ACTIONS = {
 }
 
 ENTITY_ID_KEYS = (
+    "variant_id",
+    "access_id",
     "user_id",
     "group_id",
     "course_id",

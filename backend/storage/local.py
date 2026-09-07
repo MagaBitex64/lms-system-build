@@ -32,6 +32,15 @@ class LocalDiskStorage:
     def save(self, filename: str, content: bytes) -> tuple[str, str]:
         """Save bytes to disk. Returns (stored_name, mime)."""
         ext = self.validate(filename, len(content))
+        image_signatures = {
+            ".png": content.startswith(b"\x89PNG\r\n\x1a\n"),
+            ".jpg": content.startswith(b"\xff\xd8\xff"),
+            ".jpeg": content.startswith(b"\xff\xd8\xff"),
+            ".gif": content.startswith((b"GIF87a", b"GIF89a")),
+            ".webp": content.startswith(b"RIFF") and content[8:12] == b"WEBP",
+        }
+        if ext in image_signatures and not image_signatures[ext]:
+            raise FileValidationError("File contents do not match the selected image type")
         stored_name = f"{uuid.uuid4().hex}{ext}"
         path = os.path.join(self.base_dir, stored_name)
         with open(path, "wb") as f:

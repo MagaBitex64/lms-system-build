@@ -2,18 +2,22 @@
 
 import { useParams, useRouter } from 'next/navigation'
 import useSWR from 'swr'
-import { fetcher } from '@/lib/api'
+import { fetcher, getFileUrl } from '@/lib/api'
 import { Spinner, ErrorState, Card, Button, cx } from '@/components/ui'
 import { AlertCircle, ArrowLeft, CheckCircle, FileText, Trophy, XCircle } from 'lucide-react'
 
 type ResultOption = { id: number; text: string; is_correct: boolean }
-type MatchingPair = { id: number; left_text: string; right_text: string }
+type MatchingPair = { id: number; left_text: string; right_text: string; correct_option_id: number }
 type ResultQuestion = {
   question_id: number
   prompt: string
   question_type: 'single_choice' | 'context' | 'matching' | 'multi_choice'
   context_text: string
   image_url: string
+  image_file_id: number | null
+  image_placement: 'before' | 'after' | 'marker'
+  image_width: number
+  image_alt: string
   max_points: number
   points_earned: number
   is_correct: boolean
@@ -22,27 +26,36 @@ type ResultQuestion = {
   matching_pairs: MatchingPair[]
   selected_option_id: number | null
   selected_option_ids: number[]
-  matching_answer: Record<string, string>
+  matching_answer: Record<string, string | number>
 }
 type ResultData = {
   status: 'in_progress' | 'submitted'
   combination: string
   scores: { kaz_history: number; reading: number; math_literacy: number; subject1: number; subject2: number; total: number }
+  scores_by_subject: Record<string, number>
+  max_score: number
+  proctor_status: string
+  proctor_violations: number
   questions: Record<string, ResultQuestion[]>
 }
 
-const SUBJECT_NAMES: Record<string, string> = {
-  kaz_history: 'Қазақстан тарихы', reading: 'Оқу сауаттылығы', math_literacy: 'Мат. сауаттылық',
-  informatics: 'Информатика', mathematics: 'Математика', physics: 'Физика', chemistry: 'Химия',
-  biology: 'Биология', geography: 'География',
-}
-const COMBINATION_SUBJECTS: Record<string, [string, string]> = {
-  infmat: ['informatics', 'mathematics'], phymat: ['physics', 'mathematics'], biochem: ['biology', 'chemistry'],
-  chemphi: ['chemistry', 'physics'], matgeo: ['mathematics', 'geography'],
-}
+import { SUBJECT_NAMES } from '@/lib/ent'
 
 function formatScore(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
+}
+
+function ResultPrompt({ question }: { question: ResultQuestion }) {
+  const src = question.image_file_id ? getFileUrl(question.image_file_id) : question.image_url
+  const image = src ? <img src={src} alt={question.image_alt || 'Сұрақ суреті'} className="max-h-72 max-w-full rounded-lg border border-border object-contain" style={{ width: question.image_width || 640 }} /> : null
+  const text = (value: string) => value ? <p className="whitespace-pre-wrap font-medium">{value.replaceAll('{{image}}', '')}</p> : null
+  if (!image) return text(question.prompt)
+  if (question.image_placement === 'before') return <div className="space-y-3">{image}{text(question.prompt)}</div>
+  if (question.image_placement === 'marker' && question.prompt.includes('{{image}}')) {
+    const at = question.prompt.indexOf('{{image}}')
+    return <div className="space-y-3">{text(question.prompt.slice(0, at))}{image}{text(question.prompt.slice(at + 9))}</div>
+  }
+  return <div className="space-y-3">{text(question.prompt)}{image}</div>
 }
 
 export default function EntResultPage() {
@@ -55,15 +68,8 @@ export default function EntResultPage() {
   if (!data) return null
   if (data.status !== 'submitted') return <div className="mx-auto mt-20 max-w-2xl space-y-4 text-center"><h2 className="text-2xl font-bold">Тест әлі аяқталмаған</h2><Button onClick={() => router.push(`/ent-trial/${id}`)}>Тестке қайту</Button></div>
 
-  const fallbackSubjects = Object.keys(data.questions).filter((subject) => !['kaz_history', 'reading', 'math_literacy'].includes(subject))
-  const profileSubjects = COMBINATION_SUBJECTS[data.combination] ?? [fallbackSubjects[0], fallbackSubjects[1]]
-  const scoreItems = [
-    { key: 'kaz_history', score: data.scores.kaz_history, max: 20 },
-    { key: 'reading', score: data.scores.reading, max: 10 },
-    { key: 'math_literacy', score: data.scores.math_literacy, max: 10 },
-    { key: profileSubjects[0], score: data.scores.subject1, max: 50 },
-    { key: profileSubjects[1], score: data.scores.subject2, max: 50 },
-  ].filter((item) => Boolean(item.key))
+  const scoreItems = Object.entries(data.questions).map(([key, questions]) => ({ key,
+    score: Number(data.scores_by_subject?.[key] ?? 0), max: questions.reduce((sum, q) => sum + Number(q.max_points), 0) }))
 
   return (
     <div className="mx-auto max-w-5xl space-y-8">
@@ -72,7 +78,8 @@ export default function EntResultPage() {
         <Trophy size={48} className="mx-auto mb-4 text-primary" />
         <h1 className="mb-2 text-3xl font-bold">Тест аяқталды!</h1>
         <p className="mb-6 text-muted">Дифференциалды бағалауды ескерген жалпы нәтиже:</p>
-        <div className="text-6xl font-black text-foreground">{formatScore(data.scores.total)} <span className="text-3xl font-bold text-muted">/ 140</span></div>
+        <div className="text-6xl font-black text-foreground">{formatScore(data.scores.total)} <span className="text-3xl font-bold text-muted">/ {data.max_score}</span></div>
+        <p className="mt-4 text-sm text-muted">Прокторинг: {data.proctor_status === 'terminated' ? 'бұзушылықтарға байланысты автоматты аяқталды' : 'аяқталды'} · тіркелген бұзушылық: {data.proctor_violations}</p>
       </Card>
 
       <h2 className="text-xl font-bold">Пәндер бойынша талдау</h2>
@@ -100,13 +107,13 @@ export default function EntResultPage() {
             <div className="mb-3 flex gap-3">
               <div className="mt-0.5">{complete ? <CheckCircle size={20} className="text-success" /> : partial ? <AlertCircle size={20} className="text-warning" /> : <XCircle size={20} className="text-danger" />}</div>
               <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-medium">{index + 1}. {question.prompt}</p>
+                <p className="font-medium">Сұрақ №{index + 1}</p>
                 <span className={cx('rounded-full px-2.5 py-1 text-xs font-bold', complete ? 'bg-success/10 text-success' : partial ? 'bg-warning/10 text-warning' : 'bg-danger/10 text-danger')}>{formatScore(earned)} / {formatScore(maxPoints)} балл</span>
               </div></div>
             </div>
 
             {question.context_text && <div className="ml-8 mb-4 rounded-lg border border-border bg-background p-3 text-sm"><p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase text-muted"><FileText size={13} /> Контекст</p><p className="whitespace-pre-wrap">{question.context_text}</p></div>}
-            {question.image_url && <img src={question.image_url} alt="Сұрақ суреті" className="ml-8 mb-4 max-h-72 rounded-lg border border-border object-contain" />}
+            <div className="ml-8 mb-4"><ResultPrompt question={question} /></div>
 
             {(question.question_type === 'single_choice' || question.question_type === 'context') && <div className="space-y-2 pl-8">
               {question.options.map((option) => {
@@ -138,8 +145,9 @@ export default function EntResultPage() {
             {question.question_type === 'matching' && <div className="space-y-2 pl-8">
               <p className="mb-2 text-xs text-muted">Сәйкестендіру нәтижесі</p>
               {question.matching_pairs.map((pair) => {
-                const selected = question.matching_answer?.[String(pair.id)] ?? ''
-                const correct = selected === pair.right_text
+                const selectedId = question.matching_answer?.[String(pair.id)] ?? ''
+                const selected = question.options.find(o => String(o.id) === String(selectedId))?.text ?? ''
+                const correct = String(selectedId) === String(pair.correct_option_id)
                 return <div key={pair.id} className={cx('rounded-lg border p-3 text-sm', correct ? 'border-success/30 bg-success/5' : 'border-danger/30 bg-danger/5')}>
                   <div className="flex items-center gap-2">{correct ? <CheckCircle size={16} className="shrink-0 text-success" /> : <XCircle size={16} className="shrink-0 text-danger" />}<span className="font-medium">{pair.left_text}</span><span className="text-muted">→</span><span className={correct ? 'font-semibold text-success' : 'font-semibold text-danger'}>{selected || 'Жауап берілмеді'}</span></div>
                   {!correct && <p className="mt-1 pl-6 text-xs text-success">Дұрыс жауап: {pair.right_text}</p>}
