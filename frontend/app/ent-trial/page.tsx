@@ -25,7 +25,6 @@ export default function EntTrialListPage() {
   const { data: variantsData, isLoading: variantsLoading, mutate: mutateVariants } = useSWR<{ items: any[] }>(isAdmin ? '/ent-trial/variants' : null, fetcher)
   const { data: allAccessesData, mutate: mutateAdminAccesses } = useSWR<{ items: any[] }>(isAdmin ? '/ent-trial/admin/accesses' : null, fetcher)
   const { data: groupsData } = useSWR<{ items: any[] }>(isAdmin ? '/admin/groups?per_page=100' : null, fetcher)
-
   const [adminTab, setAdminTab] = useState<'variants' | 'grant_access' | 'edit_variant'>('variants')
   const [editingVariantId, setEditingVariantId] = useState<number | null>(null)
   const [resultsAccessId, setResultsAccessId] = useState<number | null>(null)
@@ -48,6 +47,8 @@ export default function EntTrialListPage() {
   const [accessStudentId, setAccessStudentId] = useState<number | ''>('')
   const [extraTime, setExtraTime] = useState(false)
   const [cameraRequired, setCameraRequired] = useState(true)
+  const [accessExpiresAt, setAccessExpiresAt] = useState('')
+  const [allowRetake, setAllowRetake] = useState(false)
 
   if (user?.role === 'teacher') {
     return <ErrorState message="Мұғалімдерге бұл бетке кіруге рұқсат жоқ." />
@@ -102,6 +103,7 @@ export default function EntTrialListPage() {
   async function handleGrantAccess(e: FormEvent) {
     e.preventDefault()
     if (!accessVarId) return alert('Вариантты таңдаңыз')
+    if (allowRetake && !accessExpiresAt) return alert('Шексіз қайта тапсыру үшін дедлайнды көрсетіңіз')
     try {
       await api('/ent-trial/admin/accesses', {
         method: 'POST',
@@ -113,9 +115,13 @@ export default function EntTrialListPage() {
           student_id: accessTarget === 'student' && accessStudentId ? Number(accessStudentId) : null,
           extra_time_minutes: accessTarget === 'student' && extraTime ? 40 : 0,
           camera_required: cameraRequired,
+          expires_at: accessExpiresAt ? new Date(accessExpiresAt).toISOString() : null,
+          allow_retake: allowRetake,
         }
       })
       alert('Рұқсат берілді!')
+      setAccessExpiresAt('')
+      setAllowRetake(false)
       mutateAdminAccesses()
       if (isStudent) mutateAccesses()
     } catch (err: any) {
@@ -308,6 +314,23 @@ export default function EntTrialListPage() {
                   </div>
                 )}
 
+                <div>
+                  <label className="block text-sm font-medium mb-1">Дедлайн · күні және уақыты</label>
+                  <input
+                    type="datetime-local"
+                    value={accessExpiresAt}
+                    onChange={(e) => setAccessExpiresAt(e.target.value)}
+                    required={allowRetake}
+                    className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground"
+                  />
+                  <p className="mt-1 text-xs text-muted">Бос қалдырсаңыз, рұқсат қайтарып алынғанша ашық болады.</p>
+                </div>
+
+                <label className="flex items-start gap-2 rounded-xl border border-border bg-surface-muted p-3 text-sm">
+                  <input type="checkbox" checked={allowRetake} onChange={e => setAllowRetake(e.target.checked)} className="mt-1" />
+                  <span><b>Дедлайнға дейін шексіз қайта тапсыру</b><span className="mt-1 block text-xs text-muted">Әр аяқталған әрекеттен кейін оқушы жаңа әрекетті бастай алады. Барлық нәтиже сақталады.</span></span>
+                </label>
+
                 {accessTarget === 'student' && <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={extraTime} onChange={e => setExtraTime(e.target.checked)} className="mt-1" /><span>Қосымша 40 минут (ерекше білім беру қажеттілігіне байланысты құқығы расталған оқушы үшін)</span></label>}
                 <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={cameraRequired} onChange={e => setCameraRequired(e.target.checked)} className="mt-1" /><span>Камераның болуы міндетті</span></label>
                 <Button type="submit" variant="primary" className="w-full py-2.5" disabled={!accessVarId || !variants.find(v => v.id === accessVarId)?.ready}>
@@ -330,12 +353,16 @@ export default function EntTrialListPage() {
                           {a.target_type === 'all' ? 'Барлық студенттерге' : a.target_type === 'group' ? `Топ: ${a.group_title || a.group_code}` : `Студент: ${a.student_name}`}
                         </p>
                         <p className="text-xs text-muted">{a.exam_mode === 'single' ? `Пән: ${rulesData?.subject_labels[a.single_subject] || a.single_subject}` : `Комбинация: ${COMBO_LABELS[a.combination] || a.combination}`}</p>
+                        <p className="text-xs text-muted">
+                          {a.expires_at ? `Дедлайн: ${new Date(a.expires_at).toLocaleString()}` : 'Дедлайн жоқ'}
+                          {' · '}{a.allow_retake ? 'шексіз қайта тапсыру' : 'бір әрекет'}
+                        </p>
                       </div>
                       <div className="flex shrink-0 gap-2"><Button variant="secondary" size="sm" onClick={() => { setResultsAccessId(resultsAccessId === a.id ? null : a.id); setProctorAttemptId(null) }}>Нәтижелер</Button><Button variant="danger" size="sm" onClick={() => handleRevokeAccess(a.id)}><Trash2 size={14} /></Button></div>
                     </div>
-                    {resultsAccessId === a.id && <div className="space-y-3 border-t border-border pt-3"><h3 className="font-bold">Оқушылар нәтижесі және прокторинг</h3>
+                    {resultsAccessId === a.id && <div className="space-y-3 border-t border-border pt-3"><div><h3 className="font-bold">Оқушылар нәтижесі және прокторинг</h3><p className="text-xs text-muted">Аяқталған әрекеттер ең жоғары ұпайдан бастап сұрыпталған.</p></div>
                       {!resultsData ? <Spinner /> : resultsData.items.length === 0 ? <p className="text-sm text-muted">Бұл рұқсат бойынша тестті әлі ешкім бастаған жоқ.</p> : resultsData.items.map(item => <div key={item.id} className="rounded-xl border border-border p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{item.full_name}</p><p className="text-xs text-muted">{item.status === 'submitted' ? `Нәтиже: ${item.total_score}` : 'Тест орындалуда'} · уходов: {item.absence_count ?? 0} · вне теста: {Math.floor((item.absence_seconds ?? 0) / 60)} мин</p></div><Button size="sm" variant="secondary" onClick={() => setProctorAttemptId(proctorAttemptId === item.id ? null : item.id)}>Журнал уходов</Button></div>
+                        <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{item.full_name} · {item.attempt_number}-әрекет</p><p className="text-xs text-muted">{item.status === 'submitted' ? `Нәтиже: ${item.total_score}` : 'Тест орындалуда'} · {new Date(item.started_at).toLocaleString()} · уходов: {item.absence_count ?? 0} · вне теста: {Math.floor((item.absence_seconds ?? 0) / 60)} мин</p></div><Button size="sm" variant="secondary" onClick={() => setProctorAttemptId(proctorAttemptId === item.id ? null : item.id)}>Журнал уходов</Button></div>
                         {proctorAttemptId === item.id && <div className="mt-3 max-h-52 space-y-2 overflow-auto text-xs">{!proctorData ? <Spinner /> : proctorData.absences?.length ? proctorData.absences.map(absence => <div key={`absence-${absence.id}`} className="rounded-lg bg-warning/10 p-2"><b>Уход из теста</b> · {Math.floor((absence.duration_seconds ?? 0) / 60)} мин {(absence.duration_seconds ?? 0) % 60} сек · {new Date(absence.started_at).toLocaleString()}</div>) : <p className="text-muted">Уходов не зафиксировано.</p>}</div>}
                       </div>)}</div>}
                   </Card>
@@ -361,12 +388,13 @@ export default function EntTrialListPage() {
             const isCompleted = a.attempt_status === 'submitted'
             const expired = Boolean(a.revoked_at) || (a.expires_at && new Date(a.expires_at) <= new Date())
             const cannotStart = !a.attempt_id && (expired || !a.variant_ready)
+            const canRetake = isCompleted && a.allow_retake && !expired && a.variant_ready
             return (
               <Card key={a.id} className="p-6 flex flex-col justify-between hover:shadow-lg transition-all">
                 <div>
                   <div className="flex justify-between items-start mb-3">
                     <Badge tone={isCompleted ? 'success' : 'primary'}>
-                      {isCompleted ? 'Аяқталған' : a.attempt_id ? 'Басталған' : expired ? 'Мерзімі аяқталған' : !a.variant_ready ? 'Әкімші толықтыруда' : 'Жаңа'}
+                      {canRetake ? 'Қайта тапсыруға болады' : isCompleted ? 'Аяқталған' : a.attempt_id ? 'Басталған' : expired ? 'Мерзімі аяқталған' : !a.variant_ready ? 'Әкімші толықтыруда' : 'Жаңа'}
                     </Badge>
                   </div>
                   <h3 className="text-xl font-bold mb-1">{a.variant_title || 'Пробтық ЕНТ'}</h3>
@@ -375,6 +403,8 @@ export default function EntTrialListPage() {
                     <p><span className="font-semibold text-foreground">{a.exam_mode === 'single' ? 'Пән:' : 'Бейін:'}</span> {a.exam_mode === 'single' ? rulesData?.subject_labels[a.single_subject] || a.single_subject : COMBO_LABELS[a.combination] || a.combination}</p>
                     <p><span className="font-semibold text-foreground">Формат:</span> {a.question_count ?? '—'} сұрақ, {a.max_score ?? '—'} балл, {a.duration_seconds ? Math.round(a.duration_seconds / 60) + (a.extra_time_minutes ?? 0) : '—'} мин</p>
                     <p><span className="font-semibold text-foreground">Бақылау:</span> камера және толық экран міндетті</p>
+                    {a.expires_at && <p><span className="font-semibold text-foreground">Дедлайн:</span> {new Date(a.expires_at).toLocaleString()}</p>}
+                    {a.allow_retake && <p><span className="font-semibold text-foreground">Әрекеттер:</span> дедлайнға дейін шексіз · аяқталғаны {a.completed_attempt_count ?? 0}</p>}
                   </div>
                   {isCompleted && a.attempt_score !== null && (
                     <div className="mt-4 p-3 bg-success/10 rounded-xl border border-success/20 flex items-center justify-between">
@@ -382,12 +412,16 @@ export default function EntTrialListPage() {
                       <span className="text-lg font-bold text-success">{a.attempt_score} / {a.max_score ?? 140} балл</span>
                     </div>
                   )}
+                  {a.allow_retake && a.best_score !== null && a.completed_attempt_count > 0 && <p className="mt-2 text-right text-xs font-medium text-muted">Ең жақсы нәтиже: {a.best_score} / {a.max_score ?? 140}</p>}
                 </div>
                 <div className="mt-6 pt-4 border-t border-border flex justify-end">
                   {isCompleted ? (
-                    <Button onClick={() => router.push(`/ent-trial/${a.attempt_id}/result`)} variant="secondary">
-                      Нәтижені көру <ArrowRight size={16} />
-                    </Button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button onClick={() => router.push(`/ent-trial/${a.attempt_id}/result`)} variant="secondary">
+                        Нәтижені көру
+                      </Button>
+                      {canRetake && <Button onClick={() => handleStart(a.id)} variant="primary">Қайта тапсыру <ArrowRight size={16} /></Button>}
+                    </div>
                   ) : (
                     <Button disabled={cannotStart} onClick={() => handleStart(a.id)} variant="primary">
                       {a.attempt_id ? 'Жалғастыру' : 'Бастау'} <ArrowRight size={16} />

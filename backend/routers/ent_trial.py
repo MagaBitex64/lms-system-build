@@ -6,8 +6,9 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from core.access import ensure_course_owner
 from core.db import get_pool
-from core.deps import get_current_user, require_admin, require_student
+from core.deps import get_current_user, require_admin, require_student, require_teacher
 from core.ent_rules import (COMBINATIONS, DURATION_SECONDS, RULES_VERSION, SUBJECT_LABELS,
                             blueprint, blueprint_metrics, question_issues, score_question,
                             subject_blueprint, validate_variant, variant_blueprint)
@@ -60,6 +61,11 @@ class VariantIn(BaseModel):
     single_subject: str | None = None
 
 
+class TeacherVariantIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=1000)
+
+
 class ContextIn(BaseModel):
     content: str = Field(max_length=30000)
 
@@ -72,6 +78,7 @@ class AccessIn(BaseModel):
     expires_at: dt.datetime | None = None
     extra_time_minutes: Literal[0, 40] = 0
     camera_required: bool = True
+    allow_retake: bool = False
 
 
 class AnswerIn(BaseModel):
@@ -104,6 +111,27 @@ async def variant_or_404(conn, variant_id, lock=False):
     if not row:
         raise HTTPException(404, "Вариант табылмады")
     return row
+
+
+async def managed_variant_or_404(conn, variant_id: int, user: dict, lock: bool = False):
+    """Admins manage every variant; teachers only single-subject variants attached to their own course."""
+    variant = await variant_or_404(conn, variant_id, lock)
+    if user["role"] == "admin":
+        return variant
+    if variant["exam_mode"] != "single" or not variant["course_id"]:
+        raise HTTPException(status_code=403, detail="Бұл вариантты редакциялауға рұқсат жоқ")
+    allowed = await conn.fetchval(
+        """SELECT EXISTS(
+            SELECT 1 FROM courses
+            WHERE id=$1 AND teacher_id=$2 AND ent_subject=$3
+        )""",
+        variant["course_id"],
+        user["id"],
+        variant["single_subject"],
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Бұл вариантты редакциялауға рұқсат жоқ")
+    return variant
 
 
 def rules_for_variant(variant):
@@ -221,9 +249,9 @@ async def create_ent_variant(data: VariantIn, user: dict = Depends(require_admin
             (data.exam_mode == "single" and data.single_subject not in SUBJECT_LABELS)):
         raise HTTPException(422, "Вариант атауы мен дұрыс пәндер комбинациясы қажет")
     pool = await get_pool()
-    vid = await pool.fetchval("""INSERT INTO ent_variants(title,description,combination,exam_mode,single_subject)
-        VALUES($1,$2,$3,$4,$5) RETURNING id""", data.title.strip(), data.description, data.combination,
-        data.exam_mode, data.single_subject if data.exam_mode == "single" else None)
+    vid = await pool.fetchval("""INSERT INTO ent_variants(title,description,combination,exam_mode,single_subject,created_by_id)
+        VALUES($1,$2,$3,$4,$5,$6) RETURNING id""", data.title.strip(), data.description, data.combination,
+        data.exam_mode, data.single_subject if data.exam_mode == "single" else None, user["id"])
     return {"ok": True, "id": vid}
 
 
@@ -253,21 +281,82 @@ async def delete_ent_variant(variant_id: int, user: dict = Depends(require_admin
     return {"ok": True}
 
 
+@router.get("/teacher/courses/{course_id}/variants")
+async def list_course_ent_variants(course_id: int, user: dict = Depends(require_teacher)):
+    course = await ensure_course_owner(user, course_id)
+    pool = await get_pool()
+    items = []
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM ent_variants WHERE course_id=$1 ORDER BY created_at DESC", course_id)
+        for row in rows:
+            _, _, validation = await content(conn, row)
+            items.append({
+                **dict(row),
+                **{key: value for key, value in validation.items() if key != "issues"},
+                "issue_count": len(validation["issues"]),
+            })
+    return {"items": items, "subject": course.get("ent_subject")}
+
+
+@router.post("/teacher/courses/{course_id}/variants")
+async def create_course_ent_variant(course_id: int, data: TeacherVariantIn, user: dict = Depends(require_teacher)):
+    course = await ensure_course_owner(user, course_id)
+    subject = course.get("ent_subject")
+    if subject not in SUBJECT_LABELS:
+        raise HTTPException(status_code=409, detail="Алдымен курстың ҰБТ пәнін таңдаңыз")
+    if not data.title.strip():
+        raise HTTPException(status_code=422, detail="Вариант атауы қажет")
+    pool = await get_pool()
+    variant_id = await pool.fetchval(
+        """INSERT INTO ent_variants(
+            title,description,combination,exam_mode,single_subject,course_id,created_by_id
+        ) VALUES($1,$2,'infmat','single',$3,$4,$5) RETURNING id""",
+        data.title.strip(), data.description, subject, course_id, user["id"],
+    )
+    return {"ok": True, "id": variant_id}
+
+
+@router.patch("/teacher/variants/{variant_id}")
+async def update_course_ent_variant(variant_id: int, data: TeacherVariantIn, user: dict = Depends(require_teacher)):
+    if not data.title.strip():
+        raise HTTPException(status_code=422, detail="Вариант атауы қажет")
+    pool = await get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        await managed_variant_or_404(conn, variant_id, user, True)
+        await conn.execute(
+            "UPDATE ent_variants SET title=$2,description=$3 WHERE id=$1",
+            variant_id, data.title.strip(), data.description,
+        )
+    return {"ok": True}
+
+
+@router.delete("/teacher/variants/{variant_id}")
+async def delete_course_ent_variant(variant_id: int, user: dict = Depends(require_teacher)):
+    pool = await get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        await managed_variant_or_404(conn, variant_id, user, True)
+        if await conn.fetchval("SELECT EXISTS(SELECT 1 FROM ent_trial_attempts WHERE variant_id=$1)", variant_id):
+            raise HTTPException(status_code=409, detail="Бұл вариантты оқушылар тапсырған, сондықтан оны жоюға болмайды")
+        await freeze_legacy(conn, variant_id)
+        await conn.execute("DELETE FROM ent_variants WHERE id=$1", variant_id)
+    return {"ok": True}
+
+
 @router.get("/admin/variants/{variant_id}/questions")
-async def get_variant_questions(variant_id: int, user: dict = Depends(require_admin)):
+async def get_variant_questions(variant_id: int, user: dict = Depends(require_teacher)):
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction(isolation="repeatable_read", readonly=True):
-        v = await variant_or_404(conn, variant_id)
+        v = await managed_variant_or_404(conn, variant_id, user)
         qs, contexts, validation = await content(conn, v)
     return {"items": qs, "contexts": contexts, "rules": rules_for_variant(v), "validation": validation,
             "variant": dict(v)}
 
 
 @router.put("/admin/variants/{variant_id}/contexts/{subject}/{start_position}")
-async def save_ent_context(variant_id: int, subject: str, start_position: int, data: ContextIn, user: dict = Depends(require_admin)):
+async def save_ent_context(variant_id: int, subject: str, start_position: int, data: ContextIn, user: dict = Depends(require_teacher)):
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
-        v = await variant_or_404(conn, variant_id, True)
+        v = await managed_variant_or_404(conn, variant_id, user, True)
         if start_position not in [c["start"] for c in rules_for_variant(v).get(subject, {}).get("contexts", [])]:
             raise HTTPException(422, "Бұл орында ортақ контекст жоқ")
         await freeze_legacy(conn, variant_id)
@@ -277,10 +366,10 @@ async def save_ent_context(variant_id: int, subject: str, start_position: int, d
 
 
 @router.post("/admin/questions")
-async def save_ent_question(data: QuestionIn, user: dict = Depends(require_admin)):
+async def save_ent_question(data: QuestionIn, user: dict = Depends(require_teacher)):
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
-        v = await variant_or_404(conn, data.variant_id, True)
+        v = await managed_variant_or_404(conn, data.variant_id, user, True)
         rules = rules_for_variant(v)
         slots = rules.get(data.subject, {}).get("slots", [])
         if data.position >= len(slots):
@@ -297,7 +386,8 @@ async def save_ent_question(data: QuestionIn, user: dict = Depends(require_admin
         if errors:
             raise HTTPException(422, "; ".join(errors))
         if data.image_file_id is not None and not await conn.fetchval(
-                "SELECT 1 FROM files WHERE id=$1 AND owner_id=$2 AND mime LIKE 'image/%'", data.image_file_id, user["id"]):
+                "SELECT 1 FROM files WHERE id=$1 AND mime LIKE 'image/%' AND (owner_id=$2 OR $3)",
+                data.image_file_id, user["id"], user["role"] == "admin"):
             raise HTTPException(422, "Жүктелген сурет табылмады немесе файл сурет емес")
         if data.image_placement == "marker" and (data.image_file_id is not None or data.image_url) and "{{image}}" not in data.prompt:
             raise HTTPException(422, "Мәтіндегі сурет орны үшін {{image}} белгісін қойыңыз")
@@ -328,7 +418,7 @@ async def save_ent_question(data: QuestionIn, user: dict = Depends(require_admin
 
 
 @router.delete("/admin/questions/{question_id}")
-async def delete_ent_question(question_id: int, user: dict = Depends(require_admin)):
+async def delete_ent_question(question_id: int, user: dict = Depends(require_teacher)):
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow("SELECT variant_id FROM ent_questions WHERE id=$1", question_id)
@@ -336,7 +426,7 @@ async def delete_ent_question(question_id: int, user: dict = Depends(require_adm
             raise HTTPException(404, "Сұрақ табылмады")
         if not row["variant_id"]:
             raise HTTPException(409, "Ескі сұрақтар банкі тек оқу режимінде")
-        await variant_or_404(conn, row["variant_id"], True)
+        await managed_variant_or_404(conn, row["variant_id"], user, True)
         await freeze_legacy(conn, row["variant_id"])
         await conn.execute("DELETE FROM ent_questions WHERE id=$1", question_id)
     return {"ok": True}
@@ -356,6 +446,8 @@ async def grant_ent_access(data: AccessIn, user: dict = Depends(require_admin)):
         raise HTTPException(422, "Қосымша 40 минут тек жеке оқушыға тағайындалады")
     if data.expires_at and (data.expires_at.tzinfo is None or data.expires_at <= now()):
         raise HTTPException(422, "Аяқталу уақыты уақыт белдеуімен және болашақта болуы керек")
+    if data.allow_retake and data.expires_at is None:
+        raise HTTPException(422, "Шексіз қайта тапсыру режимі үшін аяқталу күні мен уақытын көрсетіңіз")
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
         v = await variant_or_404(conn, data.variant_id, True)
@@ -364,9 +456,14 @@ async def grant_ent_access(data: AccessIn, user: dict = Depends(require_admin)):
             raise HTTPException(422, "Оқушы табылмады")
         if data.target_type == "group" and not await conn.fetchval("SELECT 1 FROM groups WHERE id=$1", data.group_id):
             raise HTTPException(422, "Топ табылмады")
-        aid = await conn.fetchval("""INSERT INTO ent_trial_accesses(granted_by_id,variant_id,combination,target_type,group_id,student_id,expires_at,extra_time_minutes,camera_required)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id""", user["id"], data.variant_id, v["combination"], data.target_type,
-            data.group_id if data.target_type == "group" else None, data.student_id if data.target_type == "student" else None, data.expires_at, data.extra_time_minutes, data.camera_required)
+        aid = await conn.fetchval("""INSERT INTO ent_trial_accesses(
+            granted_by_id,variant_id,combination,target_type,group_id,student_id,expires_at,
+            extra_time_minutes,camera_required,allow_retake
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id""",
+            user["id"], data.variant_id, v["combination"], data.target_type,
+            data.group_id if data.target_type == "group" else None,
+            data.student_id if data.target_type == "student" else None,
+            data.expires_at, data.extra_time_minutes, data.camera_required, data.allow_retake)
     return {"ok": True, "id": aid}
 
 
@@ -384,12 +481,110 @@ async def get_access_results(access_id: int, user: dict = Depends(require_admin)
     await finalize_expired()
     pool = await get_pool()
     rows = await pool.fetch("""SELECT a.*,u.full_name,u.email,
+        ROW_NUMBER() OVER (PARTITION BY a.student_id ORDER BY a.started_at)::int attempt_number,
         COUNT(ap.id)::int absence_count,
         COALESCE(SUM(COALESCE(ap.duration_seconds, EXTRACT(EPOCH FROM (clock_timestamp()-ap.started_at))::int)), 0)::int absence_seconds
         FROM ent_trial_attempts a JOIN users u ON u.id=a.student_id
         LEFT JOIN ent_absence_periods ap ON ap.attempt_id=a.id
-        WHERE a.access_id=$1 GROUP BY a.id,u.full_name,u.email ORDER BY a.total_score DESC""", access_id)
+        WHERE a.access_id=$1 GROUP BY a.id,u.full_name,u.email
+        ORDER BY (a.status='submitted') DESC,a.total_score DESC,a.started_at DESC""", access_id)
     return {"items": [{k: v for k, v in dict(r).items() if k not in ("snapshot", "responses")} for r in rows]}
+
+
+@router.get("/leaderboard")
+async def get_ent_leaderboard(user: dict = Depends(get_current_user)):
+    """Public authenticated rankings: full 140-point ENT and per-subject best scores."""
+    await finalize_expired()
+    pool = await get_pool()
+    rows = await pool.fetch("""SELECT t.id attempt_id,t.student_id,u.full_name,t.total_score,t.submitted_at,
+        t.scores_by_subject,t.kaz_history_score,t.reading_score,t.math_score,
+        t.subject1_score,t.subject2_score,t.combination,v.title variant_title,
+        COALESCE(t.snapshot->>'exam_mode',v.exam_mode,'full') exam_mode,
+        COALESCE(t.snapshot->>'single_subject',v.single_subject) single_subject,
+        NULLIF(t.snapshot->>'max_score','')::int snapshot_max_score
+        FROM ent_trial_attempts t
+        JOIN users u ON u.id=t.student_id AND u.role='student'
+        LEFT JOIN ent_variants v ON v.id=t.variant_id
+        WHERE t.status='submitted' ORDER BY t.submitted_at,t.id""")
+
+    subject_max = {
+        subject: sum(slot["max_points"] for slot in subject_blueprint(subject)["slots"])
+        for subject in SUBJECT_LABELS
+    }
+    general_best: dict[int, dict] = {}
+    general_attempts: dict[int, int] = {}
+    subject_best: dict[str, dict[int, dict]] = {subject: {} for subject in SUBJECT_LABELS}
+    subject_attempts: dict[tuple[str, int], int] = {}
+    subject_totals = dict.fromkeys(SUBJECT_LABELS, 0)
+    general_total = 0
+
+    def record(row, score, max_score):
+        return {
+            "attempt_id": row["attempt_id"], "student_id": row["student_id"],
+            "full_name": row["full_name"], "score": float(score), "max_score": max_score,
+            "percentage": round(float(score) / max_score * 100, 2) if max_score else 0,
+            "submitted_at": row["submitted_at"], "variant_title": row["variant_title"],
+        }
+
+    def prefer(candidate, current):
+        return (candidate["score"], -candidate["attempt_id"]) > (current["score"], -current["attempt_id"])
+
+    for row in rows:
+        exam_mode = row["exam_mode"]
+        max_score = int(row["snapshot_max_score"] or (subject_max.get(row["single_subject"], 0) if exam_mode == "single" else 140))
+        student_id = row["student_id"]
+
+        if exam_mode == "full" and max_score == 140:
+            general_total += 1
+            general_attempts[student_id] = general_attempts.get(student_id, 0) + 1
+            candidate = record(row, row["total_score"], 140)
+            if student_id not in general_best or prefer(candidate, general_best[student_id]):
+                general_best[student_id] = candidate
+
+        scores = decoded(row["scores_by_subject"]) or {}
+        if not scores:
+            if exam_mode == "single" and row["single_subject"] in SUBJECT_LABELS:
+                scores = {row["single_subject"]: row["total_score"]}
+            else:
+                profile1, profile2 = COMBINATIONS.get(row["combination"], (None, None))
+                scores = {
+                    "kaz_history": row["kaz_history_score"], "reading": row["reading_score"],
+                    "math_literacy": row["math_score"], profile1: row["subject1_score"],
+                    profile2: row["subject2_score"],
+                }
+        for subject, score in scores.items():
+            if subject not in SUBJECT_LABELS:
+                continue
+            subject_totals[subject] += 1
+            key = (subject, student_id)
+            subject_attempts[key] = subject_attempts.get(key, 0) + 1
+            candidate = record(row, score, subject_max[subject])
+            if student_id not in subject_best[subject] or prefer(candidate, subject_best[subject][student_id]):
+                subject_best[subject][student_id] = candidate
+
+    def ranked(best, attempts):
+        items = sorted(best.values(), key=lambda item: (-item["score"], item["attempt_id"]))[:100]
+        for rank, item in enumerate(items, 1):
+            item["rank"] = rank
+            item["attempt_count"] = attempts[item["student_id"]]
+        return items
+
+    general_items = ranked(general_best, general_attempts)
+    subjects = []
+    for subject, label in SUBJECT_LABELS.items():
+        attempts = {student_id: subject_attempts[(subject, student_id)] for student_id in subject_best[subject]}
+        subjects.append({
+            "subject": subject, "label": label, "max_score": subject_max[subject],
+            "participant_count": len(subject_best[subject]),
+            "completed_attempt_count": subject_totals[subject],
+            "items": ranked(subject_best[subject], attempts),
+        })
+    return {
+        "general": {"label": "Жалпы ҰБТ", "max_score": 140,
+                    "participant_count": len(general_best), "completed_attempt_count": general_total,
+                    "items": general_items},
+        "subjects": subjects, "limit": 100,
+    }
 
 
 @router.get("/admin/attempts/{attempt_id}/proctor-events")
@@ -410,8 +605,21 @@ async def get_my_accesses(user: dict = Depends(require_student)):
     await finalize_expired(user["id"])
     pool = await get_pool()
     rows = await pool.fetch("""SELECT a.*,v.title variant_title,v.description variant_description,v.exam_mode,v.single_subject,
-        t.id attempt_id,t.status attempt_status,t.total_score attempt_score FROM ent_trial_accesses a
-        LEFT JOIN ent_variants v ON v.id=a.variant_id LEFT JOIN ent_trial_attempts t ON t.access_id=a.id AND t.student_id=$1
+        t.id attempt_id,t.status attempt_status,t.total_score attempt_score,
+        COALESCE(stats.attempt_count,0)::int attempt_count,
+        COALESCE(stats.completed_attempt_count,0)::int completed_attempt_count,stats.best_score
+        FROM ent_trial_accesses a
+        LEFT JOIN ent_variants v ON v.id=a.variant_id
+        LEFT JOIN LATERAL (
+            SELECT id,status,total_score FROM ent_trial_attempts
+            WHERE access_id=a.id AND student_id=$1 ORDER BY id DESC LIMIT 1
+        ) t ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) attempt_count,
+                   COUNT(*) FILTER (WHERE status='submitted') completed_attempt_count,
+                   MAX(total_score) FILTER (WHERE status='submitted') best_score
+            FROM ent_trial_attempts WHERE access_id=a.id AND student_id=$1
+        ) stats ON TRUE
         WHERE t.id IS NOT NULL OR (a.revoked_at IS NULL AND (a.target_type='all' OR (a.target_type='student' AND a.student_id=$1) OR
         (a.target_type='group' AND a.group_id IN (SELECT group_id FROM group_students WHERE student_id=$1)))) ORDER BY a.created_at DESC""", user["id"])
     readiness = {}
@@ -441,9 +649,10 @@ async def start_ent_test(access_id: int, user: dict = Depends(require_student)):
         access = await conn.fetchrow("SELECT * FROM ent_trial_accesses WHERE id=$1 FOR UPDATE", access_id)
         if not access:
             raise HTTPException(404, "Рұқсат табылмады")
-        existing = await conn.fetchval("SELECT id FROM ent_trial_attempts WHERE access_id=$1 AND student_id=$2", access_id, user["id"])
-        if existing:
-            return {"ok": True, "attempt_id": existing}
+        existing = await conn.fetchrow("""SELECT id,status FROM ent_trial_attempts
+            WHERE access_id=$1 AND student_id=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE""", access_id, user["id"])
+        if existing and (not access["allow_retake"] or existing["status"] == "in_progress"):
+            return {"ok": True, "attempt_id": existing["id"]}
         authorized = access["target_type"] == "all" or (access["target_type"] == "student" and access["student_id"] == user["id"])
         if access["target_type"] == "group":
             authorized = bool(await conn.fetchval("SELECT 1 FROM group_students WHERE group_id=$1 AND student_id=$2", access["group_id"], user["id"]))

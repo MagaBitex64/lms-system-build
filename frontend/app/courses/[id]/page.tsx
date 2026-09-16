@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   Eye,
   EyeOff,
   FileText,
@@ -28,6 +29,7 @@ import {
 import { useI18n, type TKey } from '@/lib/i18n'
 import { useAuth } from '@/lib/auth'
 import { api, fetcher } from '@/lib/api'
+import CourseEntVariants from '@/components/course-ent-variants'
 import {
   Badge,
   Button,
@@ -100,6 +102,7 @@ type Course = {
   items: Item[] | null
   groups?: CourseGroup[] | null
   students?: CourseStudent[] | null
+  ent_subject?: string | null
 }
 
 const TYPE_ICON: Record<ItemType, ReactNode> = {
@@ -134,6 +137,8 @@ export default function CoursePage() {
   const [accessGroupIds, setAccessGroupIds] = useState<number[]>([])
   const [accessStudentIds, setAccessStudentIds] = useState<number[]>([])
   const [expandedGroupIds, setExpandedGroupIds] = useState<number[]>([])
+  const [contentExpanded, setContentExpanded] = useState(true)
+  const [entExpanded, setEntExpanded] = useState(true)
   
   // Delete course states
   const [menuOpen, setMenuOpen] = useState(false)
@@ -385,7 +390,15 @@ export default function CoursePage() {
 
       <section className="space-y-4">
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold">{t('courseContent')}</h2>
+          <button
+            type="button"
+            className="flex min-w-0 items-center gap-2 rounded-lg text-left hover:text-primary"
+            onClick={() => setContentExpanded((value) => !value)}
+            aria-expanded={contentExpanded}
+          >
+            {contentExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+            <h2 className="text-lg font-semibold">{t('courseContent')}</h2>
+          </button>
           {isOwner && (
             <Button variant="secondary" size="sm" onClick={() => setAddOpen(true)}>
               <PlusCircle size={15} />
@@ -394,7 +407,7 @@ export default function CoursePage() {
           )}
         </div>
 
-        {course.items === null ? (
+        {contentExpanded && (course.items === null ? (
           <EmptyState
             icon={<Lock size={22} />}
             title={t('locked')}
@@ -499,8 +512,28 @@ export default function CoursePage() {
             title={t('noData')}
             action={isOwner ? <Button onClick={() => setAddOpen(true)}>{t('addItem')}</Button> : undefined}
           />
-        )}
+        ))}
       </section>
+
+      {isOwner && <section className="space-y-4 border-t border-border pt-6">
+        <button
+          type="button"
+          className="flex w-full items-center gap-3 rounded-xl text-left hover:text-primary"
+          onClick={() => setEntExpanded((value) => !value)}
+          aria-expanded={entExpanded}
+        >
+          {entExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+          <span className="flex size-9 items-center justify-center rounded-lg bg-primary-soft text-primary"><ClipboardList size={18} /></span>
+          <span>
+            <span className="block text-lg font-semibold">Пәндік пробный ҰБТ</span>
+            <span className="block text-sm font-normal text-muted">Курс пәні бойынша варианттарды құру және редакциялау</span>
+          </span>
+        </button>
+        {entExpanded && <CourseEntVariants
+          courseId={courseId}
+          subject={course.ent_subject ?? null}
+        />}
+      </section>}
 
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title={t('addItem')}>
         <form onSubmit={createItem} className="space-y-4">

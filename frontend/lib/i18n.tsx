@@ -19,6 +19,7 @@ const dictionaries = {
     dashboard: 'Басты бет',
     myCourses: 'Менің курстарым',
     catalog: 'Курстар каталогы',
+    top: 'Топ',
     grades: 'Бағалар',
     search: 'Іздеу',
     searchPlaceholder: 'Курс, сабақ немесе материал іздеу...',

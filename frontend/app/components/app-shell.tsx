@@ -18,6 +18,7 @@ import {
   Home,
   Settings,
   BarChart3,
+  Trophy,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
@@ -55,22 +56,33 @@ function AuthedShell({ children }: { children: ReactNode }) {
     return <Spinner className="mt-40" />
   }
 
+  // The active ENT attempt has its own distraction-free shell. Authentication
+  // still happens here, but the regular dashboard navigation must not occupy
+  // the screen while the student is taking the exam.
+  const isEntAttempt = /^\/ent-trial\/[^/]+$/.test(pathname)
+  if (isEntAttempt) {
+    return <main className="min-h-screen bg-background">{children}</main>
+  }
+
   // Build navigation based on role
   const nav: NavItem[] = [{ href: '/dashboard', label: 'overview', icon: <Home size={20} /> }]
   
   if (user.role === 'student') {
     nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
+    nav.push({ href: '/top', label: 'top', icon: <Trophy size={20} /> })
     nav.push({ href: '/ent-trial', label: 'entTrial', icon: <ClipboardList size={20} /> })
   }
   
   if (user.role === 'teacher') {
     nav.push({ href: '/teacher', label: 'myCourses', icon: <GraduationCap size={20} /> })
     nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
+    nav.push({ href: '/top', label: 'top', icon: <Trophy size={20} /> })
   }
   
   if (user.role === 'admin') {
     nav.push({ href: '/teacher', label: 'myCourses', icon: <GraduationCap size={20} /> })
     nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
+    nav.push({ href: '/top', label: 'top', icon: <Trophy size={20} /> })
     nav.push({ href: '/ent-trial', label: 'entTrial', icon: <ClipboardList size={20} /> })
     nav.push({ href: '/admin', label: 'adminPanel', icon: <Users size={20} /> })
     nav.push({ href: '/admin/leads', label: 'leadRequests', icon: <ClipboardList size={20} /> })

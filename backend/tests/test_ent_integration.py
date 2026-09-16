@@ -4,6 +4,7 @@ No production tables/users are touched; rollback removes all fixtures and schema
 Run explicitly: python -m unittest tests.test_ent_integration -v
 """
 import copy
+import datetime as dt
 import json
 import unittest
 import uuid
@@ -48,6 +49,10 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         for role in ("admin", "student", "teacher"):
             row = await self.conn.fetchrow("INSERT INTO users(email,password_hash,full_name,role) VALUES($1,'unused',$2,$2) RETURNING *", f"{role}@example.invalid", role)
             self.users[role] = dict(row)
+        teacher2 = await self.conn.fetchrow(
+            "INSERT INTO users(email,password_hash,full_name,role) VALUES('teacher2@example.invalid','unused','teacher2','teacher') RETURNING *"
+        )
+        self.users["teacher2"] = dict(teacher2)
         self.actor = self.users["admin"]
         pool = TransactionPool(self.conn)
         async def get_pool():
@@ -82,6 +87,19 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.post("/ent-trial/admin/questions", json=q)
             self.assertEqual(response.status_code, 200, response.text)
         return qs
+
+    async def fill_single_variant(self, vid, subject):
+        _, questions, contexts = fixture()
+        for context in (item for item in contexts if item["subject"] == subject):
+            response = await self.client.put(
+                f"/ent-trial/admin/variants/{vid}/contexts/{subject}/{context['start_position']}",
+                json={"content": context["content"]},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+        for question in (item for item in questions if item["subject"] == subject):
+            question["variant_id"] = vid
+            response = await self.client.post("/ent-trial/admin/questions", json=question)
+            self.assertEqual(response.status_code, 200, response.text)
 
     async def start(self, vid):
         response = await self.client.post("/ent-trial/admin/accesses", json={"variant_id": vid, "target_type": "all"})
@@ -135,7 +153,7 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         violation = await self.client.post(f"/ent-trial/attempts/{attempt_id}/proctor/events", json={
             "session_id": "integration-test-session", "event_type": "fullscreen_exit", "details": {},
         })
-        self.assertEqual(violation.json()["violations"], 1)
+        self.assertEqual(violation.json()["violations"], 0)
         self.actor = {**self.users["student"], "id": 999999}
         self.assertEqual((await self.client.get(f"/ent-trial/attempts/{attempt_id}")).status_code, 404)
         for role in ("teacher", "admin"):
@@ -171,6 +189,12 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["questions"]["kaz_history"][0]["prompt"], "Формула: {{image}} жауапты таңдаңыз")
         self.assertTrue(result["questions"]["kaz_history"][0]["options"][0]["is_correct"])
         self.assertEqual(result["questions"]["informatics"][30]["points_earned"], 2)
+        leaderboard = (await self.client.get("/ent-trial/leaderboard")).json()
+        general_rank = next(item for item in leaderboard["general"]["items"]
+                            if item["student_id"] == self.users["student"]["id"])
+        self.assertEqual(general_rank["rank"], 1)
+        self.assertEqual(general_rank["score"], 140)
+        self.assertEqual(general_rank["max_score"], 140)
 
     async def test_expiry_grades_only_saved_answers_and_blocks_late_edits(self):
         vid = await self.create_variant()
@@ -214,6 +238,127 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(response.json()["rules"]), ["mathematics"])
         self.assertEqual(response.json()["validation"]["max_score"], 50)
         self.assertEqual(response.json()["validation"]["duration_seconds"], 80 * 60)
+
+    async def test_teacher_course_variants_are_single_subject_and_owner_only(self):
+        owned_course = await self.conn.fetchval(
+            """INSERT INTO courses(teacher_id,title,ent_subject)
+               VALUES($1,'Chemistry','chemistry') RETURNING id""",
+            self.users["teacher"]["id"],
+        )
+        foreign_course = await self.conn.fetchval(
+            """INSERT INTO courses(teacher_id,title,ent_subject)
+               VALUES($1,'Foreign chemistry','chemistry') RETURNING id""",
+            self.users["teacher2"]["id"],
+        )
+
+        async def ensure_owner(user, course_id):
+            row = await self.conn.fetchrow("SELECT * FROM courses WHERE id=$1", course_id)
+            if not row:
+                raise ent.HTTPException(404, "Course not found")
+            if user["role"] != "admin" and row["teacher_id"] != user["id"]:
+                raise ent.HTTPException(403, "You do not manage this course")
+            return dict(row)
+
+        with patch.object(ent, "ensure_course_owner", ensure_owner):
+            self.actor = self.users["teacher"]
+            response = await self.client.post(
+                f"/ent-trial/teacher/courses/{owned_course}/variants",
+                json={"title": "Teacher chemistry", "description": "One subject"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            variant_id = response.json()["id"]
+            variant = await self.conn.fetchrow("SELECT * FROM ent_variants WHERE id=$1", variant_id)
+            self.assertEqual((variant["exam_mode"], variant["single_subject"], variant["course_id"]),
+                             ("single", "chemistry", owned_course))
+            self.assertEqual((await self.client.get(
+                f"/ent-trial/admin/variants/{variant_id}/questions"
+            )).status_code, 200)
+
+            self.actor = self.users["teacher2"]
+            self.assertEqual((await self.client.get(
+                f"/ent-trial/admin/variants/{variant_id}/questions"
+            )).status_code, 403)
+            self.assertEqual((await self.client.get(
+                f"/ent-trial/teacher/courses/{owned_course}/variants"
+            )).status_code, 403)
+            self.assertEqual((await self.client.delete(
+                f"/ent-trial/teacher/variants/{variant_id}"
+            )).status_code, 403)
+
+            own_list = await self.client.get(f"/ent-trial/teacher/courses/{foreign_course}/variants")
+            self.assertEqual(own_list.status_code, 200, own_list.text)
+
+            self.actor = self.users["teacher"]
+            self.assertEqual((await self.client.delete(
+                f"/ent-trial/teacher/variants/{variant_id}"
+            )).status_code, 200)
+
+    async def test_repeatable_access_creates_unlimited_attempts_until_deadline(self):
+        response = await self.client.post("/ent-trial/admin/variants", json={
+            "title": "Repeatable math", "combination": "infmat", "exam_mode": "single",
+            "single_subject": "mathematics",
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        variant_id = response.json()["id"]
+        await self.fill_single_variant(variant_id, "mathematics")
+
+        missing_deadline = await self.client.post("/ent-trial/admin/accesses", json={
+            "variant_id": variant_id, "target_type": "all", "allow_retake": True,
+        })
+        self.assertEqual(missing_deadline.status_code, 422, missing_deadline.text)
+
+        deadline = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1)
+        response = await self.client.post("/ent-trial/admin/accesses", json={
+            "variant_id": variant_id, "target_type": "all", "allow_retake": True,
+            "expires_at": deadline.isoformat(),
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        access_id = response.json()["id"]
+
+        self.actor = self.users["student"]
+        first = (await self.client.post(f"/ent-trial/accesses/{access_id}/start")).json()["attempt_id"]
+        await self.conn.execute(
+            "UPDATE ent_trial_attempts SET status='submitted',submitted_at=now(),total_score=12 WHERE id=$1",
+            first,
+        )
+        second = (await self.client.post(f"/ent-trial/accesses/{access_id}/start")).json()["attempt_id"]
+        self.assertNotEqual(first, second)
+        resumed = (await self.client.post(f"/ent-trial/accesses/{access_id}/start")).json()["attempt_id"]
+        self.assertEqual(resumed, second)
+
+        cards = (await self.client.get("/ent-trial/my-accesses")).json()["items"]
+        card = next(item for item in cards if item["id"] == access_id)
+        self.assertEqual(card["attempt_id"], second)
+        self.assertEqual(card["attempt_count"], 2)
+        self.assertEqual(card["completed_attempt_count"], 1)
+        self.assertEqual(float(card["best_score"]), 12)
+
+        await self.conn.execute(
+            "UPDATE ent_trial_attempts SET status='submitted',submitted_at=now(),total_score=20 WHERE id=$1",
+            second,
+        )
+        self.actor = self.users["admin"]
+        results = (await self.client.get(f"/ent-trial/admin/accesses/{access_id}/results")).json()["items"]
+        self.assertEqual({item["attempt_number"] for item in results}, {1, 2})
+        self.assertEqual([float(item["total_score"]) for item in results], [20, 12])
+        leaderboard = (await self.client.get("/ent-trial/leaderboard")).json()
+        self.assertEqual(leaderboard["general"]["participant_count"], 0)
+        math_top = next(group for group in leaderboard["subjects"] if group["subject"] == "mathematics")
+        self.assertEqual(math_top["participant_count"], 1)
+        self.assertEqual(math_top["completed_attempt_count"], 2)
+        student_rank = next(item for item in math_top["items"] if item["student_id"] == self.users["student"]["id"])
+        self.assertEqual(student_rank["rank"], 1)
+        self.assertEqual(float(student_rank["score"]), 20)
+        self.assertEqual(float(student_rank["max_score"]), 50)
+        self.assertEqual(float(student_rank["percentage"]), 40)
+        self.assertEqual(student_rank["attempt_count"], 2)
+
+        self.actor = self.users["student"]
+        self.assertEqual((await self.client.get("/ent-trial/leaderboard")).status_code, 200)
+
+        await self.conn.execute("UPDATE ent_trial_accesses SET expires_at=now()-interval '1 second' WHERE id=$1", access_id)
+        blocked = await self.client.post(f"/ent-trial/accesses/{access_id}/start")
+        self.assertEqual(blocked.status_code, 403, blocked.text)
 
     async def test_proctor_events_do_not_terminate_attempt(self):
         vid = await self.create_variant(); await self.fill_variant(vid)

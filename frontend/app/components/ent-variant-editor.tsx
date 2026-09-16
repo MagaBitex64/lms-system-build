@@ -17,8 +17,8 @@ type EditorData = {
 }
 const inputClass = 'w-full rounded-xl border border-border bg-surface p-3 text-foreground'
 
-export default function VariantEditor({ variantId, variants, onSelectVariant, onSaved }: {
-  variantId: number | null; variants: { id: number; title: string }[]; onSelectVariant: (id: number | null) => void; onSaved: () => void
+export default function VariantEditor({ variantId, variants, onSelectVariant, onSaved, hideVariantSelect = false }: {
+  variantId: number | null; variants: { id: number; title: string }[]; onSelectVariant: (id: number | null) => void; onSaved: () => void; hideVariantSelect?: boolean
 }) {
   const { data, error, isLoading, mutate } = useSWR<EditorData>(variantId ? `/ent-trial/admin/variants/${variantId}/questions` : null, fetcher, { revalidateOnFocus: false })
   const [subject, setSubject] = useState('kaz_history')
@@ -54,11 +54,11 @@ export default function VariantEditor({ variantId, variants, onSelectVariant, on
   const contextReady = slot?.context_start === null || Boolean(currentContext && (!wordRange || (contextWords >= wordRange[0] && contextWords <= wordRange[1])))
   const extras = data?.items.filter(q => !data.rules[q.subject]?.slots[q.position] || data.items.find(x => x.subject === q.subject && x.position === q.position)?.id !== q.id) ?? []
   return <div className="space-y-5">
-    <label className="block space-y-2"><span className="text-sm font-semibold">Вариант</span>
+    {!hideVariantSelect && <label className="block space-y-2"><span className="text-sm font-semibold">Вариант</span>
       <select className={inputClass} value={variantId ?? ''} onChange={e => navigate(() => { onSelectVariant(Number(e.target.value) || null); setSubject('kaz_history'); setPosition(0) })}>
         <option value="">Вариантты таңдаңыз</option>{variants.map(v => <option key={v.id} value={v.id}>{v.title}</option>)}
       </select>
-    </label>
+    </label>}
     {isLoading && <Spinner />}{error && <ErrorState message={error.message} />}{actionError && <ErrorState message={actionError} />}
     {data && <>
       <Card className="space-y-3 p-5">

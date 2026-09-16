@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS courses (
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     announcement TEXT NOT NULL DEFAULT '',
+    ent_subject TEXT,
     is_published BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -274,6 +275,8 @@ CREATE TABLE IF NOT EXISTS ent_variants (
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     combination TEXT NOT NULL DEFAULT 'infmat',
+    course_id BIGINT REFERENCES courses(id) ON DELETE CASCADE,
+    created_by_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -321,6 +324,7 @@ CREATE TABLE IF NOT EXISTS ent_trial_accesses (
     group_id BIGINT REFERENCES groups(id) ON DELETE CASCADE,
     student_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ,
+    allow_retake BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ent_accesses_student ON ent_trial_accesses(student_id);
@@ -341,10 +345,10 @@ CREATE TABLE IF NOT EXISTS ent_trial_attempts (
     subject2_score    NUMERIC(5,2) NOT NULL DEFAULT 0,
     total_score       NUMERIC(6,2) NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'in_progress'
-        CHECK (status IN ('in_progress','submitted')),
-    UNIQUE (access_id, student_id)
+        CHECK (status IN ('in_progress','submitted'))
 );
 CREATE INDEX IF NOT EXISTS idx_ent_attempts_student ON ent_trial_attempts(student_id);
+CREATE INDEX IF NOT EXISTS idx_ent_attempts_access_student ON ent_trial_attempts(access_id, student_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS ent_trial_answers (
     id BIGSERIAL PRIMARY KEY,
@@ -360,6 +364,7 @@ CREATE INDEX IF NOT EXISTS idx_ent_answers_attempt ON ent_trial_answers(attempt_
 """
 
 MIGRATIONS = [
+    "ALTER TABLE courses ADD COLUMN IF NOT EXISTS ent_subject TEXT",
     "CREATE TABLE IF NOT EXISTS ent_variants (id BIGSERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', combination TEXT NOT NULL DEFAULT 'infmat', created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
     "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS variant_id BIGINT REFERENCES ent_variants(id) ON DELETE CASCADE",
     "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS question_type TEXT NOT NULL DEFAULT 'single_choice'",
@@ -452,6 +457,9 @@ MIGRATIONS = [
 ENT_MIGRATIONS = [
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS extra_time_minutes INTEGER NOT NULL DEFAULT 0 CHECK (extra_time_minutes IN (0,40))",
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS camera_required BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS allow_retake BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE ent_trial_attempts DROP CONSTRAINT IF EXISTS ent_trial_attempts_access_id_student_id_key",
+    "CREATE INDEX IF NOT EXISTS idx_ent_attempts_access_student ON ent_trial_attempts(access_id,student_id,id DESC)",
     "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS difficulty TEXT",
     "ALTER TABLE ent_matching_pairs ADD COLUMN IF NOT EXISTS correct_option_position INTEGER",
     "CREATE TABLE IF NOT EXISTS ent_contexts (id BIGSERIAL PRIMARY KEY, variant_id BIGINT NOT NULL REFERENCES ent_variants(id) ON DELETE CASCADE, subject TEXT NOT NULL, start_position INTEGER NOT NULL, content TEXT NOT NULL DEFAULT '', UNIQUE(variant_id, subject, start_position))",
@@ -464,6 +472,15 @@ ENT_MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_ent_attempts_deadline ON ent_trial_attempts(deadline_at) WHERE status = 'in_progress'",
     "ALTER TABLE ent_variants ADD COLUMN IF NOT EXISTS exam_mode TEXT NOT NULL DEFAULT 'full' CHECK (exam_mode IN ('full','single'))",
     "ALTER TABLE ent_variants ADD COLUMN IF NOT EXISTS single_subject TEXT",
+    "ALTER TABLE ent_variants ADD COLUMN IF NOT EXISTS course_id BIGINT REFERENCES courses(id) ON DELETE CASCADE",
+    "ALTER TABLE ent_variants ADD COLUMN IF NOT EXISTS created_by_id BIGINT REFERENCES users(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS idx_ent_variants_course ON ent_variants(course_id,created_at DESC)",
+    """UPDATE courses SET ent_subject = CASE title
+        WHEN 'Қазақстан тарихы' THEN 'kaz_history'
+        WHEN 'Математикалық сауаттылық' THEN 'math_literacy'
+        WHEN 'Оқу сауаттылығы' THEN 'reading'
+        END
+        WHERE ent_subject IS NULL AND title IN ('Қазақстан тарихы','Математикалық сауаттылық','Оқу сауаттылығы')""",
     "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS context_mode TEXT NOT NULL DEFAULT 'shared' CHECK (context_mode IN ('shared','addendum','override'))",
     "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS context_override TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS image_file_id BIGINT REFERENCES files(id) ON DELETE SET NULL",

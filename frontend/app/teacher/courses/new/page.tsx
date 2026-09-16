@@ -6,7 +6,8 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { api } from '@/lib/api'
-import { Button, Card, Field, Input, Textarea, PageHeader, ErrorState } from '../../../components/ui'
+import { Button, Card, Field, Input, Select, Textarea, PageHeader, ErrorState } from '../../../components/ui'
+import { SUBJECT_NAMES } from '@/lib/ent'
 
 export default function NewCoursePage() {
   const { t } = useI18n()
@@ -15,6 +16,7 @@ export default function NewCoursePage() {
   const [description, setDescription] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [isPublished, setIsPublished] = useState(false)
+  const [entSubject, setEntSubject] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -24,7 +26,7 @@ export default function NewCoursePage() {
     setError(null)
     try {
       const created = await api<{ id: number }>('/courses', {
-        body: { title, description, announcement, is_published: isPublished },
+        body: { title, description, announcement, is_published: isPublished, ent_subject: entSubject },
       })
       router.push(`/courses/${created.id}`)
     } catch (err) {
@@ -52,6 +54,12 @@ export default function NewCoursePage() {
           </Field>
           <Field label={t('announcement')}>
             <Textarea value={announcement} onChange={(e) => setAnnouncement(e.target.value)} rows={3} placeholder={t('announcement')} />
+          </Field>
+          <Field label="Курс пәні" hint="Курстағы тапсырмалар мен пробный ҰБТ осы пәнге байланады.">
+            <Select value={entSubject} onChange={(event) => setEntSubject(event.target.value)} required>
+              <option value="">Пәнді таңдаңыз</option>
+              {Object.entries(SUBJECT_NAMES).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </Select>
           </Field>
 
           <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-surface-muted/50 p-3.5">

@@ -11,7 +11,8 @@ from core.access import (
     is_item_unlocked,
 )
 from core.db import get_pool
-from core.deps import get_current_user, require_teacher
+from core.deps import get_current_user, require_admin, require_teacher
+from core.ent_rules import SUBJECT_LABELS
 from storage.local import storage
 
 router = APIRouter(prefix="/courses", tags=["courses"])
@@ -22,6 +23,11 @@ class CourseIn(BaseModel):
     description: str = Field(default="", max_length=5000)
     announcement: str = Field(default="", max_length=5000)
     is_published: bool = False
+    ent_subject: str | None = None
+
+
+class CourseSubjectIn(BaseModel):
+    subject: str = Field(min_length=1, max_length=50)
 
 
 class ItemIn(BaseModel):
@@ -143,19 +149,36 @@ async def my_courses(user: dict = Depends(get_current_user)):
 
 @router.post("")
 async def create_course(data: CourseIn, user: dict = Depends(require_teacher)):
+    if data.ent_subject is not None and data.ent_subject not in SUBJECT_LABELS:
+        raise HTTPException(status_code=422, detail="Дұрыс ҰБТ пәнін таңдаңыз")
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        INSERT INTO courses (teacher_id, title, description, announcement, is_published)
-        VALUES ($1, $2, $3, $4, $5) RETURNING *
+        INSERT INTO courses (teacher_id, title, description, announcement, is_published, ent_subject)
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
         """,
         user["id"],
         data.title.strip(),
         data.description,
         data.announcement,
         data.is_published,
+        data.ent_subject,
     )
     return dict(row) | {"created_at": str(row["created_at"])}
+
+
+@router.put("/{course_id}/ent-subject")
+async def set_course_ent_subject(course_id: int, data: CourseSubjectIn, user: dict = Depends(require_admin)):
+    course = await ensure_course_owner(user, course_id)
+    if data.subject not in SUBJECT_LABELS:
+        raise HTTPException(status_code=422, detail="Дұрыс ҰБТ пәнін таңдаңыз")
+    pool = await get_pool()
+    if course.get("ent_subject") and course["ent_subject"] != data.subject:
+        has_variants = await pool.fetchval("SELECT EXISTS(SELECT 1 FROM ent_variants WHERE course_id=$1)", course_id)
+        if has_variants:
+            raise HTTPException(status_code=409, detail="Пробный варианттар бар кезде курс пәнін өзгертуге болмайды")
+    await pool.execute("UPDATE courses SET ent_subject=$2 WHERE id=$1", course_id, data.subject)
+    return {"ok": True, "ent_subject": data.subject}
 
 
 @router.put("/{course_id}")
@@ -399,6 +422,7 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         "teacher_name": course["teacher_name"],
         "is_published": course["is_published"],
         "is_owner": is_owner,
+        "ent_subject": course["ent_subject"] if is_owner else None,
         "enrollment_status": "approved" if enrolled else None,
         "items": items,
         "groups": groups,

@@ -7,7 +7,7 @@ import { api, ApiError, fetcher, getFileUrl } from '@/lib/api'
 import { SUBJECT_NAMES, TYPE_NAMES } from '@/lib/ent'
 import { Button, Spinner, ErrorState, cx } from '@/components/ui'
 import { Clock, Flag, ChevronLeft, ChevronRight } from 'lucide-react'
-import EntCalculator from '@/components/ent-calculator'
+import EntExamTools from '@/components/ent-exam-tools'
 
 type Answer = { selected_option_id: number | null; selected_option_ids: number[]; matching_answer: Record<string, number | string> }
 type Question = Answer & { question_id: number; position: number; prompt: string; question_type: string; context_text: string; image_url: string; image_file_id: number | null; image_placement: 'before' | 'after' | 'marker'; image_width: number; image_alt: string; max_points: number; options: { id: number; text: string }[]; matching_pairs: { id: number; left_text: string }[] }
@@ -291,15 +291,15 @@ export default function EntTestPage() {
   const seconds = timeLeft ?? data.remaining_seconds ?? 0
   const time = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60].map(n => String(n).padStart(2, '0')).join(':')
   const disabled = submitting || timeLeft === 0 || conflict.current
-  return <div className="mx-auto max-w-7xl space-y-5">
-    <header className="sticky top-20 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+  return <div className="min-h-screen w-full space-y-5 bg-background px-4 py-4 pl-24 sm:px-6 sm:pl-28 lg:px-8 lg:pl-32">
+    <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface/95 p-4 shadow-sm backdrop-blur">
       <div><h1 className="text-xl font-bold">{data.title}</h1><p className="text-sm text-muted">Жауап берілді: {count}/{all.length} сұрақ</p></div>
       <div className="flex items-center gap-4"><span className={cx('flex items-center gap-2 font-mono text-xl font-bold', seconds < 600 && 'text-danger')}><Clock size={20} />{time}</span><Button disabled={submitting} onClick={() => void submit(true)}>{submitting ? 'Аяқталуда…' : 'Тестті аяқтау'}</Button></div>
     </header>
     {data.rules_version === 'legacy' && <p className="rounded-xl bg-warning/10 p-3 text-sm">Бұл — жаңартуға дейін басталған, ескі форматтағы тест. Жаңа ҰБТ құрылымына сай емес.</p>}
     <div aria-live="polite" className="text-sm text-muted">{saveStatus}</div>
     {saveError && <div role="alert" className="space-y-2 rounded-xl border border-danger p-4 text-sm text-danger"><p>Жауаптарды сақтау қатесі: {saveError}</p><p>Сақтау расталмайынша бетті жаппаңыз. Басқа терезеде тест ашылса, оны жабыңыз.</p><Button variant="secondary" onClick={() => conflict.current ? window.location.reload() : void save()}>{conflict.current ? 'Сервердегі жауаптарды қайта жүктеу' : 'Қайта сақтау'}</Button></div>}
-    <div className="grid gap-5 lg:grid-cols-[250px_1fr]">
+    <div className="grid gap-5 xl:grid-cols-[250px_1fr]">
       <aside className="space-y-4"><div className="flex flex-wrap gap-2 lg:flex-col">{subjects.map(s => <button key={s} onClick={() => { setSubject(s); setIndex(0) }} className={cx('rounded-xl border p-3 text-left text-sm font-semibold', subject === s ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-surface')}>{SUBJECT_NAMES[s] || s}<span className="ml-2 opacity-75">{data.questions[s].filter(q => answered(q, answers[q.question_id] ?? empty())).length}/{data.questions[s].length}</span></button>)}</div>
         <div className="flex flex-wrap gap-2">{questions.map((item, i) => <button key={item.question_id} onClick={() => setIndex(i)} aria-label={`Сұрақ ${item.position + 1}${flags[item.question_id] ? ', кейін қарау' : ''}`} aria-current={i === index ? 'step' : undefined} className={cx('relative h-10 min-w-10 rounded-lg border text-sm font-bold', i === index ? 'border-primary ring-2 ring-primary' : 'border-border', answered(item, answers[item.question_id] ?? empty()) ? 'bg-primary-soft text-primary' : 'bg-surface')}>
           {item.position + 1}{flags[item.question_id] && <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-warning" />}
@@ -330,7 +330,7 @@ export default function EntTestPage() {
         <div className="flex justify-between gap-3"><Button variant="secondary" disabled={index === 0} onClick={() => setIndex(i => i - 1)}><ChevronLeft size={16} />Алдыңғы</Button><Button variant="secondary" disabled={index === questions.length - 1} onClick={() => setIndex(i => i + 1)}>Келесі<ChevronRight size={16} /></Button></div>
       </div> : <p>Бұл ескі әрекетте осы пәннің сұрақтары жоқ.</p>}</main>
     </div>
-    {cameraRequired && <video ref={videoRef} autoPlay muted playsInline className="fixed bottom-20 left-5 z-30 aspect-video w-32 rounded-xl border border-border bg-black object-cover shadow-lg" aria-label="Камераны бақылау" />}
-    <EntCalculator />
+    {cameraRequired && <video ref={videoRef} autoPlay muted playsInline className="fixed bottom-5 right-5 z-30 aspect-video w-32 rounded-xl border border-border bg-black object-cover shadow-lg" aria-label="Камераны бақылау" />}
+    <EntExamTools />
   </div>
 }

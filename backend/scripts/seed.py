@@ -50,13 +50,19 @@ async def seed() -> None:
         s6 = await user("student6@phenomenon.school", "Аружан Сейіт", "student")
 
         async def course(teacher: int, title: str, desc: str, ann: str) -> int:
+            ent_subject = {
+                "Қазақстан тарихы": "kaz_history",
+                "Математикалық сауаттылық": "math_literacy",
+                "Оқу сауаттылығы": "reading",
+            }.get(title)
             return await conn.fetchval(
-                """INSERT INTO courses (teacher_id, title, description, announcement, is_published)
-                   VALUES ($1,$2,$3,$4,TRUE) RETURNING id""",
+                """INSERT INTO courses (teacher_id, title, description, announcement, is_published, ent_subject)
+                   VALUES ($1,$2,$3,$4,TRUE,$5) RETURNING id""",
                 teacher,
                 title,
                 desc,
                 ann,
+                ent_subject,
             )
 
         async def item(cid: int, typ: str, title: str, pos: int, note: str = "", seq: bool = False) -> int:
