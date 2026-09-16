@@ -79,7 +79,7 @@ export default function EntResultPage() {
         <h1 className="mb-2 text-3xl font-bold">Тест аяқталды!</h1>
         <p className="mb-6 text-muted">Дифференциалды бағалауды ескерген жалпы нәтиже:</p>
         <div className="text-6xl font-black text-foreground">{formatScore(data.scores.total)} <span className="text-3xl font-bold text-muted">/ {data.max_score}</span></div>
-        <p className="mt-4 text-sm text-muted">Прокторинг: {data.proctor_status === 'terminated' ? 'бұзушылықтарға байланысты автоматты аяқталды' : 'аяқталды'} · тіркелген бұзушылық: {data.proctor_violations}</p>
+        <p className="mt-4 text-sm text-muted">Прокторинг аяқталды. Әкімші журналынан тесттен тыс болған уақытты көруге болады.</p>
       </Card>
 
       <h2 className="text-xl font-bold">Пәндер бойынша талдау</h2>

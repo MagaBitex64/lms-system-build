@@ -11,7 +11,7 @@ import EntCalculator from '@/components/ent-calculator'
 
 type Answer = { selected_option_id: number | null; selected_option_ids: number[]; matching_answer: Record<string, number | string> }
 type Question = Answer & { question_id: number; position: number; prompt: string; question_type: string; context_text: string; image_url: string; image_file_id: number | null; image_placement: 'before' | 'after' | 'marker'; image_width: number; image_alt: string; max_points: number; options: { id: number; text: string }[]; matching_pairs: { id: number; left_text: string }[] }
-type Attempt = { id: number; title: string; rules_version: string; status: string; revision: number; remaining_seconds: number | null; server_time: string; deadline_at: string | null; requires_proctor_setup: boolean; proctor_status: string; proctor_violations: number; questions: Record<string, Question[]> }
+type Attempt = { id: number; title: string; rules_version: string; status: string; revision: number; remaining_seconds: number | null; server_time: string; deadline_at: string | null; requires_proctor_setup: boolean; camera_required: boolean; proctor_status: string; proctor_violations: number; questions: Record<string, Question[]> }
 type SaveResult = { revision: number; status: string }
 const empty = (): Answer => ({ selected_option_id: null, selected_option_ids: [], matching_answer: {} })
 function answered(q: Question, a: Answer) {
@@ -49,6 +49,7 @@ export default function EntTestPage() {
   const [cameraPrepared, setCameraPrepared] = useState(false)
   const [screenPrepared, setScreenPrepared] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
+  const [reentryRequired, setReentryRequired] = useState(false)
   const [violations, setViolations] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
   const mediaRef = useRef<MediaStream | null>(null)
@@ -62,9 +63,11 @@ export default function EntTestPage() {
   const inFlight = useRef<Promise<void> | null>(null)
   const submissionLock = useRef(false)
   const conflict = useRef(false)
+  const absenceActive = useRef(false)
   const all = useMemo(() => Object.values(data?.questions ?? {}).flat(), [data?.questions])
   const subjects = Object.keys(data?.questions ?? {})
   const payload = useCallback(() => all.map(q => ({ question_id: q.question_id, ...(latest.current[q.question_id] ?? empty()) })), [all])
+  const cameraRequired = data?.camera_required ?? true
 
   useEffect(() => {
     if (!data || initialized.current === data.id) return
@@ -111,7 +114,7 @@ export default function EntTestPage() {
   }
 
   async function prepareScreen() {
-    if (!data || proctorStarting || !mediaRef.current?.active) return
+    if (!data || proctorStarting || (cameraRequired && !mediaRef.current?.active)) return
     setProctorStarting(true); setProctorError('')
     try {
       if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('Бұл браузер экран бөлісуді қолдамайды')
@@ -127,14 +130,34 @@ export default function EntTestPage() {
   }
 
   async function startProctoring() {
-    if (!data || proctorStarting || !mediaRef.current?.active || !screenRef.current?.active) return
+    if (!data || proctorStarting || (cameraRequired && !mediaRef.current?.active) || !screenRef.current?.active) return
     setProctorStarting(true); setProctorError('')
     try {
       if (!document.documentElement.requestFullscreen) throw new Error('Бұл браузер толық экран режимін қолдамайды')
       await document.documentElement.requestFullscreen()
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
       if (!document.fullscreenElement) throw new Error('Толық экран режимі қосылмады. Қайтадан көріңіз.')
-      await api(`/ent-trial/attempts/${id}/proctor/activate`, { method: 'POST', body: { session_id: sessionId.current, camera_active: mediaRef.current.active, screen_active: screenRef.current.active, fullscreen: true } })
+      await api(`/ent-trial/attempts/${id}/proctor/activate`, { method: 'POST', body: { session_id: sessionId.current, camera_active: mediaRef.current?.active ?? false, screen_active: screenRef.current.active, fullscreen: true } })
+      setCameraReady(true)
+      await mutate()
+    } catch (e) {
+      if (document.fullscreenElement) void document.exitFullscreen()
+      setProctorError((e as Error).message)
+    } finally { setProctorStarting(false) }
+  }
+
+  async function resumeTest() {
+    if (!data || proctorStarting || (cameraRequired && !mediaRef.current?.active) || !screenRef.current?.active) return
+    setProctorStarting(true); setProctorError('')
+    try {
+      if (!document.documentElement.requestFullscreen) throw new Error('Бұл браузер толық экран режимін қолдамайды')
+      await document.documentElement.requestFullscreen()
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      if (!document.fullscreenElement) throw new Error('Толық экран режимі қосылмады. Қайтадан көріңіз.')
+      await api(`/ent-trial/attempts/${id}/proctor/activate`, { method: 'POST', body: { session_id: sessionId.current, camera_active: mediaRef.current?.active ?? false, screen_active: screenRef.current.active, fullscreen: true } })
+      await reportProctor('absence_end')
+      absenceActive.current = false
+      setReentryRequired(false)
       setCameraReady(true)
       await mutate()
     } catch (e) {
@@ -144,10 +167,16 @@ export default function EntTestPage() {
   }
 
   useEffect(() => {
-    if (!data || data.requires_proctor_setup || data.status !== 'in_progress' || (data.proctor_status === 'active' && !cameraReady)) return
-    const visibility = () => { if (document.hidden) void reportProctor('tab_hidden') }
-    const blur = () => { window.setTimeout(() => { if (!document.hasFocus()) void reportProctor('window_blur') }, 400) }
-    const fullscreen = () => { if (!document.fullscreenElement) { setCameraReady(false); void reportProctor('fullscreen_exit') } }
+    if (!data || data.requires_proctor_setup || data.status !== 'in_progress' || (data.proctor_status === 'active' && cameraRequired && !cameraReady)) return
+    const startAbsence = () => {
+      if (absenceActive.current) return
+      absenceActive.current = true
+      setReentryRequired(true)
+      void reportProctor('absence_start')
+    }
+    const visibility = () => { if (document.hidden) startAbsence() }
+    const blur = () => { window.setTimeout(() => { if (!document.hasFocus()) startAbsence() }, 400) }
+    const fullscreen = () => { if (!document.fullscreenElement) startAbsence() }
     const block = (event: Event) => { event.preventDefault(); void reportProctor(event.type === 'contextmenu' ? 'context_menu' : event.type) }
     const shortcut = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
@@ -166,7 +195,7 @@ export default function EntTestPage() {
       document.removeEventListener('cut', block); document.removeEventListener('paste', block); document.removeEventListener('contextmenu', block)
       document.removeEventListener('keydown', shortcut); window.clearInterval(heartbeat)
     }
-  }, [cameraReady, data?.proctor_status, data?.requires_proctor_setup, data?.status, reportProctor])
+  }, [cameraReady, cameraRequired, data?.proctor_status, data?.requires_proctor_setup, data?.status, reportProctor])
 
   useEffect(() => { if (cameraReady && videoRef.current && mediaRef.current) videoRef.current.srcObject = mediaRef.current }, [cameraReady, data?.requires_proctor_setup])
 
@@ -193,12 +222,12 @@ export default function EntTestPage() {
   }, [id, payload, router])
 
   useEffect(() => {
-    if (!data || data.status !== 'in_progress' || data.requires_proctor_setup || (data.proctor_status === 'active' && !cameraReady) || initialized.current !== data.id) return
+    if (!data || data.status !== 'in_progress' || data.requires_proctor_setup || (data.proctor_status === 'active' && cameraRequired && !cameraReady) || initialized.current !== data.id) return
     const timer = window.setTimeout(() => { void save() }, 350)
     // Periodic retry also saves edits made while a previous request was in flight.
     const retry = window.setInterval(() => { void save() }, 5000)
     return () => { window.clearTimeout(timer); window.clearInterval(retry) }
-  }, [answers, cameraReady, data?.id, data?.proctor_status, data?.status, data?.requires_proctor_setup, save])
+  }, [answers, cameraReady, cameraRequired, data?.id, data?.proctor_status, data?.status, data?.requires_proctor_setup, save])
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (sequence.current !== savedSequence.current && !submissionLock.current) { event.preventDefault(); event.returnValue = '' } }
@@ -235,16 +264,25 @@ export default function EntTestPage() {
   if (isLoading || !data) return error ? <ErrorState message={error.message} /> : <Spinner className="mt-20" />
   if (error) return <ErrorState message={error.message} />
   if (data.status === 'submitted') return <Spinner />
-  if (data.requires_proctor_setup || (data.proctor_status === 'active' && !cameraReady)) return <div className="mx-auto max-w-2xl py-10"><div className="space-y-5 rounded-2xl border border-border bg-surface p-6 sm:p-8">
+  if (data.requires_proctor_setup || (data.proctor_status === 'active' && cameraRequired && !cameraReady)) return <div className="mx-auto max-w-2xl py-10"><div className="space-y-5 rounded-2xl border border-border bg-surface p-6 sm:p-8">
     <div><p className="text-sm font-semibold text-primary">Прокторингті тексеру</p><h1 className="mt-1 text-2xl font-bold">{data.title}</h1></div>
-    <p className="text-muted">Тест уақыты камера, бүкіл экранды бөлісу және толық экран режимі қосылғаннан кейін ғана басталады.</p>
-    <ul className="list-disc space-y-2 pl-5 text-sm"><li>Алдымен камераны тексеріңіз, содан кейін «Бүкіл экран» нұсқасын таңдаңыз.</li><li>Қойындыны ауыстыруға, экран бөлісуді тоқтатуға және толық экраннан шығуға болмайды.</li><li>Көшіру, қою, оң жақ мәзір және тыйым салынған пернелер бұғатталады.</li><li>Үш тіркелген бұзушылықтан кейін тест автоматты түрде аяқталады.</li><li>Камера мен экран бейнесі жазылмайды және серверге жіберілмейді; браузер тек олардың қосулы екенін бақылайды.</li></ul>
-    <video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full rounded-xl bg-black object-cover" />
+    <p className="text-muted">Тест уақыты {cameraRequired ? 'камера, ' : ''}бүкіл экранды бөлісу және толық экран режимі қосылғаннан кейін ғана басталады.</p>
+    <ul className="list-disc space-y-2 pl-5 text-sm">{cameraRequired && <li>Алдымен камераны тексеріңіз, содан кейін «Бүкіл экран» нұсқасын таңдаңыз.</li>}<li>{cameraRequired ? 'Камера, ' : ''}экран бөлісу және толық экран режимі тест барысында міндетті.</li><li>Қойынды немесе терезе ауысса, оның ұзақтығы әкімші журналында сақталады.</li><li>Көшіру, қою, оң жақ мәзір және тыйым салынған пернелер бұғатталады.</li>{cameraRequired && <li>Камера мен экран бейнесі жазылмайды және серверге жіберілмейді; браузер тек олардың қосулы екенін бақылайды.</li>}</ul>
+    {cameraRequired && <video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full rounded-xl bg-black object-cover" />}
     {proctorError && <p role="alert" className="rounded-xl border border-danger p-3 text-sm text-danger">{proctorError}</p>}
-    {!cameraPrepared ? <Button className="w-full" disabled={proctorStarting} onClick={() => void prepareCamera()}>{proctorStarting ? 'Камера тексерілуде…' : '1. Камераны қосу және тексеру'}</Button>
-      : !screenPrepared ? <Button className="w-full" disabled={proctorStarting} onClick={() => void prepareScreen()}>{proctorStarting ? 'Экран таңдалуда…' : '2. Бүкіл экранды бөлісу'}</Button>
-      : <Button className="w-full" disabled={proctorStarting} onClick={() => void startProctoring()}>{proctorStarting ? 'Тест басталуда…' : '3. Толық экранды қосып, тестті бастау'}</Button>}
+    {cameraRequired && !cameraPrepared ? <Button className="w-full" disabled={proctorStarting} onClick={() => void prepareCamera()}>{proctorStarting ? 'Камера тексерілуде…' : '1. Камераны қосу және тексеру'}</Button>
+      : !screenPrepared ? <Button className="w-full" disabled={proctorStarting} onClick={() => void prepareScreen()}>{proctorStarting ? 'Экран таңдалуда…' : `${cameraRequired ? '2' : '1'}. Бүкіл экранды бөлісу`}</Button>
+      : <Button className="w-full" disabled={proctorStarting} onClick={() => void startProctoring()}>{proctorStarting ? 'Тест басталуда…' : `${cameraRequired ? '3' : '2'}. Толық экранды қосып, тестті бастау`}</Button>}
     <p className="text-xs text-muted">Маңызды: браузер басқа телефонды немесе экран сыртындағы әрекеттерді толық анықтай алмайды. Күмәнді оқиғалар әкімші журналында сақталады.</p>
+  </div></div>
+  if (reentryRequired) return <div className="mx-auto max-w-2xl py-10"><div className="space-y-5 rounded-2xl border border-warning bg-surface p-6 sm:p-8">
+    <div><p className="text-sm font-semibold text-warning">Тест уақытша тоқтатылды</p><h1 className="mt-1 text-2xl font-bold">{data.title}</h1></div>
+    <p className="text-muted">Тесттен тыс әрекет анықталды. {cameraRequired ? 'Камера мен ' : ''}бүкіл экранды бөлісу қосулы күйде, тестке оралу үшін батырманы басыңыз.</p>
+    {proctorError && <p role="alert" className="rounded-xl border border-danger p-3 text-sm text-danger">{proctorError}</p>}
+    <Button className="w-full" disabled={proctorStarting || (cameraRequired && !mediaRef.current?.active) || !screenRef.current?.active} onClick={() => void resumeTest()}>
+      {proctorStarting ? 'Тестке қайту тексерілуде…' : 'Тестке жалғастыру'}
+    </Button>
+    <p className="text-xs text-muted">Таймер тоқтамайды. Бұл уақыт әкімші журналында сақталады.</p>
   </div></div>
   const questions = data.questions[subject] ?? []
   const q = questions[index]
@@ -256,7 +294,7 @@ export default function EntTestPage() {
   return <div className="mx-auto max-w-7xl space-y-5">
     <header className="sticky top-20 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
       <div><h1 className="text-xl font-bold">{data.title}</h1><p className="text-sm text-muted">Жауап берілді: {count}/{all.length} сұрақ</p></div>
-      <div className="flex items-center gap-4"><span className="text-xs text-muted">Бұзушылық: {violations}/3</span><span className={cx('flex items-center gap-2 font-mono text-xl font-bold', seconds < 600 && 'text-danger')}><Clock size={20} />{time}</span><Button disabled={submitting} onClick={() => void submit(true)}>{submitting ? 'Аяқталуда…' : 'Тестті аяқтау'}</Button></div>
+      <div className="flex items-center gap-4"><span className={cx('flex items-center gap-2 font-mono text-xl font-bold', seconds < 600 && 'text-danger')}><Clock size={20} />{time}</span><Button disabled={submitting} onClick={() => void submit(true)}>{submitting ? 'Аяқталуда…' : 'Тестті аяқтау'}</Button></div>
     </header>
     {data.rules_version === 'legacy' && <p className="rounded-xl bg-warning/10 p-3 text-sm">Бұл — жаңартуға дейін басталған, ескі форматтағы тест. Жаңа ҰБТ құрылымына сай емес.</p>}
     <div aria-live="polite" className="text-sm text-muted">{saveStatus}</div>
@@ -292,7 +330,7 @@ export default function EntTestPage() {
         <div className="flex justify-between gap-3"><Button variant="secondary" disabled={index === 0} onClick={() => setIndex(i => i - 1)}><ChevronLeft size={16} />Алдыңғы</Button><Button variant="secondary" disabled={index === questions.length - 1} onClick={() => setIndex(i => i + 1)}>Келесі<ChevronRight size={16} /></Button></div>
       </div> : <p>Бұл ескі әрекетте осы пәннің сұрақтары жоқ.</p>}</main>
     </div>
-    <video ref={videoRef} autoPlay muted playsInline className="fixed bottom-20 left-5 z-30 aspect-video w-32 rounded-xl border border-border bg-black object-cover shadow-lg" aria-label="Камераны бақылау" />
+    {cameraRequired && <video ref={videoRef} autoPlay muted playsInline className="fixed bottom-20 left-5 z-30 aspect-video w-32 rounded-xl border border-border bg-black object-cover shadow-lg" aria-label="Камераны бақылау" />}
     <EntCalculator />
   </div>
 }

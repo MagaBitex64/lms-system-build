@@ -71,6 +71,7 @@ class AccessIn(BaseModel):
     student_id: int | None = None
     expires_at: dt.datetime | None = None
     extra_time_minutes: Literal[0, 40] = 0
+    camera_required: bool = True
 
 
 class AnswerIn(BaseModel):
@@ -94,7 +95,7 @@ class ProctorActivateIn(BaseModel):
 
 class ProctorEventIn(BaseModel):
     session_id: str = Field(min_length=16, max_length=100)
-    event_type: Literal["heartbeat", "tab_hidden", "window_blur", "fullscreen_exit", "camera_stopped", "screen_share_stopped", "copy", "cut", "paste", "context_menu", "forbidden_shortcut"]
+    event_type: Literal["heartbeat", "absence_start", "absence_end", "tab_hidden", "window_blur", "fullscreen_exit", "camera_stopped", "screen_share_stopped", "copy", "cut", "paste", "context_menu", "forbidden_shortcut"]
     details: dict = Field(default_factory=dict)
 
 
@@ -363,9 +364,9 @@ async def grant_ent_access(data: AccessIn, user: dict = Depends(require_admin)):
             raise HTTPException(422, "Оқушы табылмады")
         if data.target_type == "group" and not await conn.fetchval("SELECT 1 FROM groups WHERE id=$1", data.group_id):
             raise HTTPException(422, "Топ табылмады")
-        aid = await conn.fetchval("""INSERT INTO ent_trial_accesses(granted_by_id,variant_id,combination,target_type,group_id,student_id,expires_at,extra_time_minutes)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id""", user["id"], data.variant_id, v["combination"], data.target_type,
-            data.group_id if data.target_type == "group" else None, data.student_id if data.target_type == "student" else None, data.expires_at, data.extra_time_minutes)
+        aid = await conn.fetchval("""INSERT INTO ent_trial_accesses(granted_by_id,variant_id,combination,target_type,group_id,student_id,expires_at,extra_time_minutes,camera_required)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id""", user["id"], data.variant_id, v["combination"], data.target_type,
+            data.group_id if data.target_type == "group" else None, data.student_id if data.target_type == "student" else None, data.expires_at, data.extra_time_minutes, data.camera_required)
     return {"ok": True, "id": aid}
 
 
@@ -382,7 +383,12 @@ async def revoke_ent_access(access_id: int, user: dict = Depends(require_admin))
 async def get_access_results(access_id: int, user: dict = Depends(require_admin)):
     await finalize_expired()
     pool = await get_pool()
-    rows = await pool.fetch("SELECT a.*,u.full_name,u.email FROM ent_trial_attempts a JOIN users u ON u.id=a.student_id WHERE access_id=$1 ORDER BY total_score DESC", access_id)
+    rows = await pool.fetch("""SELECT a.*,u.full_name,u.email,
+        COUNT(ap.id)::int absence_count,
+        COALESCE(SUM(COALESCE(ap.duration_seconds, EXTRACT(EPOCH FROM (clock_timestamp()-ap.started_at))::int)), 0)::int absence_seconds
+        FROM ent_trial_attempts a JOIN users u ON u.id=a.student_id
+        LEFT JOIN ent_absence_periods ap ON ap.attempt_id=a.id
+        WHERE a.access_id=$1 GROUP BY a.id,u.full_name,u.email ORDER BY a.total_score DESC""", access_id)
     return {"items": [{k: v for k, v in dict(r).items() if k not in ("snapshot", "responses")} for r in rows]}
 
 
@@ -393,7 +399,10 @@ async def get_proctor_events(attempt_id: int, user: dict = Depends(require_admin
         raise HTTPException(404, "Әрекет табылмады")
     rows = await pool.fetch("""SELECT id,event_type,severity,details,created_at FROM ent_proctor_events
         WHERE attempt_id=$1 ORDER BY created_at,id""", attempt_id)
-    return {"items": [dict(r) for r in rows]}
+    absences = await pool.fetch("""SELECT id,started_at,ended_at,
+        COALESCE(duration_seconds, GREATEST(0, EXTRACT(EPOCH FROM (clock_timestamp()-started_at))::INTEGER)) duration_seconds
+        FROM ent_absence_periods WHERE attempt_id=$1 ORDER BY started_at,id""", attempt_id)
+    return {"items": [dict(r) for r in rows], "absences": [dict(r) for r in absences]}
 
 
 @router.get("/my-accesses")
@@ -444,23 +453,28 @@ async def start_ent_test(access_id: int, user: dict = Depends(require_student)):
             raise HTTPException(409, "Ескі кездейсоқ тест іске қосылмайды. Әкімші құрылымды вариант тағайындауы керек.")
         qs, contexts = await ready_content(conn, v)
         started = now()
+        snapshot = make_snapshot(v, qs, contexts)
+        snapshot["camera_required"] = access["camera_required"]
         aid = await conn.fetchval("""INSERT INTO ent_trial_attempts(access_id,student_id,variant_id,combination,snapshot,started_at,deadline_at)
-            VALUES($1,$2,$3,$4,$5::jsonb,$6,NULL) RETURNING id""", access_id, user["id"], v["id"], v["combination"], json.dumps(make_snapshot(v, qs, contexts)), started)
+            VALUES($1,$2,$3,$4,$5::jsonb,$6,NULL) RETURNING id""", access_id, user["id"], v["id"], v["combination"], json.dumps(snapshot), started)
     return {"ok": True, "attempt_id": aid}
 
 
 @router.post("/attempts/{attempt_id}/proctor/activate")
 async def activate_proctor(attempt_id: int, data: ProctorActivateIn, user: dict = Depends(require_student)):
-    if not data.camera_active or not data.screen_active or not data.fullscreen:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        camera_required = bool(await conn.fetchval("""SELECT a.camera_required FROM ent_trial_attempts t
+            JOIN ent_trial_accesses a ON a.id=t.access_id WHERE t.id=$1 AND t.student_id=$2""", attempt_id, user["id"]))
+    if (camera_required and not data.camera_active) or not data.screen_active or not data.fullscreen:
         missing = []
-        if not data.camera_active:
+        if camera_required and not data.camera_active:
             missing.append("камера")
         if not data.screen_active:
             missing.append("экран демонстрациясы")
         if not data.fullscreen:
             missing.append("толық экран режимі")
         raise HTTPException(422, "Қосылмаған: " + ", ".join(missing))
-    pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
         attempt = await owned_attempt(conn, attempt_id, user["id"])
         if attempt["status"] == "submitted":
@@ -471,13 +485,7 @@ async def activate_proctor(attempt_id: int, data: ProctorActivateIn, user: dict 
                 raise HTTPException(409, "Тест басқа терезеде ашылған")
             await conn.execute("""INSERT INTO ent_proctor_events(attempt_id,event_type,severity,details)
                 VALUES($1,'window_blur',1,$2::jsonb)""", attempt_id, json.dumps({"action": "session_recovered"}))
-            await conn.execute("UPDATE ent_trial_attempts SET proctor_violations=proctor_violations+1,proctor_session_id=$2 WHERE id=$1", attempt_id, data.session_id)
-            attempt = await owned_attempt(conn, attempt_id, user["id"])
-            if attempt["proctor_violations"] >= 3:
-                attempt = dict(await conn.fetchrow("UPDATE ent_trial_attempts SET proctor_status='terminated' WHERE id=$1 RETURNING *", attempt_id))
-                attempt = await finish(conn, attempt)
-                return {"ok": True, "status": attempt["status"], "deadline_at": attempt["deadline_at"],
-                        "violations": attempt["proctor_violations"]}
+            await conn.execute("UPDATE ent_trial_attempts SET proctor_session_id=$2 WHERE id=$1", attempt_id, data.session_id)
         if attempt["deadline_at"] is None:
             snapshot = decoded(attempt["snapshot"])
             duration = int(snapshot.get("duration_seconds", DURATION_SECONDS))
@@ -501,7 +509,7 @@ async def activate_proctor(attempt_id: int, data: ProctorActivateIn, user: dict 
 async def proctor_event(attempt_id: int, data: ProctorEventIn, user: dict = Depends(require_student)):
     if len(json.dumps(data.details)) > 2000:
         raise HTTPException(422, "Прокторинг оқиғасының деректері тым үлкен")
-    severity = {"heartbeat": 0, "copy": 1, "cut": 1, "paste": 1, "context_menu": 1,
+    severity = {"heartbeat": 0, "absence_start": 0, "absence_end": 0, "copy": 1, "cut": 1, "paste": 1, "context_menu": 1,
                 "window_blur": 1, "tab_hidden": 1, "forbidden_shortcut": 1,
                 "fullscreen_exit": 2, "camera_stopped": 2, "screen_share_stopped": 2}[data.event_type]
     pool = await get_pool()
@@ -517,18 +525,22 @@ async def proctor_event(attempt_id: int, data: ProctorEventIn, user: dict = Depe
                 attempt = await finish(conn, attempt)
             return {"ok": True, "status": attempt["status"], "violations": attempt["proctor_violations"],
                     "terminated": attempt["proctor_status"] == "terminated"}
+        if data.event_type == "absence_start":
+            await conn.execute("""INSERT INTO ent_absence_periods(attempt_id)
+                SELECT $1 WHERE NOT EXISTS (
+                    SELECT 1 FROM ent_absence_periods WHERE attempt_id=$1 AND ended_at IS NULL)""", attempt_id)
+        elif data.event_type == "absence_end":
+            await close_absence(conn, attempt_id)
         duplicate = False
         if severity:
             duplicate = bool(await conn.fetchval("""SELECT 1 FROM ent_proctor_events WHERE attempt_id=$1 AND event_type=$2
                 AND created_at > now() - interval '3 seconds' LIMIT 1""", attempt_id, data.event_type))
         await conn.execute("INSERT INTO ent_proctor_events(attempt_id,event_type,severity,details) VALUES($1,$2,$3,$4::jsonb)",
                            attempt_id, data.event_type, 0 if duplicate else severity, json.dumps(data.details))
-        increment = 0 if duplicate else int(severity > 0)
+        increment = 0
         attempt = dict(await conn.fetchrow("""UPDATE ent_trial_attempts SET proctor_last_seen_at=now(),
             proctor_violations=proctor_violations+$2 WHERE id=$1 RETURNING *""", attempt_id, increment))
-        if attempt["deadline_at"] <= now() or attempt["proctor_violations"] >= 3:
-            if attempt["proctor_violations"] >= 3:
-                attempt = dict(await conn.fetchrow("UPDATE ent_trial_attempts SET proctor_status='terminated' WHERE id=$1 RETURNING *", attempt_id))
+        if attempt["deadline_at"] <= now():
             attempt = await finish(conn, attempt)
     return {"ok": True, "status": attempt["status"], "violations": attempt["proctor_violations"],
             "terminated": attempt["proctor_status"] == "terminated"}
@@ -572,9 +584,16 @@ def question_score(q, response):
     return score_question(q, response)
 
 
+async def close_absence(conn, attempt_id):
+    await conn.execute("""UPDATE ent_absence_periods
+        SET ended_at=clock_timestamp(), duration_seconds=GREATEST(0, EXTRACT(EPOCH FROM (clock_timestamp()-started_at))::INTEGER)
+        WHERE attempt_id=$1 AND ended_at IS NULL""", attempt_id)
+
+
 async def finish(conn, attempt):
     if attempt["status"] == "submitted":
         return attempt
+    await close_absence(conn, attempt["id"])
     snapshot, responses = decoded(attempt["snapshot"]), decoded(attempt["responses"])
     scores = dict.fromkeys(snapshot.get("subjects") or {q["subject"] for q in snapshot["questions"]}, 0)
     for q in snapshot["questions"]:
@@ -637,6 +656,7 @@ def public_attempt(attempt):
             "remaining_seconds": max(0, int((deadline - now()).total_seconds())) if deadline else None,
             "submitted_at": attempt["submitted_at"], "revision": attempt["response_revision"],
             "requires_proctor_setup": attempt["status"] == "in_progress" and deadline is None,
+            "camera_required": snapshot.get("camera_required", True),
             "proctor_status": attempt.get("proctor_status", "legacy"), "proctor_violations": attempt.get("proctor_violations", 0),
             "exam_mode": snapshot.get("exam_mode", "full"), "single_subject": snapshot.get("single_subject"),
             "duration_seconds": snapshot.get("duration_seconds", DURATION_SECONDS), "max_score": max_score,

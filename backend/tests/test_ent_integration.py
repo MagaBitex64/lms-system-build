@@ -215,7 +215,7 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["validation"]["max_score"], 50)
         self.assertEqual(response.json()["validation"]["duration_seconds"], 80 * 60)
 
-    async def test_three_proctor_violations_terminate_attempt(self):
+    async def test_proctor_events_do_not_terminate_attempt(self):
         vid = await self.create_variant(); await self.fill_variant(vid)
         _, attempt_id = await self.start(vid)
         for event_type in ("tab_hidden", "fullscreen_exit", "camera_stopped"):
@@ -223,10 +223,10 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 "session_id": "integration-test-session", "event_type": event_type, "details": {},
             })
             self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["status"], "submitted")
-        self.assertTrue(response.json()["terminated"])
+        self.assertEqual(response.json()["status"], "in_progress")
+        self.assertFalse(response.json()["terminated"])
         row = await self.conn.fetchrow("SELECT proctor_status,proctor_violations FROM ent_trial_attempts WHERE id=$1", attempt_id)
-        self.assertEqual((row["proctor_status"], row["proctor_violations"]), ("terminated", 3))
+        self.assertEqual((row["proctor_status"], row["proctor_violations"]), ("active", 0))
 
     async def test_extra_time_is_individual_and_fixed_at_start(self):
         vid = await self.create_variant()

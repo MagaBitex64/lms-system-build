@@ -31,7 +31,7 @@ export default function EntTrialListPage() {
   const [resultsAccessId, setResultsAccessId] = useState<number | null>(null)
   const [proctorAttemptId, setProctorAttemptId] = useState<number | null>(null)
   const { data: resultsData } = useSWR<{ items: any[] }>(isAdmin && resultsAccessId ? `/ent-trial/admin/accesses/${resultsAccessId}/results` : null, fetcher)
-  const { data: proctorData } = useSWR<{ items: any[] }>(isAdmin && proctorAttemptId ? `/ent-trial/admin/attempts/${proctorAttemptId}/proctor-events` : null, fetcher)
+  const { data: proctorData } = useSWR<{ items: any[]; absences: any[] }>(isAdmin && proctorAttemptId ? `/ent-trial/admin/attempts/${proctorAttemptId}/proctor-events` : null, fetcher)
 
   // Form states for creating variant
   const [newVarTitle, setNewVarTitle] = useState('')
@@ -47,6 +47,7 @@ export default function EntTrialListPage() {
   const [accessGroupId, setAccessGroupId] = useState<number | ''>('')
   const [accessStudentId, setAccessStudentId] = useState<number | ''>('')
   const [extraTime, setExtraTime] = useState(false)
+  const [cameraRequired, setCameraRequired] = useState(true)
 
   if (user?.role === 'teacher') {
     return <ErrorState message="Мұғалімдерге бұл бетке кіруге рұқсат жоқ." />
@@ -111,6 +112,7 @@ export default function EntTrialListPage() {
           group_id: accessTarget === 'group' && accessGroupId ? Number(accessGroupId) : null,
           student_id: accessTarget === 'student' && accessStudentId ? Number(accessStudentId) : null,
           extra_time_minutes: accessTarget === 'student' && extraTime ? 40 : 0,
+          camera_required: cameraRequired,
         }
       })
       alert('Рұқсат берілді!')
@@ -307,6 +309,7 @@ export default function EntTrialListPage() {
                 )}
 
                 {accessTarget === 'student' && <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={extraTime} onChange={e => setExtraTime(e.target.checked)} className="mt-1" /><span>Қосымша 40 минут (ерекше білім беру қажеттілігіне байланысты құқығы расталған оқушы үшін)</span></label>}
+                <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={cameraRequired} onChange={e => setCameraRequired(e.target.checked)} className="mt-1" /><span>Камераның болуы міндетті</span></label>
                 <Button type="submit" variant="primary" className="w-full py-2.5" disabled={!accessVarId || !variants.find(v => v.id === accessVarId)?.ready}>
                   <CheckCircle size={16} /> Рұқсат Беру
                 </Button>
@@ -319,23 +322,25 @@ export default function EntTrialListPage() {
                 <EmptyState icon={<Users size={36} />} title="Рұқсаттар жоқ" />
               ) : (
                 adminAccesses.map((a) => (
-                  <Card key={a.id} className="p-4 flex items-center justify-between">
-                    <div>
-                      <p className="font-bold">{a.variant_title || 'ЕНТ Варианты'}</p>
-                      <p className="text-xs text-muted">
-                        {a.target_type === 'all' ? 'Барлық студенттерге' : a.target_type === 'group' ? `Топ: ${a.group_title || a.group_code}` : `Студент: ${a.student_name}`}
-                      </p>
-                      <p className="text-xs text-muted">{a.exam_mode === 'single' ? `Пән: ${rulesData?.subject_labels[a.single_subject] || a.single_subject}` : `Комбинация: ${COMBO_LABELS[a.combination] || a.combination}`}</p>
+                  <Card key={a.id} className="space-y-3 p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="font-bold">{a.variant_title || 'ЕНТ Варианты'}</p>
+                        <p className="text-xs text-muted">
+                          {a.target_type === 'all' ? 'Барлық студенттерге' : a.target_type === 'group' ? `Топ: ${a.group_title || a.group_code}` : `Студент: ${a.student_name}`}
+                        </p>
+                        <p className="text-xs text-muted">{a.exam_mode === 'single' ? `Пән: ${rulesData?.subject_labels[a.single_subject] || a.single_subject}` : `Комбинация: ${COMBO_LABELS[a.combination] || a.combination}`}</p>
+                      </div>
+                      <div className="flex shrink-0 gap-2"><Button variant="secondary" size="sm" onClick={() => { setResultsAccessId(resultsAccessId === a.id ? null : a.id); setProctorAttemptId(null) }}>Нәтижелер</Button><Button variant="danger" size="sm" onClick={() => handleRevokeAccess(a.id)}><Trash2 size={14} /></Button></div>
                     </div>
-                    <div className="flex gap-2"><Button variant="secondary" size="sm" onClick={() => { setResultsAccessId(resultsAccessId === a.id ? null : a.id); setProctorAttemptId(null) }}>Нәтижелер</Button><Button variant="danger" size="sm" onClick={() => handleRevokeAccess(a.id)}><Trash2 size={14} /></Button></div>
+                    {resultsAccessId === a.id && <div className="space-y-3 border-t border-border pt-3"><h3 className="font-bold">Оқушылар нәтижесі және прокторинг</h3>
+                      {!resultsData ? <Spinner /> : resultsData.items.length === 0 ? <p className="text-sm text-muted">Бұл рұқсат бойынша тестті әлі ешкім бастаған жоқ.</p> : resultsData.items.map(item => <div key={item.id} className="rounded-xl border border-border p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{item.full_name}</p><p className="text-xs text-muted">{item.status === 'submitted' ? `Нәтиже: ${item.total_score}` : 'Тест орындалуда'} · уходов: {item.absence_count ?? 0} · вне теста: {Math.floor((item.absence_seconds ?? 0) / 60)} мин</p></div><Button size="sm" variant="secondary" onClick={() => setProctorAttemptId(proctorAttemptId === item.id ? null : item.id)}>Журнал уходов</Button></div>
+                        {proctorAttemptId === item.id && <div className="mt-3 max-h-52 space-y-2 overflow-auto text-xs">{!proctorData ? <Spinner /> : proctorData.absences?.length ? proctorData.absences.map(absence => <div key={`absence-${absence.id}`} className="rounded-lg bg-warning/10 p-2"><b>Уход из теста</b> · {Math.floor((absence.duration_seconds ?? 0) / 60)} мин {(absence.duration_seconds ?? 0) % 60} сек · {new Date(absence.started_at).toLocaleString()}</div>) : <p className="text-muted">Уходов не зафиксировано.</p>}</div>}
+                      </div>)}</div>}
                   </Card>
                 ))
               )}
-              {resultsAccessId && <Card className="space-y-3 p-4"><h3 className="font-bold">Оқушылар нәтижесі және прокторинг</h3>
-                {!resultsData ? <Spinner /> : resultsData.items.length === 0 ? <p className="text-sm text-muted">Бұл рұқсат бойынша тестті әлі ешкім бастаған жоқ.</p> : resultsData.items.map(item => <div key={item.id} className="rounded-xl border border-border p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{item.full_name}</p><p className="text-xs text-muted">{item.status === 'submitted' ? `Нәтиже: ${item.total_score}` : 'Тест орындалуда'} · бұзушылық: {item.proctor_violations}/3</p></div><Button size="sm" variant="secondary" onClick={() => setProctorAttemptId(proctorAttemptId === item.id ? null : item.id)}>Прокторинг журналы</Button></div>
-                  {proctorAttemptId === item.id && <div className="mt-3 max-h-52 space-y-2 overflow-auto text-xs">{!proctorData ? <Spinner /> : proctorData.items.length === 0 ? <p className="text-muted">Оқиғалар жоқ.</p> : proctorData.items.map(event => <div key={event.id} className="rounded-lg bg-surface-muted p-2"><b>{event.event_type}</b> · маңыздылық {event.severity} · {new Date(event.created_at).toLocaleString()}</div>)}</div>}
-                </div>)}</Card>}
             </div>
           </div>
         )}

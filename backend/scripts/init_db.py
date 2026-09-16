@@ -451,6 +451,7 @@ MIGRATIONS = [
 
 ENT_MIGRATIONS = [
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS extra_time_minutes INTEGER NOT NULL DEFAULT 0 CHECK (extra_time_minutes IN (0,40))",
+    "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS camera_required BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS difficulty TEXT",
     "ALTER TABLE ent_matching_pairs ADD COLUMN IF NOT EXISTS correct_option_position INTEGER",
     "CREATE TABLE IF NOT EXISTS ent_contexts (id BIGSERIAL PRIMARY KEY, variant_id BIGINT NOT NULL REFERENCES ent_variants(id) ON DELETE CASCADE, subject TEXT NOT NULL, start_position INTEGER NOT NULL, content TEXT NOT NULL DEFAULT '', UNIQUE(variant_id, subject, start_position))",
@@ -485,6 +486,14 @@ ENT_MIGRATIONS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS idx_ent_proctor_events_attempt ON ent_proctor_events(attempt_id,created_at DESC)",
+    """CREATE TABLE IF NOT EXISTS ent_absence_periods (
+        id BIGSERIAL PRIMARY KEY,
+        attempt_id BIGINT NOT NULL REFERENCES ent_trial_attempts(id) ON DELETE CASCADE,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        ended_at TIMESTAMPTZ,
+        duration_seconds INTEGER
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_ent_absence_periods_attempt ON ent_absence_periods(attempt_id,started_at DESC)",
 ]
 
 
