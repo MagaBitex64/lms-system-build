@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { I18nProvider } from '@/lib/i18n'
 import { AppShell } from '@/components/app-shell'
+import 'katex/dist/katex.min.css'
 import './globals.css'
 
 export const metadata: Metadata = {

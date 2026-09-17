@@ -5,6 +5,7 @@ import useSWR from 'swr'
 import { fetcher, getFileUrl } from '@/lib/api'
 import { Spinner, ErrorState, Card, Button, cx } from '@/components/ui'
 import { AlertCircle, ArrowLeft, CheckCircle, FileText, Trophy, XCircle } from 'lucide-react'
+import LatexText from '@/components/latex-text'
 
 type ResultOption = { id: number; text: string; is_correct: boolean }
 type MatchingPair = { id: number; left_text: string; right_text: string; correct_option_id: number }
@@ -48,7 +49,7 @@ function formatScore(value: number) {
 function ResultPrompt({ question }: { question: ResultQuestion }) {
   const src = question.image_file_id ? getFileUrl(question.image_file_id) : question.image_url
   const image = src ? <img src={src} alt={question.image_alt || 'Сұрақ суреті'} className="max-h-72 max-w-full rounded-lg border border-border object-contain" style={{ width: question.image_width || 640 }} /> : null
-  const text = (value: string) => value ? <p className="whitespace-pre-wrap font-medium">{value.replaceAll('{{image}}', '')}</p> : null
+  const text = (value: string) => value ? <LatexText text={value.replaceAll('{{image}}', '')} className="font-medium" /> : null
   if (!image) return text(question.prompt)
   if (question.image_placement === 'before') return <div className="space-y-3">{image}{text(question.prompt)}</div>
   if (question.image_placement === 'marker' && question.prompt.includes('{{image}}')) {
@@ -112,7 +113,7 @@ export default function EntResultPage() {
               </div></div>
             </div>
 
-            {question.context_text && <div className="ml-8 mb-4 rounded-lg border border-border bg-background p-3 text-sm"><p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase text-muted"><FileText size={13} /> Контекст</p><p className="whitespace-pre-wrap">{question.context_text}</p></div>}
+            {question.context_text && <div className="ml-8 mb-4 rounded-lg border border-border bg-background p-3 text-sm"><p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase text-muted"><FileText size={13} /> Контекст</p><LatexText text={question.context_text} /></div>}
             <div className="ml-8 mb-4"><ResultPrompt question={question} /></div>
 
             {(question.question_type === 'single_choice' || question.question_type === 'context') && <div className="space-y-2 pl-8">
@@ -120,10 +121,10 @@ export default function EntResultPage() {
                 const selected = question.selected_option_id === option.id
                 return <div key={option.id} className="flex items-start gap-2 text-sm">
                   <span className={cx('mt-0.5 h-4 w-4 flex-shrink-0 rounded-full border', option.is_correct ? 'border-success bg-success' : selected ? 'border-danger bg-danger' : 'border-muted')} />
-                  <p className={cx(option.is_correct ? 'font-semibold text-foreground' : selected ? 'text-danger' : 'text-muted-foreground')}>{option.text}
+                  <div className={cx('min-w-0', option.is_correct ? 'font-semibold text-foreground' : selected ? 'text-danger' : 'text-muted-foreground')}><LatexText text={option.text} />
                     {option.is_correct && <span className="ml-2 text-xs font-bold text-success">(Дұрыс жауап)</span>}
                     {selected && !option.is_correct && <span className="ml-2 text-xs font-bold text-danger">(Сіздің жауап)</span>}
-                  </p>
+                  </div>
                 </div>
               })}
             </div>}
@@ -134,10 +135,10 @@ export default function EntResultPage() {
                 const selected = question.selected_option_ids.includes(option.id)
                 return <div key={option.id} className="flex items-start gap-2 text-sm">
                   <span className={cx('mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border text-[10px] text-white', option.is_correct ? 'border-success bg-success' : selected ? 'border-danger bg-danger' : 'border-muted')}>{selected ? '✓' : ''}</span>
-                  <p className={cx(option.is_correct ? 'font-semibold text-foreground' : selected ? 'text-danger' : 'text-muted-foreground')}>{option.text}
+                  <div className={cx('min-w-0', option.is_correct ? 'font-semibold text-foreground' : selected ? 'text-danger' : 'text-muted-foreground')}><LatexText text={option.text} />
                     {option.is_correct && <span className="ml-2 text-xs font-bold text-success">(Дұрыс)</span>}
                     {selected && <span className={cx('ml-2 text-xs font-bold', option.is_correct ? 'text-success' : 'text-danger')}>(Сіз таңдадыңыз)</span>}
-                  </p>
+                  </div>
                 </div>
               })}
             </div>}
@@ -149,13 +150,13 @@ export default function EntResultPage() {
                 const selected = question.options.find(o => String(o.id) === String(selectedId))?.text ?? ''
                 const correct = String(selectedId) === String(pair.correct_option_id)
                 return <div key={pair.id} className={cx('rounded-lg border p-3 text-sm', correct ? 'border-success/30 bg-success/5' : 'border-danger/30 bg-danger/5')}>
-                  <div className="flex items-center gap-2">{correct ? <CheckCircle size={16} className="shrink-0 text-success" /> : <XCircle size={16} className="shrink-0 text-danger" />}<span className="font-medium">{pair.left_text}</span><span className="text-muted">→</span><span className={correct ? 'font-semibold text-success' : 'font-semibold text-danger'}>{selected || 'Жауап берілмеді'}</span></div>
-                  {!correct && <p className="mt-1 pl-6 text-xs text-success">Дұрыс жауап: {pair.right_text}</p>}
+                  <div className="flex items-center gap-2">{correct ? <CheckCircle size={16} className="shrink-0 text-success" /> : <XCircle size={16} className="shrink-0 text-danger" />}<LatexText text={pair.left_text} className="min-w-0 font-medium" /><span className="text-muted">→</span>{selected ? <LatexText text={selected} className={correct ? 'min-w-0 font-semibold text-success' : 'min-w-0 font-semibold text-danger'} /> : <span className="font-semibold text-danger">Жауап берілмеді</span>}</div>
+                  {!correct && <div className="mt-1 flex gap-1 pl-6 text-xs text-success"><span>Дұрыс жауап:</span><LatexText text={pair.right_text} className="min-w-0" /></div>}
                 </div>
               })}
             </div>}
 
-            {question.explanation && <div className="ml-8 mt-4 rounded-lg border border-border bg-background p-3 text-sm"><span className="font-semibold">Түсіндірме:</span> {question.explanation}</div>}
+            {question.explanation && <div className="ml-8 mt-4 rounded-lg border border-border bg-background p-3 text-sm"><span className="font-semibold">Түсіндірме:</span><LatexText text={question.explanation} className="mt-1" /></div>}
           </div>
         })}
       </div>)}

@@ -87,6 +87,14 @@ img {
   display: block;
 }
 
+.latex-text .katex-display {
+  margin: 0.5rem 0;
+}
+
+.latex-text .katex {
+  font-size: 1.08em;
+}
+
 /* Refined scrollbar */
 ::-webkit-scrollbar {
   width: 10px;

@@ -5,6 +5,7 @@ import useSWR from 'swr'
 import { api, fetcher, getFileUrl } from '@/lib/api'
 import { SUBJECT_NAMES, TYPE_NAMES, type Slot, type SubjectRule, type ContextBlock } from '@/lib/ent'
 import { Button, Card, Spinner, ErrorState, cx } from '@/components/ui'
+import LatexText from '@/components/latex-text'
 
 type Option = { text: string; is_correct: boolean }
 type Pair = { left_text: string; correct_option_position: number | null; right_text?: string }
@@ -146,6 +147,23 @@ function QuestionEditor({ variantId, subject, slot, question, contextReady, onSa
     setPrompt(next); setImagePlacement('marker'); onDirty(true)
     requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(start + 9, start + 9) })
   }
+  function insertLatex(template: string, display = false) {
+    const el = promptRef.current
+    const start = el?.selectionStart ?? prompt.length
+    const end = el?.selectionEnd ?? start
+    const expression = prompt.slice(start, end) || template
+    const delimiter = display ? '$$' : '$'
+    const prefix = start === end && start > 0 && (display ? prompt[start - 1] !== '\n' : !/\s/.test(prompt[start - 1])) ? (display ? '\n' : ' ') : ''
+    const suffix = start === end && end < prompt.length && (display ? prompt[end] !== '\n' : !/[\s.,!?;:)]/.test(prompt[end])) ? (display ? '\n' : ' ') : ''
+    const wrapped = `${prefix}${delimiter}${expression}${delimiter}${suffix}`
+    setPrompt(`${prompt.slice(0, start)}${wrapped}${prompt.slice(end)}`)
+    onDirty(true); setSaved(false)
+    const expressionStart = start + prefix.length + delimiter.length
+    requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(expressionStart, expressionStart + expression.length)
+    })
+  }
   async function save(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMessage(''); setSaved(false)
     try {
@@ -161,7 +179,21 @@ function QuestionEditor({ variantId, subject, slot, question, contextReady, onSa
       {contextMode !== 'shared' && <textarea className={inputClass} rows={4} maxLength={30000} required value={contextOverride} onChange={e => setContextOverride(e.target.value)} placeholder={contextMode === 'addendum' ? 'Ортақ контексттен кейін көрсетілетін қосымша мәтін' : 'Тек осы сұрақта көрсетілетін контекст'} />}
       {question?.context_text && !question.context_override && <p className="rounded-xl bg-warning/10 p-3 text-sm">Ескі жеке контекст табылды. Қажет болса, оны осы өріске көшіріңіз: {question.context_text}</p>}
     </div></details>}
-    <label className="block space-y-2"><span>Сұрақ мәтіні</span><textarea ref={promptRef} maxLength={10000} className={inputClass} rows={5} value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="Сурет сұрақтың толық мәтінін қамтыса, бұл өрісті бос қалдыруға болады." /></label>
+    <label className="block space-y-2"><span>Сұрақ мәтіні</span><textarea ref={promptRef} maxLength={10000} className={inputClass} rows={5} value={prompt} onChange={e => setPrompt(e.target.value)} placeholder={subject === 'mathematics' ? 'Мысалы: $x^2 + 5x - 6 = 0$ теңдеуін шешіңіз.' : 'Сурет сұрақтың толық мәтінін қамтыса, бұл өрісті бос қалдыруға болады.'} /></label>
+    {subject === 'mathematics' && <Card className="space-y-4 border-primary/20 bg-primary-soft/30 p-4">
+      <div><h4 className="font-semibold">LaTeX формуласы</h4><p className="text-sm text-muted">Жол ішіндегі формула үшін <code>$...$</code>, жеке жолдағы формула үшін <code>$$...$$</code> қолданыңыз. Белгіленген мәтінді батырма формулаға айналдырады.</p></div>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('x^2')}>x²</Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\frac{a}{b}')}>Бөлшек</Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\sqrt{x}')}>Түбір</Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('x_1, x_2')}>Индекстер</Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\begin{cases}x+y=5\\\\x-y=1\\end{cases}', true)}>Теңдеулер жүйесі</Button>
+      </div>
+      <div className="rounded-xl border border-border bg-surface p-4">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Алдын ала қарау</p>
+        {prompt ? <LatexText text={prompt.replaceAll('{{image}}', '[Сурет]')} className="leading-relaxed" /> : <p className="text-sm text-muted">Формула енгізілгеннен кейін осы жерде көрсетіледі.</p>}
+      </div>
+    </Card>}
     <Card className="space-y-4 bg-surface-muted p-4"><div><h4 className="font-semibold">Сұрақ суреті (міндетті емес)</h4><p className="text-sm text-muted">Кез келген сұраққа JPG, PNG, GIF немесе WebP жүктеуге болады.</p></div>
       <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" disabled={uploading} onChange={e => { void uploadImage(e.target.files?.[0]); e.currentTarget.value = '' }} />
       {uploading && <p className="text-sm text-muted">Сурет жүктелуде…</p>}
@@ -176,7 +208,7 @@ function QuestionEditor({ variantId, subject, slot, question, contextReady, onSa
     <fieldset className="space-y-3"><legend className="mb-2 font-semibold">{slot.option_count} жауап нұсқасы{slot.question_type === 'matching' ? ' · дұрыс сәйкестіктер төменде таңдалады' : ' · дұрысын белгілеңіз'}</legend>
       {options.map((o, i) => <div key={i} className="flex items-center gap-3">
         {slot.question_type !== 'matching' && <input aria-label={`${String.fromCharCode(65 + i)} дұрыс жауап`} type={slot.question_type === 'multi_choice' ? 'checkbox' : 'radio'} name="correct-option" checked={o.is_correct} onChange={e => setOptions(prev => prev.map((v, j) => ({ ...v, is_correct: j === i ? e.target.checked : slot.question_type === 'multi_choice' ? v.is_correct : false })))} className="h-5 w-5" />}
-        <label className="flex flex-1 items-center gap-2"><span className="font-semibold">{String.fromCharCode(65 + i)}</span><input required aria-label={`Жауап ${String.fromCharCode(65 + i)}`} maxLength={2000} className={inputClass} value={o.text} onChange={e => setOptions(prev => prev.map((v, j) => j === i ? { ...v, text: e.target.value } : v))} /></label>
+        <label className="flex flex-1 items-center gap-2"><span className="font-semibold">{String.fromCharCode(65 + i)}</span><div className="min-w-0 flex-1 space-y-1"><input required aria-label={`Жауап ${String.fromCharCode(65 + i)}`} maxLength={2000} className={inputClass} value={o.text} onChange={e => setOptions(prev => prev.map((v, j) => j === i ? { ...v, text: e.target.value } : v))} />{subject === 'mathematics' && o.text.includes('$') && <LatexText text={o.text} className="rounded-lg bg-surface-muted px-3 py-2 text-sm" />}</div></label>
       </div>)}
       {slot.question_type !== 'matching' && <p className="text-sm text-muted">Дұрыс жауаптар: {correctCount}. Қажет: {slot.question_type === 'multi_choice' ? '1–3' : '1'}.</p>}
     </fieldset>

@@ -8,6 +8,7 @@ import { SUBJECT_NAMES, TYPE_NAMES } from '@/lib/ent'
 import { Button, Spinner, ErrorState, cx } from '@/components/ui'
 import { Clock, Flag, ChevronLeft, ChevronRight } from 'lucide-react'
 import EntExamTools from '@/components/ent-exam-tools'
+import LatexText from '@/components/latex-text'
 
 type Answer = { selected_option_id: number | null; selected_option_ids: number[]; matching_answer: Record<string, number | string> }
 type Question = Answer & { question_id: number; position: number; prompt: string; question_type: string; context_text: string; image_url: string; image_file_id: number | null; image_placement: 'before' | 'after' | 'marker'; image_width: number; image_alt: string; max_points: number; options: { id: number; text: string }[]; matching_pairs: { id: number; left_text: string }[] }
@@ -22,7 +23,7 @@ function answered(q: Question, a: Answer) {
 function QuestionPrompt({ q }: { q: Question }) {
   const src = q.image_file_id ? getFileUrl(q.image_file_id) : q.image_url
   const picture = src ? <img src={src} alt={q.image_alt || 'Сұраққа арналған сурет'} className="max-h-[520px] max-w-full rounded-xl object-contain" style={{ width: q.image_width || 640 }} /> : null
-  const text = (value: string) => <p className="whitespace-pre-wrap text-lg leading-relaxed">{value.replaceAll('{{image}}', '')}</p>
+  const text = (value: string) => <LatexText text={value.replaceAll('{{image}}', '')} className="text-lg leading-relaxed" />
   if (!picture) return text(q.prompt)
   if (q.image_placement === 'before') return <div className="space-y-4">{picture}{text(q.prompt)}</div>
   if (q.image_placement === 'marker' && q.prompt.includes('{{image}}')) {
@@ -307,7 +308,7 @@ export default function EntTestPage() {
       </aside>
       <main className="min-w-0">{q ? <div className="space-y-5 rounded-2xl border border-border bg-surface p-5 sm:p-7">
         <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-bold">№{q.position + 1} · {TYPE_NAMES[q.question_type]}</h2><span className="text-sm text-muted">{q.max_points} балл</span></div>
-        {q.context_text && <section className="rounded-xl border border-border bg-surface-muted p-5"><h3 className="mb-3 text-sm font-bold text-primary">Ортақ контекст</h3><p className="whitespace-pre-wrap leading-relaxed">{q.context_text}</p></section>}
+        {q.context_text && <section className="rounded-xl border border-border bg-surface-muted p-5"><h3 className="mb-3 text-sm font-bold text-primary">Ортақ контекст</h3><LatexText text={q.context_text} className="leading-relaxed" /></section>}
         <QuestionPrompt q={q} />
         <fieldset disabled={disabled} className="space-y-3">
           <legend className="sr-only">Жауапты таңдаңыз</legend>
@@ -317,12 +318,12 @@ export default function EntTestPage() {
             const selected = multiple ? answer.selected_option_ids.includes(o.id) : answer.selected_option_id === o.id
             return <label key={o.id} className={cx('flex cursor-pointer items-start gap-3 rounded-xl border p-4', selected ? 'border-primary bg-primary-soft' : 'border-border')}>
               <input type={multiple ? 'checkbox' : 'radio'} name={`q-${q.question_id}`} checked={selected} className="mt-1 h-5 w-5 shrink-0" onChange={() => change(q.question_id, multiple ? { ...answer, selected_option_ids: selected ? answer.selected_option_ids.filter(v => v !== o.id) : [...answer.selected_option_ids, o.id] } : { ...answer, selected_option_id: o.id })} />
-              <span className="whitespace-pre-wrap"><b className="mr-2">{String.fromCharCode(65 + i)}.</b>{o.text}</span>
+              <div className="min-w-0 flex-1"><b className="mr-2">{String.fromCharCode(65 + i)}.</b><LatexText text={o.text} className="inline leading-relaxed" /></div>
             </label>
           }) : <>
-            <div className="space-y-2 rounded-xl bg-surface-muted p-4">{q.options.map((o, i) => <p key={o.id}><b>{i + 1}.</b> {o.text}</p>)}</div>
-            {q.matching_pairs.map((pair, i) => <label key={pair.id} className="grid items-center gap-3 rounded-xl border border-border p-4 sm:grid-cols-2"><span><b>{String.fromCharCode(65 + i)}.</b> {pair.left_text}</span><select className="w-full rounded-xl border border-border bg-surface p-3" value={answer.matching_answer[String(pair.id)] ?? ''} onChange={e => change(q.question_id, { ...answer, matching_answer: { ...answer.matching_answer, [String(pair.id)]: e.target.value === '' ? '' : Number(e.target.value) } })}>
-              <option value="">Жауапты таңдаңыз</option>{q.options.map((o, j) => <option key={o.id} value={o.id}>{j + 1}. {o.text}</option>)}
+            <div className="space-y-2 rounded-xl bg-surface-muted p-4">{q.options.map((o, i) => <div key={o.id} className="flex gap-2"><b>{i + 1}.</b><LatexText text={o.text} className="min-w-0 flex-1" /></div>)}</div>
+            {q.matching_pairs.map((pair, i) => <label key={pair.id} className="grid items-center gap-3 rounded-xl border border-border p-4 sm:grid-cols-2"><div className="flex min-w-0 gap-2"><b>{String.fromCharCode(65 + i)}.</b><LatexText text={pair.left_text} className="min-w-0 flex-1" /></div><select className="w-full rounded-xl border border-border bg-surface p-3" value={answer.matching_answer[String(pair.id)] ?? ''} onChange={e => change(q.question_id, { ...answer, matching_answer: { ...answer.matching_answer, [String(pair.id)]: e.target.value === '' ? '' : Number(e.target.value) } })}>
+              <option value="">Жауапты таңдаңыз</option>{q.options.map((o, j) => <option key={o.id} value={o.id}>{j + 1}</option>)}
             </select></label>)}
           </>}
         </fieldset>
