@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { ChevronLeft, ChevronRight, GraduationCap, History, Search, ShieldCheck } from 'lucide-react'
+import { formatDate } from '@/lib/date'
 import { fetcher } from '@/lib/api'
 import {
   Badge,
@@ -49,6 +50,9 @@ const roleLabels: Record<ActorRole, string> = {
 }
 
 const entityLabels: Record<string, string> = {
+  ent_variant: 'ҰБТ нұсқасы',
+  ent_question: 'ҰБТ сұрағы',
+  ent_access: 'ҰБТ рұқсаты',
   user: 'Пайдаланушы',
   group: 'Топ',
   course: 'Курс',
@@ -63,15 +67,14 @@ const entityLabels: Record<string, string> = {
   lead: 'Кеңес өтінімі',
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(new Date(value))
+const actionLabels: Record<string, string> = {
+  'ent.variant_create': 'ҰБТ нұсқасы құрылды',
+  'ent.variant_update': 'ҰБТ нұсқасы өзгертілді',
+  'ent.variant_delete': 'ҰБТ нұсқасы өшірілді',
+  'ent.course_variant_create': 'Курсқа пәндік ҰБТ нұсқасы құрылды',
+  'ent.course_variant_update': 'Курстың ҰБТ нұсқасы өзгертілді',
+  'ent.course_variant_delete': 'Курстың ҰБТ нұсқасы өшірілді',
+  'ent.access_grant': 'ҰБТ рұқсаты берілді',
 }
 
 export default function AuditLogsPage() {
@@ -101,7 +104,8 @@ export default function AuditLogsPage() {
                 setQuery(event.target.value)
                 setPage(1)
               }}
-              placeholder="Аты, поштасы немесе әрекеті бойынша іздеу"
+              placeholder="Әрекетті іздеу"
+              aria-label="Әрекетті іздеу"
               className="pl-10"
             />
           </div>
@@ -127,7 +131,7 @@ export default function AuditLogsPage() {
         ) : !(data?.items.length) ? (
           <EmptyState
             icon={<History size={22} />}
-            title="Әрекеттер табылмады"
+            title={query || role ? 'Ештеңе табылмады' : 'Әзірге әрекеттер жоқ'}
             hint="Жаңа маңызды өзгерістер жасалғаннан кейін олар осында автоматты түрде пайда болады."
           />
         ) : (
@@ -146,9 +150,9 @@ export default function AuditLogsPage() {
                       </span>
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-semibold">{item.summary}</p>
-                          <Badge>{item.action}</Badge>
+                          <p className="break-words font-semibold">{actionLabels[item.action] ?? item.summary}</p>
                         </div>
+                        <p className="mt-1 break-all font-mono text-xs text-muted">{item.action}</p>
                         <p className="mt-1 text-xs text-muted">
                           {entityLabels[item.entity_type] ?? item.entity_type}
                           {item.entity_id ? ` · ID ${item.entity_id}` : ''}
@@ -163,9 +167,9 @@ export default function AuditLogsPage() {
                       <p className="truncate text-xs text-muted">{item.actor_email}</p>
                     </div>
                     <div className="text-sm text-muted lg:text-right">
-                      <p>{formatDate(item.created_at)}</p>
+                      <p>{formatDate(item.created_at, true)}</p>
                       {item.details.method && item.details.path && (
-                        <p className="mt-1 truncate text-xs">
+                        <p className="mt-1 break-all font-mono text-xs">
                           {item.details.method} {item.details.path}
                         </p>
                       )}

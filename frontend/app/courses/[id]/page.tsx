@@ -525,7 +525,7 @@ export default function CoursePage() {
           {entExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
           <span className="flex size-9 items-center justify-center rounded-lg bg-primary-soft text-primary"><ClipboardList size={18} /></span>
           <span>
-            <span className="block text-lg font-semibold">Пәндік пробный ҰБТ</span>
+            <span className="block text-lg font-semibold">Пәндік сынақ ҰБТ</span>
             <span className="block text-sm font-normal text-muted">Курс пәні бойынша варианттарды құру және редакциялау</span>
           </span>
         </button>

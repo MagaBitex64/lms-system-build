@@ -5,7 +5,7 @@ import useSWR from 'swr'
 import { BookOpen, Search } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { fetcher } from '@/lib/api'
-import { PageHeader, Spinner, EmptyState, ErrorState, Input, FadeIn } from '@/components/ui'
+import { PageHeader, Skeleton, EmptyState, ErrorState, Input, FadeIn } from '@/components/ui'
 import { CourseCard, type CourseSummary } from '@/components/course-card'
 
 export default function CoursesPage() {
@@ -33,14 +33,15 @@ export default function CoursesPage() {
         <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
         <Input
           className="pl-9"
-          placeholder={t('searchPlaceholder')}
+          placeholder={t('searchCourse')}
+          aria-label={t('searchCourse')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
 
       {isLoading ? (
-        <Spinner />
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" role="status" aria-label="Курстар жүктелуде">{[0, 1, 2].map(i => <Skeleton key={i} className="h-64 border border-border" />)}</div>
       ) : error ? (
         <ErrorState message={t('errorOccurred')} />
       ) : courses.length ? (
@@ -52,7 +53,7 @@ export default function CoursesPage() {
           ))}
         </div>
       ) : (
-        <EmptyState icon={<BookOpen size={22} />} title={t('noResults')} hint={t('exploreCatalogHint')} />
+        <EmptyState icon={<BookOpen size={22} />} title={query.trim() ? t('noResults') : t('noCoursesYet')} hint={t('exploreCatalogHint')} />
       )}
     </div>
   )

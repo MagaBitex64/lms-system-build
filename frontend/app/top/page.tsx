@@ -4,8 +4,9 @@ import { useState } from 'react'
 import useSWR from 'swr'
 import { Award, ClipboardCheck, Trophy, Users } from 'lucide-react'
 
+import { formatDate } from '@/lib/date'
 import { fetcher } from '@/lib/api'
-import { Card, EmptyState, ErrorState, PageHeader, Spinner, StatCard, cx } from '@/components/ui'
+import { Button, Card, EmptyState, ErrorState, Field, PageHeader, Select, Spinner, StatCard, cx } from '@/components/ui'
 
 type RankingItem = {
   rank: number
@@ -61,44 +62,23 @@ export default function TopPage() {
           <h2 className="font-bold">Рейтингті таңдаңыз</h2>
           <p className="text-xs text-muted">Жақша ішінде осы рейтингке қатысқан оқушылар саны көрсетілген.</p>
         </div>
-        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Рейтинг санаты">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isGeneral}
-            onClick={() => setSelected('general')}
-            className={cx(
-              'rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors',
-              isGeneral ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-surface hover:border-primary/40 hover:text-primary',
-            )}
-          >
+        <div className="flex flex-wrap items-end gap-3" aria-label="Рейтинг санаты">
+          <Button type="button" aria-pressed={isGeneral} variant={isGeneral ? 'primary' : 'secondary'} onClick={() => setSelected('general')}>
             Жалпы ҰБТ · 140 балл ({data.general.participant_count})
-          </button>
-          {data.subjects.map(group => {
-            const active = selected === group.subject
-            return (
-              <button
-                key={group.subject}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setSelected(group.subject!)}
-                className={cx(
-                  'rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors',
-                  active ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-surface hover:border-primary/40 hover:text-primary',
-                )}
-              >
-                {group.label} ({group.participant_count})
-              </button>
-            )
-          })}
+          </Button>
+          <Field label="Пән">
+            <Select value={isGeneral ? '' : selected} onChange={event => setSelected(event.target.value || 'general')} className="sm:w-72">
+              <option value="">Пәнді таңдаңыз</option>
+              {data.subjects.map(group => <option key={group.subject} value={group.subject}>{group.label} ({group.participant_count})</option>)}
+            </Select>
+          </Field>
         </div>
       </Card>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Қатысушылар" value={current.participant_count} hint="Бірегей оқушылар" icon={<Users size={20} />} />
         <StatCard label="Тапсырылған тесттер" value={current.completed_attempt_count} hint="Барлық аяқталған әрекет" icon={<ClipboardCheck size={20} />} tone="success" />
-        <StatCard label="Ең жоғары ұпай" value={current.max_score} hint={isGeneral ? 'Толық ҰБТ форматы' : current.label} icon={<Award size={20} />} tone="warning" />
+        <StatCard label="Максималды ұпай" value={current.max_score} hint={isGeneral ? 'Толық ҰБТ форматы' : current.label} icon={<Award size={20} />} tone="warning" />
       </div>
 
       <section className="space-y-4" aria-labelledby="ranking-title">
@@ -110,7 +90,7 @@ export default function TopPage() {
         {current.items.length === 0 ? (
           <EmptyState
             icon={<Trophy size={36} />}
-            title="Рейтинг әзірге бос"
+            title="Бұл рейтингте әзірге қатысушылар жоқ"
             hint={isGeneral ? '140 балдық толық ҰБТ тапсырылғаннан кейін нәтиже осында шығады.' : 'Осы пән бойынша аяқталған нәтиже әлі жоқ.'}
           />
         ) : (
@@ -137,7 +117,7 @@ export default function TopPage() {
                   </div>
                   <p className="truncate text-xs text-muted">{item.variant_title || (isGeneral ? 'Толық ҰБТ' : current.label)}</p>
                   <p className="mt-1 text-xs text-muted">
-                    {item.attempt_count} аяқталған әрекет · {new Date(item.submitted_at).toLocaleString('kk-KZ')}
+                    {item.attempt_count} аяқталған әрекет · {formatDate(item.submitted_at)}
                   </p>
                 </div>
 

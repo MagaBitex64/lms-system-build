@@ -27,8 +27,8 @@ export default function TeacherDashboard() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={t('teacher')}
-        title={user ? `${t('welcomeBack')}, ${user.full_name}` : t('courseManagement')}
+        eyebrow={t('myCourses')}
+        title={user ? `${t('welcomeBack')}, ${user.full_name.split(' ')[0]}!` : t('courseManagement')}
         description={t('manageCourses')}
         actions={
           <Button asChild>
@@ -69,8 +69,8 @@ export default function TeacherDashboard() {
             <FadeIn key={course.id} delay={i * 40}>
               <Card interactive className="flex h-full flex-col gap-4">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1.5">
-                    <h3 className="font-semibold text-foreground">{course.title}</h3>
+                  <div className="min-w-0 space-y-1.5">
+                    <h3 className="break-words font-semibold text-foreground">{course.title}</h3>
                     <p className="line-clamp-2 text-sm leading-relaxed text-muted">{course.description}</p>
                   </div>
                   <Badge tone={course.is_published ? 'success' : 'neutral'}>
@@ -82,8 +82,8 @@ export default function TeacherDashboard() {
                   <span className="flex items-center gap-1.5"><Users size={14} />{course.student_count} {t('studentsCount')}</span>
                 </div>
                 <div className="mt-auto flex flex-wrap gap-2 pt-1">
-                  <Button asChild variant="outline" size="sm"><Link href={`/courses/${course.id}`}>{t('viewCourse')}</Link></Button>
-                  <Button asChild size="sm"><Link href={`/teacher/courses/${course.id}/gradebook`}>{t('gradebook')}</Link></Button>
+                  <Button asChild variant="primary" size="sm"><Link href={`/courses/${course.id}`}>{t('viewCourse')}</Link></Button>
+                  <Button asChild variant="secondary" size="sm"><Link href={`/teacher/courses/${course.id}/gradebook`}>{t('gradebook')}</Link></Button>
                 </div>
               </Card>
             </FadeIn>

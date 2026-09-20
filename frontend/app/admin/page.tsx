@@ -5,7 +5,7 @@ import useSWR from 'swr'
 import { BookOpen, Check, GraduationCap, Pencil, PlusCircle, Search, Trash2, UserMinus, Users, UserPlus, X, ClipboardList } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { api, fetcher } from '@/lib/api'
-import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Field, Input, PageHeader, Select, Spinner } from '../components/ui'
+import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Field, Input, PageHeader, Select, Spinner, Modal, DeletionConfirmModal } from '../components/ui'
 
 type User = {
   id: number
@@ -82,6 +82,9 @@ export default function AdminDashboard() {
 
 function StudentsTab() {
   const { t } = useI18n()
+  const [createOpen, setCreateOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [notice, setNotice] = useState('')
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
   const { data, isLoading, error: loadError, mutate } = useSWR<{ items: User[] }>('/admin/users?role=student&per_page=100', fetcher)
@@ -89,7 +92,10 @@ function StudentsTab() {
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    if (creating) return
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    setCreating(true)
     setError(null)
     try {
       await api('/admin/users', {
@@ -100,30 +106,37 @@ function StudentsTab() {
           role: 'student',
         },
       })
-      event.currentTarget.reset()
+      formElement.reset()
+      setCreateOpen(false)
+      setNotice('Оқушы қосылды')
       await mutate()
     } catch (err) {
       setError((err as Error).message || t('errorOccurred'))
+    } finally {
+      setCreating(false)
     }
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
-      <Card>
-        <h2 className="text-base font-semibold">{t('createStudent')}</h2>
-        <form onSubmit={createUser} className="mt-4 space-y-4">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p role="status" className="text-sm text-success-foreground">{notice}</p>
+        <Button onClick={() => { setCreateOpen(true); setError(null) }}><UserPlus size={16} />{t('createStudent')}</Button>
+      </div>
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={t('createStudent')} closeDisabled={creating}>
+        <form onSubmit={createUser} autoComplete="off" className="space-y-4">
           <Field label={t('fullName')}><Input name="full_name" required minLength={2} /></Field>
-          <Field label={t('email')}><Input name="email" type="email" required /></Field>
-          <Field label={t('password')} hint={t('passwordHint')}><Input name="password" type="password" required minLength={8} /></Field>
+          <Field label={t('email')}><Input name="email" type="email" autoComplete="off" required /></Field>
+          <Field label={t('password')} hint={t('passwordHint')}><Input name="password" type="password" autoComplete="new-password" required minLength={8} /></Field>
           {error && <ErrorState message={error} />}
-          <Button type="submit" className="w-full"><UserPlus size={16} />{t('create')}</Button>
+          <Button type="submit" disabled={creating} className="w-full"><UserPlus size={16} />{creating ? 'Қосылуда…' : 'Оқушыны қосу'}</Button>
         </form>
-      </Card>
+      </Modal>
 
       <Card className="space-y-4">
-        <ListHeader title={t('students')} query={query} setQuery={setQuery} />
+        <ListHeader title={t('students')} query={query} setQuery={setQuery} placeholder={t('searchStudent')} />
         {isLoading ? <Spinner /> : loadError ? <ErrorState message={t('errorOccurred')} /> : (
-          <UserList users={students} fixedRole="student" onChanged={mutate} />
+          <UserList users={students} fixedRole="student" onChanged={mutate} emptyTitle={query.trim() ? t('noResults') : t('noData')} />
         )}
       </Card>
     </div>
@@ -132,6 +145,12 @@ function StudentsTab() {
 
 function TeachersTab() {
   const { t } = useI18n()
+  const [createOpen, setCreateOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [groupToRemove, setGroupToRemove] = useState<{ courseId: number; group: Group } | null>(null)
+  const [removingGroup, setRemovingGroup] = useState(false)
+  const [removeError, setRemoveError] = useState('')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -142,7 +161,10 @@ function TeachersTab() {
 
   async function createTeacher(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    if (creating) return
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    setCreating(true)
     setError(null)
     try {
       await api('/admin/users', {
@@ -153,10 +175,14 @@ function TeachersTab() {
           role: 'teacher',
         },
       })
-      event.currentTarget.reset()
+      formElement.reset()
+      setCreateOpen(false)
+      setNotice('Мұғалім қосылды')
       await teachersReq.mutate()
     } catch (err) {
       setError((err as Error).message || t('errorOccurred'))
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -167,33 +193,51 @@ function TeachersTab() {
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
-      <div className="space-y-6">
-        <Card>
-          <h2 className="text-base font-semibold">{t('createTeacher')}</h2>
-          <form onSubmit={createTeacher} className="mt-4 space-y-4">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p role="status" className="text-sm text-success-foreground">{notice}</p>
+        <Button onClick={() => { setCreateOpen(true); setError(null) }}><UserPlus size={16} />{t('createTeacher')}</Button>
+      </div>
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={t('createTeacher')} closeDisabled={creating}>
+          <form onSubmit={createTeacher} autoComplete="off" className="space-y-4">
             <Field label={t('fullName')}><Input name="full_name" required minLength={2} /></Field>
-            <Field label={t('email')}><Input name="email" type="email" required /></Field>
-            <Field label={t('password')} hint={t('passwordHint')}><Input name="password" type="password" required minLength={8} /></Field>
+            <Field label={t('email')}><Input name="email" type="email" autoComplete="off" required /></Field>
+            <Field label={t('password')} hint={t('passwordHint')}><Input name="password" type="password" autoComplete="new-password" required minLength={8} /></Field>
             {error && <ErrorState message={error} />}
-            <Button type="submit" className="w-full"><UserPlus size={16} />{t('create')}</Button>
+            <Button type="submit" disabled={creating} className="w-full"><UserPlus size={16} />{creating ? 'Қосылуда…' : 'Мұғалімді қосу'}</Button>
           </form>
-        </Card>
+      </Modal>
+      <DeletionConfirmModal open={groupToRemove !== null} onClose={() => setGroupToRemove(null)}
+        title="Топты курстан алып тастау" description="Осы топты курстан алып тастағыңыз келе ме?"
+        courseName={groupToRemove?.group.title ?? ''} isLoading={removingGroup} warning={removeError || undefined}
+        onConfirm={async () => {
+          if (!groupToRemove) return
+          setRemovingGroup(true); setRemoveError('')
+          try {
+            await api(`/admin/courses/${groupToRemove.courseId}/groups/${groupToRemove.group.id}`, { method: 'DELETE' })
+            await detailReq.mutate(); setGroupToRemove(null)
+          } catch (err) { setRemoveError((err as Error).message) }
+          finally { setRemovingGroup(false) }
+        }}
+      />
+      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="min-w-0 space-y-6">
 
         <Card className="space-y-4">
-          <ListHeader title={t('teachers')} query={query} setQuery={setQuery} />
+          <ListHeader title={t('teachers')} query={query} setQuery={setQuery} placeholder="Мұғалімді іздеу" />
           {teachersReq.isLoading ? <Spinner /> : teachersReq.error ? <ErrorState message={t('errorOccurred')} /> : (
             <div className="space-y-2">
+              {!teachers.length && <EmptyState title={query ? t('noResults') : t('noData')} />}
               {teachers.map((teacher) => (
                 <div
                   key={teacher.id}
-                  onClick={() => setSelectedId(teacher.id)}
                   className={`w-full rounded-lg border text-left transition-colors ${
                     selectedId === teacher.id ? 'border-primary bg-primary-soft' : 'border-border hover:bg-surface-muted'
                   }`}
                 >
                   <UserRow
                     user={teacher}
+                    onSelect={() => setSelectedId(teacher.id)}
                     fixedRole="teacher"
                     onChanged={async () => {
                       await teachersReq.mutate()
@@ -254,10 +298,7 @@ function TeachersTab() {
                         <span key={group.id} className="inline-flex items-center gap-1 rounded-full bg-primary-soft px-2.5 py-0.5 text-xs font-semibold text-primary">
                           {group.code} - {group.student_count}/{group.capacity}
                           <button
-                            onClick={async () => {
-                              await api(`/admin/courses/${course.id}/groups/${group.id}`, { method: 'DELETE' })
-                              await detailReq.mutate()
-                            }}
+                            onClick={() => { setRemoveError(''); setGroupToRemove({ courseId: course.id, group }) }}
                             className="rounded-full p-0.5 hover:bg-primary/10"
                             aria-label={t('remove')}
                           >
@@ -274,6 +315,7 @@ function TeachersTab() {
         )}
       </Card>
     </div>
+    </div>
   )
 }
 
@@ -284,6 +326,9 @@ function GroupsTab() {
   const [studentQuery, setStudentQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [editingGroup, setEditingGroup] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   const groupsReq = useSWR<{ items: Group[] }>('/admin/groups?per_page=100', fetcher)
   const detailReq = useSWR<GroupDetail>(selectedId ? `/admin/groups/${selectedId}` : null, fetcher)
   const searchReq = useSWR<{ items: User[] }>(
@@ -328,10 +373,14 @@ function GroupsTab() {
   }
 
   async function deleteGroup(groupId: number) {
-    if (!window.confirm(t('confirmDelete'))) return
-    await api(`/admin/groups/${groupId}`, { method: 'DELETE' })
-    setSelectedId(null)
-    await groupsReq.mutate()
+    setDeleting(true); setDeleteError('')
+    try {
+      await api(`/admin/groups/${groupId}`, { method: 'DELETE' })
+      setConfirmDelete(false)
+      setSelectedId(null)
+      await groupsReq.mutate()
+    } catch (err) { setDeleteError((err as Error).message) }
+    finally { setDeleting(false) }
   }
 
   async function updateGroup(event: FormEvent<HTMLFormElement>) {
@@ -355,6 +404,11 @@ function GroupsTab() {
 
   return (
     <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
+      <DeletionConfirmModal open={confirmDelete} onClose={() => setConfirmDelete(false)}
+        onConfirm={() => { if (selectedId) void deleteGroup(selectedId) }}
+        title="Топты өшіру" description={`«${detailReq.data?.title ?? ''}» тобын өшіргіңіз келе ме?`}
+        courseName={detailReq.data?.title ?? ''} warning={deleteError || undefined} isLoading={deleting}
+      />
       <div className="space-y-6">
         <Card>
           <h2 className="text-base font-semibold">{t('createGroup')}</h2>
@@ -427,7 +481,7 @@ function GroupsTab() {
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone="primary">{detailReq.data.students.length}/{detailReq.data.capacity}</Badge>
                   <Button size="sm" variant="outline" onClick={() => setEditingGroup(true)}><Pencil size={14} />{t('edit')}</Button>
-                  <Button size="sm" variant="danger" onClick={() => deleteGroup(detailReq.data!.id)}><Trash2 size={14} />{t('delete')}</Button>
+                  <Button size="sm" variant="danger-ghost" onClick={() => { setDeleteError(''); setConfirmDelete(true) }}><Trash2 size={14} />{t('delete')}</Button>
                 </div>
               </div>
             )}
@@ -500,14 +554,14 @@ function filterUsers(users: User[], query: string) {
   return users.filter((u) => u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
 }
 
-function ListHeader({ title, query, setQuery }: { title: string; query: string; setQuery: (value: string) => void }) {
+function ListHeader({ title, query, setQuery, placeholder }: { title: string; query: string; setQuery: (value: string) => void; placeholder?: string }) {
   const { t } = useI18n()
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <h2 className="text-base font-semibold">{title}</h2>
       <div className="relative">
         <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('search')} className="pl-9 sm:w-56" />
+        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={placeholder ?? t('search')} aria-label={placeholder ?? t('search')} className="pl-9 sm:w-56" />
       </div>
     </div>
   )
@@ -518,14 +572,16 @@ function UserList({
   fixedRole,
   onChanged,
   onRemove,
+  emptyTitle,
 }: {
   users: User[]
   fixedRole?: 'student' | 'teacher' | 'admin'
   onChanged?: () => Promise<unknown>
   onRemove?: (user: User) => Promise<void>
+  emptyTitle?: string
 }) {
   const { t } = useI18n()
-  if (!users.length) return <EmptyState icon={<Users size={22} />} title={t('noData')} />
+  if (!users.length) return <EmptyState icon={<Users size={22} />} title={emptyTitle ?? t('noData')} />
   return (
     <div className="divide-y divide-border rounded-lg border border-border">
       {users.map((user) => (
@@ -541,15 +597,18 @@ function UserRow({
   onChanged,
   onDeleted,
   onRemove,
+  onSelect,
 }: {
   user: User
   fixedRole?: 'student' | 'teacher' | 'admin'
   onChanged?: () => Promise<unknown>
+  onSelect?: () => void
   onDeleted?: () => void
   onRemove?: (user: User) => Promise<void>
 }) {
   const { t } = useI18n()
   const [editing, setEditing] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [working, setWorking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -580,13 +639,17 @@ function UserRow({
   }
 
   async function deleteUser() {
-    if (!window.confirm(t('confirmDelete'))) return
     setWorking(true)
     setError(null)
     try {
-      await api(`/admin/users/${user.id}`, { method: 'DELETE' })
-      onDeleted?.()
-      await onChanged?.()
+      if (onRemove) {
+        await onRemove(user)
+      } else {
+        await api(`/admin/users/${user.id}`, { method: 'DELETE' })
+        onDeleted?.()
+        await onChanged?.()
+      }
+      setConfirmOpen(false)
     } catch (err) {
       setError((err as Error).message || t('errorOccurred'))
     } finally {
@@ -618,24 +681,34 @@ function UserRow({
   }
 
   return (
-    <div className="flex w-full items-center gap-3 px-3 py-3">
-      <Avatar name={user.full_name} />
+    <>
+    <DeletionConfirmModal
+      open={confirmOpen} onClose={() => setConfirmOpen(false)} onConfirm={() => void deleteUser()}
+      title={onRemove ? 'Оқушыны топтан шығару' : 'Пайдаланушыны өшіру'}
+      description={onRemove ? `«${user.full_name}» оқушысын топтан шығарғыңыз келе ме?` : `«${user.full_name}» пайдаланушысын өшіргіңіз келе ме?`}
+      courseName={user.full_name} warning={error || undefined} isLoading={working}
+    />
+    <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
+      <Avatar name={user.full_name} className="row-span-2 sm:row-span-1" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{user.full_name}</p>
+        {onSelect ? <button type="button" className="max-w-full truncate text-left text-sm font-medium hover:text-primary" onClick={onSelect}>{user.full_name}</button> : <p className="truncate text-sm font-medium">{user.full_name}</p>}
         <p className="truncate text-xs text-muted">{user.email}</p>
       </div>
-      <Badge tone={user.is_blocked ? 'danger' : 'success'}>{user.is_blocked ? t('blocked') : t('active')}</Badge>
-      <div className="flex shrink-0 gap-1">
+      <div className="col-start-2 row-start-2 sm:col-start-3 sm:row-start-1">
+        <Badge tone={user.is_blocked ? 'danger' : 'success'}>{user.is_blocked ? t('blocked') : t('active')}</Badge>
+      </div>
+      <div className="col-start-3 row-span-2 row-start-1 flex shrink-0 gap-1 sm:col-start-4 sm:row-span-1">
         {onRemove ? (
-          <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); onRemove(user) }} disabled={working}><UserMinus size={14} /></Button>
+          <Button size="sm" variant="outline" aria-label="Топтан шығару" onClick={(event) => { event.stopPropagation(); setError(null); setConfirmOpen(true) }} disabled={working}><UserMinus size={14} /></Button>
         ) : (
           <>
-            <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); setEditing(true) }} disabled={working}><Pencil size={14} /></Button>
-            <Button size="sm" variant="danger" onClick={(event) => { event.stopPropagation(); deleteUser() }} disabled={working}><Trash2 size={14} /></Button>
+            <Button size="sm" variant="ghost" aria-label="Өңдеу" onClick={(event) => { event.stopPropagation(); setEditing(true) }} disabled={working}><Pencil size={14} /></Button>
+            <Button size="sm" variant="danger-ghost" aria-label="Өшіру" onClick={(event) => { event.stopPropagation(); setError(null); setConfirmOpen(true) }} disabled={working}><Trash2 size={14} /></Button>
           </>
         )}
       </div>
     </div>
+    </>
   )
 }
 
@@ -650,9 +723,8 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 
 function EntTrialTab() {
   return <Card className="space-y-4 p-6">
-    <h2 className="text-xl font-bold">ҰБТ варианттары</h2>
+    <h2 className="text-xl font-bold">ҰБТ нұсқалары</h2>
     <p className="text-muted">Сұрақтар мен контекстерді ҰБТ ережелеріне сай құрылымды редакторда басқарыңыз.</p>
     <a href="/ent-trial" className="inline-flex rounded-xl bg-primary px-5 py-3 font-semibold text-primary-foreground">ҰБТ редакторын ашу →</a>
   </Card>
 }
-

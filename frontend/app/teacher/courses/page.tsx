@@ -68,8 +68,8 @@ export default function TeacherCoursesPage() {
                   <span className="flex items-center gap-1.5"><Users size={14} />{course.student_count}</span>
                 </div>
                 <div className="mt-auto flex flex-wrap gap-2 pt-1">
-                  <Button asChild variant="outline" size="sm"><Link href={`/courses/${course.id}`}>{t('viewCourse')}</Link></Button>
-                  <Button asChild size="sm"><Link href={`/teacher/courses/${course.id}/gradebook`}>{t('gradebook')}</Link></Button>
+                  <Button asChild variant="primary" size="sm"><Link href={`/courses/${course.id}`}>{t('viewCourse')}</Link></Button>
+                  <Button asChild variant="secondary" size="sm"><Link href={`/teacher/courses/${course.id}/gradebook`}>{t('gradebook')}</Link></Button>
                 </div>
               </Card>
             </FadeIn>

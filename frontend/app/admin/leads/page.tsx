@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { CalendarClock, ClipboardList, Phone, Search } from 'lucide-react'
+import { formatDate } from '@/lib/date'
 import { api, fetcher } from '@/lib/api'
 import { Badge, Card, EmptyState, ErrorState, Input, PageHeader, Select, Spinner } from '../../components/ui'
 
@@ -25,20 +26,16 @@ const statusLabels: Record<LeadStatus, string> = {
   closed: 'Жабылды',
 }
 
-const statusTones: Record<LeadStatus, 'warning' | 'primary' | 'success'> = {
+const statusTones: Record<LeadStatus, 'warning' | 'primary' | 'neutral'> = {
   new: 'warning',
   contacted: 'primary',
-  closed: 'success',
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('kk-KZ', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value))
+  closed: 'neutral',
 }
 
 export default function AdminLeadsPage() {
+  const [notice, setNotice] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [savingIds, setSavingIds] = useState<number[]>([])
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<LeadStatus | ''>('')
   const endpoint = `/admin/leads?status=${status}&q=${encodeURIComponent(query)}`
@@ -53,11 +50,19 @@ export default function AdminLeadsPage() {
   }, [data])
 
   async function changeStatus(leadId: number, nextStatus: LeadStatus) {
-    await api(`/admin/leads/${leadId}`, {
-      method: 'PATCH',
-      body: { status: nextStatus },
-    })
-    await mutate()
+    setSavingIds(ids => [...ids, leadId]); setActionError(''); setNotice('')
+    try {
+      await api(`/admin/leads/${leadId}`, {
+        method: 'PATCH',
+        body: { status: nextStatus },
+      })
+      await mutate()
+      setNotice('Мәртебе өзгертілді')
+    } catch (err) {
+      setActionError((err as Error).message)
+    } finally {
+      setSavingIds(ids => ids.filter(id => id !== leadId))
+    }
   }
 
   return (
@@ -70,15 +75,18 @@ export default function AdminLeadsPage() {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Card>
-          <p className="text-xs font-semibold text-muted">Көрсетілген өтінімдер</p>
+          <p className="text-xs font-semibold text-muted">Барлық өтінімдер</p>
           <p className="mt-1 text-3xl font-bold">{counts.total}</p>
+          {(query || status) && <p className="mt-1 text-xs text-muted">Таңдалған сүзгілер бойынша</p>}
         </Card>
         <Card>
           <p className="text-xs font-semibold text-muted">Жаңа өтінімдер</p>
-          <p className="mt-1 text-3xl font-bold text-warning">{counts.new}</p>
+          <p className="mt-1 text-3xl font-bold text-warning-foreground">{counts.new}</p>
         </Card>
       </div>
 
+      {notice && <p role="status" className="text-sm text-success-foreground">{notice}</p>}
+      {actionError && <ErrorState message={actionError} />}
       <Card className="space-y-4">
         <div className="flex flex-col gap-3 md:flex-row">
           <div className="relative flex-1">
@@ -86,11 +94,12 @@ export default function AdminLeadsPage() {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Аты, телефоны немесе курсы бойынша іздеу"
+              placeholder="Аты-жөні, телефон нөмірі немесе курс бойынша іздеу"
+              aria-label="Өтінімді іздеу"
               className="pl-10"
             />
           </div>
-          <Select value={status} onChange={(event) => setStatus(event.target.value as LeadStatus | '')} className="md:w-52">
+          <Select aria-label="Мәртебе бойынша сүзу" value={status} onChange={(event) => setStatus(event.target.value as LeadStatus | '')} className="md:w-52">
             <option value="">Барлық мәртебелер</option>
             <option value="new">Жаңа</option>
             <option value="contacted">Байланыстық</option>
@@ -105,7 +114,7 @@ export default function AdminLeadsPage() {
         ) : !(data?.items.length) ? (
           <EmptyState
             icon={<ClipboardList size={22} />}
-            title="Өтінімдер табылмады"
+            title={query || status ? 'Ештеңе табылмады' : 'Әзірге өтінімдер жоқ'}
             hint="Жаңа өтінімдер лендинг формасы жіберілгеннен кейін осында пайда болады."
           />
         ) : (
@@ -123,7 +132,7 @@ export default function AdminLeadsPage() {
                 </div>
                 <div>
                   <p className="text-xs font-medium text-muted">Қызықтырған курс</p>
-                  <p className="mt-1 text-sm font-medium">{lead.course}</p>
+                  <p className="mt-1 break-words text-sm font-medium">{lead.course}</p>
                 </div>
                 <div>
                   <p className="text-xs font-medium text-muted">Филиал</p>
@@ -132,6 +141,7 @@ export default function AdminLeadsPage() {
                 </div>
                 <Select
                   aria-label="Өтінім мәртебесі"
+                  disabled={savingIds.includes(lead.id)}
                   value={lead.status}
                   onChange={(event) => changeStatus(lead.id, event.target.value as LeadStatus)}
                 >

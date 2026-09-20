@@ -3,6 +3,9 @@
 import {
   cloneElement,
   isValidElement,
+  useEffect,
+  useRef,
+  useId,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactElement,
@@ -19,7 +22,7 @@ export function cx(...parts: (string | false | null | undefined)[]) {
 /* Button                                                                     */
 /* -------------------------------------------------------------------------- */
 
-type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger'
+type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'danger-ghost'
 type ButtonSize = 'sm' | 'md' | 'lg'
 
 const buttonBase =
@@ -31,6 +34,7 @@ const buttonVariants: Record<ButtonVariant, string> = {
   outline: 'border border-border bg-transparent text-foreground hover:bg-surface-muted active:scale-[0.98]',
   ghost: 'text-muted hover:bg-surface-muted hover:text-foreground',
   danger: 'bg-danger text-primary-foreground shadow-sm hover:brightness-95 active:scale-[0.98]',
+  'danger-ghost': 'text-danger hover:bg-danger-soft',
 }
 
 const buttonSizes: Record<ButtonSize, string> = {
@@ -97,11 +101,18 @@ export function Field({
   hint?: string
   children: ReactNode
 }) {
+  const fieldId = useId()
+  const control = isValidElement(children) ? children as ReactElement<{ id?: string; 'aria-labelledby'?: string; 'aria-describedby'?: string }> : null
+  const controlId = control?.props.id ?? fieldId
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-foreground">{label}</span>
-      {children}
-      {hint && <span className="text-xs text-muted">{hint}</span>}
+    <label htmlFor={controlId} className="flex min-w-0 max-w-full flex-col gap-1.5">
+      <span id={`${fieldId}-label`} className="text-sm font-medium text-foreground">{label}</span>
+      {control ? cloneElement(control, {
+        id: controlId,
+        'aria-labelledby': control.props['aria-labelledby'] ?? `${fieldId}-label`,
+        'aria-describedby': [control.props['aria-describedby'], hint ? `${fieldId}-hint` : undefined].filter(Boolean).join(' ') || undefined,
+      }) : children}
+      {hint && <span id={`${fieldId}-hint`} className="text-xs text-muted">{hint}</span>}
     </label>
   )
 }
@@ -122,7 +133,7 @@ export function Card({
   return (
     <div
       className={cx(
-        'rounded-2xl border border-border bg-surface p-5 shadow-xs',
+        'min-w-0 rounded-2xl border border-border bg-surface p-5 shadow-xs',
         interactive && 'transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-primary/30',
         className,
       )}
@@ -144,8 +155,8 @@ export function Badge({
   const tones: Record<string, string> = {
     neutral: 'bg-surface-muted text-muted border border-border',
     primary: 'bg-primary-soft text-primary',
-    success: 'bg-success-soft text-success',
-    warning: 'bg-warning-soft text-warning',
+    success: 'bg-success-soft text-success-foreground',
+    warning: 'bg-warning-soft text-warning-foreground',
     danger: 'bg-danger-soft text-danger',
   }
   return (
@@ -167,14 +178,14 @@ export function Badge({
 
 export function Spinner({ className }: { className?: string }) {
   return (
-    <div className="flex justify-center py-12" role="status" aria-label="Loading">
+    <div className="flex justify-center py-12" role="status" aria-label="Жүктелуде">
       <div className={cx('size-6 rounded-full border-2 border-border border-t-primary animate-spin', className)} />
     </div>
   )
 }
 
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cx('animate-pulse rounded-lg bg-surface-muted', className)} />
+  return <div aria-hidden="true" className={cx('animate-pulse rounded-lg bg-surface-muted', className)} />
 }
 
 export function EmptyState({
@@ -202,7 +213,7 @@ export function EmptyState({
 
 export function ErrorState({ message }: { message: string }) {
   return (
-    <div className="rounded-2xl border border-danger/20 bg-danger-soft px-5 py-4 text-sm font-medium text-danger">
+    <div role="alert" className="rounded-2xl border border-danger/20 bg-danger-soft px-5 py-4 text-sm font-medium text-danger">
       {message}
     </div>
   )
@@ -268,8 +279,8 @@ export function StatCard({
 }) {
   const tones: Record<string, string> = {
     primary: 'bg-primary-soft text-primary',
-    success: 'bg-success-soft text-success',
-    warning: 'bg-warning-soft text-warning',
+    success: 'bg-success-soft text-success-foreground',
+    warning: 'bg-warning-soft text-warning-foreground',
     danger: 'bg-danger-soft text-danger',
   }
   return (
@@ -340,28 +351,70 @@ export function Modal({
   onClose,
   title,
   children,
+  closeDisabled = false,
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
+  closeDisabled?: boolean
 }) {
+  const panel = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  const close = useRef(onClose)
+  const locked = useRef(closeDisabled)
+  useEffect(() => { close.current = onClose; locked.current = closeDisabled }, [onClose, closeDisabled])
+  useEffect(() => {
+    if (!open) return
+    const trigger = document.activeElement as HTMLElement | null
+    const overflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusable = () => Array.from(panel.current?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]',
+    ) ?? []).filter(el => el.getClientRects().length > 0)
+    const frame = requestAnimationFrame(() => (focusable()[0] ?? panel.current)?.focus())
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (!locked.current) close.current()
+      }
+      if (event.key !== 'Tab') return
+      const items = focusable()
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (!first) { event.preventDefault(); panel.current?.focus(); return }
+      if (!panel.current?.contains(document.activeElement) || (event.shiftKey && document.activeElement === first)) {
+        event.preventDefault(); (event.shiftKey ? last : first).focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = overflow
+      if (trigger?.isConnected) trigger.focus()
+    }
+  }, [open])
   if (!open) return null
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-foreground/50 p-4 backdrop-blur-sm sm:p-8"
-      onClick={onClose}
+      onClick={closeDisabled ? undefined : onClose}
     >
       <div
+        ref={panel}
+        tabIndex={-1}
         className="w-full max-w-lg rounded-2xl border border-border bg-surface shadow-2xl animate-fade-in"
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h2 className="text-base font-semibold text-foreground">{title}</h2>
-          <button onClick={onClose} className="text-muted transition-colors hover:text-foreground" aria-label="Close">
+          <h2 id={titleId} className="min-w-0 break-words text-base font-semibold text-foreground">{title}</h2>
+          <button type="button" disabled={closeDisabled} onClick={onClose} className="shrink-0 rounded-lg p-2 text-muted transition-colors hover:text-foreground disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-primary" aria-label="Жабу">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
@@ -390,14 +443,45 @@ export function DropdownMenu({
   }>
   position?: 'left' | 'right'
 }) {
+  const menu = useRef<HTMLDivElement>(null)
+  const close = useRef(onClose)
+  useEffect(() => { close.current = onClose }, [onClose])
+  useEffect(() => {
+    if (!open) return
+    const trigger = document.activeElement as HTMLElement | null
+    const buttons = () => Array.from(menu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])
+    const frame = requestAnimationFrame(() => buttons()[0]?.focus())
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' || event.key === 'Tab') {
+        if (event.key === 'Escape') event.preventDefault()
+        close.current()
+        return
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+      event.preventDefault()
+      const entries = buttons()
+      const index = entries.indexOf(document.activeElement as HTMLButtonElement)
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? entries.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + entries.length) % entries.length
+      entries[next]?.focus()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', onKeyDown)
+      if (trigger?.isConnected) trigger.focus()
+    }
+  }, [open])
   if (!open) return null
 
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div
+        ref={menu}
+        role="menu"
+        aria-label="Әрекеттер"
         className={cx(
-          'absolute top-full z-50 mt-1 rounded-lg border border-border bg-surface shadow-lg',
+          'absolute top-full z-50 mt-1 min-w-40 rounded-lg border border-border bg-surface shadow-lg',
           position === 'right' ? 'right-0' : 'left-0',
         )}
       >
@@ -405,14 +489,16 @@ export function DropdownMenu({
           <div key={idx}>
             {item.divider && <div className="my-1 h-px bg-border" />}
             <button
+              type="button"
+              role="menuitem"
               onClick={() => {
                 item.onClick()
                 onClose()
               }}
               className={cx(
-                'flex w-full items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors',
+                'flex w-full items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary',
                 item.destructive
-                  ? 'text-danger hover:bg-red-50/50'
+                  ? 'text-danger hover:bg-danger-soft'
                   : 'text-foreground hover:bg-surface-muted',
               )}
             >
@@ -427,14 +513,7 @@ export function DropdownMenu({
 }
 
 export function DeletionConfirmModal({
-  open,
-  onClose,
-  onConfirm,
-  title,
-  description,
-  courseName,
-  warning,
-  isLoading,
+  open, onClose, onConfirm, title, description, courseName, warning, isLoading,
 }: {
   open: boolean
   onClose: () => void
@@ -445,65 +524,19 @@ export function DeletionConfirmModal({
   warning?: string
   isLoading?: boolean
 }) {
-  if (!open) return null
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-foreground/50 p-4 backdrop-blur-sm"
-      onClick={!isLoading ? onClose : undefined}
-    >
-      <div
-        className="w-full max-w-md rounded-3xl border border-border bg-surface shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Icon */}
-        <div className="flex justify-center pt-6">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-50">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-danger">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="currentColor" />
-            </svg>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="space-y-4 px-6 py-6 text-center">
-          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-          <p className="text-sm text-muted">{description}</p>
-
-          {/* Course name */}
-          <div className="rounded-lg bg-surface-muted px-4 py-3">
-            <p className="text-sm font-medium text-foreground">«{courseName}»</p>
-          </div>
-
-          {/* Warning */}
-          {warning && (
-            <div className="rounded-lg bg-red-50/30 px-4 py-3">
-              <p className="text-xs text-danger">{warning}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Actions */}
-        <div className="flex flex-col gap-3 border-t border-border px-6 py-4 sm:flex-row sm:justify-end">
-          <button
-            onClick={onClose}
-            disabled={isLoading}
-            className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-surface-muted disabled:opacity-50"
-          >
-            Бас тарту
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={isLoading}
-            className="flex items-center justify-center gap-2 rounded-lg bg-danger px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
-          >
-            {isLoading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />}
-            {isLoading ? 'Жойылуда...' : 'Курсты жою'}
-          </button>
+    <Modal open={open} onClose={onClose} title={title} closeDisabled={isLoading}>
+      <div className="space-y-4">
+        <p className="text-sm text-muted">{description}</p>
+        <p className="break-words rounded-lg bg-surface-muted px-4 py-3 text-sm font-medium">«{courseName}»</p>
+        {warning && <p className="rounded-lg bg-danger-soft px-4 py-3 text-sm text-danger">{warning}</p>}
+        <div className="flex flex-wrap justify-end gap-3 pt-2">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={isLoading}>Бас тарту</Button>
+          <Button type="button" variant="danger" onClick={onConfirm} disabled={isLoading}>
+            {isLoading ? 'Өшірілуде…' : 'Өшіру'}
+          </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }

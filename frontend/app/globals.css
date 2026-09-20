@@ -23,8 +23,10 @@
   /* Status */
   --color-success: #16a36a;
   --color-success-soft: #ecf8f1;
+  --color-success-foreground: #147d52;
   --color-warning: #f5a524;
   --color-warning-soft: #fef5e8;
+  --color-warning-foreground: #98600d;
   --color-danger: #d92d20;
   --color-danger-soft: #fef3f2;
 
@@ -80,6 +82,15 @@ select {
 
 button {
   cursor: pointer;
+}
+
+.admin-ui {
+  --color-muted: #526174;
+}
+
+.platform-ui :where(button, a, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 img {
