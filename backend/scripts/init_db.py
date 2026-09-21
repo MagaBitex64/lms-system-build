@@ -325,6 +325,7 @@ CREATE TABLE IF NOT EXISTS ent_trial_accesses (
     student_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ,
     allow_retake BOOLEAN NOT NULL DEFAULT FALSE,
+    max_attempts INTEGER NOT NULL DEFAULT 1 CHECK (max_attempts BETWEEN 1 AND 100),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ent_accesses_student ON ent_trial_accesses(student_id);
@@ -458,6 +459,10 @@ ENT_MIGRATIONS = [
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS extra_time_minutes INTEGER NOT NULL DEFAULT 0 CHECK (extra_time_minutes IN (0,40))",
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS camera_required BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS allow_retake BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS max_attempts INTEGER NOT NULL DEFAULT 1 CHECK (max_attempts BETWEEN 1 AND 100)",
+    """UPDATE ent_trial_accesses a SET max_attempts=GREATEST(3,(
+        SELECT COUNT(*)::int FROM ent_trial_attempts t WHERE t.access_id=a.id
+    )),allow_retake=FALSE WHERE a.allow_retake=TRUE""",
     "ALTER TABLE ent_trial_attempts DROP CONSTRAINT IF EXISTS ent_trial_attempts_access_id_student_id_key",
     "CREATE INDEX IF NOT EXISTS idx_ent_attempts_access_student ON ent_trial_attempts(access_id,student_id,id DESC)",
     "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS difficulty TEXT",

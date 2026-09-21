@@ -186,15 +186,21 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repeated.json()["total_score"], 140)
         result = (await self.client.get(f"/ent-trial/attempts/{attempt_id}")).json()
         self.assertEqual(result["scores"]["total"], 140)
-        self.assertEqual(result["questions"]["kaz_history"][0]["prompt"], "Формула: {{image}} жауапты таңдаңыз")
-        self.assertTrue(result["questions"]["kaz_history"][0]["options"][0]["is_correct"])
-        self.assertEqual(result["questions"]["informatics"][30]["points_earned"], 2)
+        self.assertEqual(result["questions"], {})
+        self.assertEqual(len(result["subjects"]), 5)
+        self.assertNotIn("Формула: {{image}} жауапты таңдаңыз", json.dumps(result, ensure_ascii=False))
+        self.assertNotIn("is_correct", json.dumps(result, ensure_ascii=False))
         leaderboard = (await self.client.get("/ent-trial/leaderboard")).json()
         general_rank = next(item for item in leaderboard["general"]["items"]
                             if item["student_id"] == self.users["student"]["id"])
         self.assertEqual(general_rank["rank"], 1)
         self.assertEqual(general_rank["score"], 140)
         self.assertEqual(general_rank["max_score"], 140)
+        self.assertEqual(
+            [(part["subject"], part["score"], part["max_score"]) for part in general_rank["subjects"]],
+            [("kaz_history", 20, 20), ("reading", 10, 10), ("math_literacy", 10, 10),
+             ("informatics", 50, 50), ("mathematics", 50, 50)],
+        )
 
     async def test_expiry_grades_only_saved_answers_and_blocks_late_edits(self):
         vid = await self.create_variant()
@@ -293,7 +299,7 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 f"/ent-trial/teacher/variants/{variant_id}"
             )).status_code, 200)
 
-    async def test_repeatable_access_creates_unlimited_attempts_until_deadline(self):
+    async def test_access_attempt_limit_and_deadline_are_both_enforced(self):
         response = await self.client.post("/ent-trial/admin/variants", json={
             "title": "Repeatable math", "combination": "infmat", "exam_mode": "single",
             "single_subject": "mathematics",
@@ -302,17 +308,37 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         variant_id = response.json()["id"]
         await self.fill_single_variant(variant_id, "mathematics")
 
-        missing_deadline = await self.client.post("/ent-trial/admin/accesses", json={
-            "variant_id": variant_id, "target_type": "all", "allow_retake": True,
+        second_student = await self.conn.fetchrow(
+            "INSERT INTO users(email,password_hash,full_name,role) VALUES('student2@example.invalid','unused','student2','student') RETURNING *"
+        )
+        group_ids = []
+        for index, student_id in enumerate((self.users["student"]["id"], second_student["id"]), 1):
+            group_id = await self.conn.fetchval(
+                "INSERT INTO groups(code,title,direction,stream) VALUES($1,$2,'ҰБТ',$3) RETURNING id",
+                f"G{index}", f"Group {index}", str(index),
+            )
+            group_ids.append(group_id)
+            await self.conn.execute("INSERT INTO group_students(group_id,student_id) VALUES($1,$2)", group_id, student_id)
+
+        options = (await self.client.get("/ent-trial/admin/student-options")).json()["groups"]
+        self.assertEqual({student["id"] for group in options for student in group["students"]}, {
+            self.users["student"]["id"], second_student["id"],
         })
-        self.assertEqual(missing_deadline.status_code, 422, missing_deadline.text)
+
+        invalid_limit = await self.client.post("/ent-trial/admin/accesses", json={
+            "variant_id": variant_id, "target_type": "all", "max_attempts": 0,
+        })
+        self.assertEqual(invalid_limit.status_code, 422, invalid_limit.text)
 
         deadline = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1)
         response = await self.client.post("/ent-trial/admin/accesses", json={
-            "variant_id": variant_id, "target_type": "all", "allow_retake": True,
+            "variant_id": variant_id, "target_type": "student",
+            "student_ids": [self.users["student"]["id"], second_student["id"]], "max_attempts": 2,
             "expires_at": deadline.isoformat(),
         })
         self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["count"], 2)
+        self.assertEqual(len(response.json()["ids"]), 2)
         access_id = response.json()["id"]
 
         self.actor = self.users["student"]
@@ -331,27 +357,45 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(card["attempt_id"], second)
         self.assertEqual(card["attempt_count"], 2)
         self.assertEqual(card["completed_attempt_count"], 1)
+        self.assertEqual(card["max_attempts"], 2)
         self.assertEqual(float(card["best_score"]), 12)
 
         await self.conn.execute(
             "UPDATE ent_trial_attempts SET status='submitted',submitted_at=now(),total_score=20 WHERE id=$1",
             second,
         )
+        limit_reached = await self.client.post(f"/ent-trial/accesses/{access_id}/start")
+        self.assertEqual(limit_reached.status_code, 409, limit_reached.text)
         self.actor = self.users["admin"]
-        results = (await self.client.get(f"/ent-trial/admin/accesses/{access_id}/results")).json()["items"]
+        results_payload = (await self.client.get(f"/ent-trial/admin/accesses/{access_id}/results")).json()
+        self.assertEqual(results_payload["access"]["id"], access_id)
+        self.assertEqual(results_payload["access"]["variant_title"], "Repeatable math")
+        self.assertEqual(results_payload["access"]["combination_label"], "Информатика – Математика")
+        results = results_payload["items"]
         self.assertEqual({item["attempt_number"] for item in results}, {1, 2})
         self.assertEqual([float(item["total_score"]) for item in results], [20, 12])
+        self.assertEqual([float(item["max_score"]) for item in results], [50, 50])
+        self.assertEqual(results[0]["subjects"], [{
+            "subject": "mathematics", "label": "Математика", "score": 20.0,
+            "max_score": 50, "percentage": 40.0,
+        }])
         leaderboard = (await self.client.get("/ent-trial/leaderboard")).json()
         self.assertEqual(leaderboard["general"]["participant_count"], 0)
         math_top = next(group for group in leaderboard["subjects"] if group["subject"] == "mathematics")
         self.assertEqual(math_top["participant_count"], 1)
         self.assertEqual(math_top["completed_attempt_count"], 2)
-        student_rank = next(item for item in math_top["items"] if item["student_id"] == self.users["student"]["id"])
-        self.assertEqual(student_rank["rank"], 1)
-        self.assertEqual(float(student_rank["score"]), 20)
-        self.assertEqual(float(student_rank["max_score"]), 50)
-        self.assertEqual(float(student_rank["percentage"]), 40)
-        self.assertEqual(student_rank["attempt_count"], 2)
+        student_rows = [item for item in math_top["items"] if item["student_id"] == self.users["student"]["id"]]
+        self.assertEqual(len(student_rows), 2)
+        self.assertEqual([item["rank"] for item in student_rows], [1, 2])
+        self.assertEqual([float(item["score"]) for item in student_rows], [20, 12])
+        self.assertEqual({item["attempt_number"] for item in student_rows}, {1, 2})
+        self.assertTrue(all(item["attempt_count"] == 2 for item in student_rows))
+        self.assertEqual(float(student_rows[0]["max_score"]), 50)
+        self.assertEqual(float(student_rows[0]["percentage"]), 40)
+        self.assertEqual(student_rows[0]["subjects"], [{
+            "subject": "mathematics", "label": "Математика", "score": 20.0,
+            "max_score": 50, "percentage": 40.0,
+        }])
 
         self.actor = self.users["student"]
         self.assertEqual((await self.client.get("/ent-trial/leaderboard")).status_code, 200)
@@ -403,8 +447,9 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.actor = self.users["student"]
         result = (await self.client.get(f"/ent-trial/attempts/{tid}")).json()
         self.assertEqual(result["rules_version"], "legacy")
-        self.assertEqual(result["questions"]["kaz_history"][0]["prompt"], "Synthetic question")
-        self.assertEqual(result["questions"]["kaz_history"][0]["points_earned"], 1)
+        self.assertEqual(result["questions"], {})
+        self.assertEqual(result["subjects"][0]["score"], 1)
+        self.assertNotIn("Synthetic question", json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":

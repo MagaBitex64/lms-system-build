@@ -231,9 +231,19 @@ function TeachersTab() {
               {teachers.map((teacher) => (
                 <div
                   key={teacher.id}
+                  role="group"
+                  tabIndex={0}
+                  aria-label={`${teacher.full_name} мұғалімін таңдау`}
+                  onClick={() => setSelectedId(teacher.id)}
+                  onKeyDown={(event) => {
+                    if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+                      event.preventDefault()
+                      setSelectedId(teacher.id)
+                    }
+                  }}
                   className={`w-full rounded-lg border text-left transition-colors ${
                     selectedId === teacher.id ? 'border-primary bg-primary-soft' : 'border-border hover:bg-surface-muted'
-                  }`}
+                  } cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}
                 >
                   <UserRow
                     user={teacher}

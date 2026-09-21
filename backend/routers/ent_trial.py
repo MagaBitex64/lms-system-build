@@ -75,10 +75,11 @@ class AccessIn(BaseModel):
     target_type: Literal["all", "group", "student"]
     group_id: int | None = None
     student_id: int | None = None
+    student_ids: list[int] = Field(default_factory=list)
     expires_at: dt.datetime | None = None
     extra_time_minutes: Literal[0, 40] = 0
     camera_required: bool = True
-    allow_retake: bool = False
+    max_attempts: int = Field(default=1, ge=1, le=100)
 
 
 class AnswerIn(BaseModel):
@@ -440,31 +441,57 @@ async def list_accesses(user: dict = Depends(require_admin)):
         LEFT JOIN groups g ON g.id=a.group_id WHERE a.revoked_at IS NULL ORDER BY a.created_at DESC""")]}
 
 
+@router.get("/admin/student-options")
+async def list_grouped_students(user: dict = Depends(require_admin)):
+    pool = await get_pool()
+    groups = await pool.fetch("SELECT id,code,title FROM groups ORDER BY title,code")
+    members = await pool.fetch("""SELECT gs.group_id,u.id,u.full_name,u.email
+        FROM group_students gs JOIN users u ON u.id=gs.student_id
+        WHERE u.role='student' AND NOT u.is_blocked
+        ORDER BY gs.group_id,u.full_name,u.id""")
+    grouped = {group["id"]: [] for group in groups}
+    for member in members:
+        grouped.setdefault(member["group_id"], []).append({
+            "id": member["id"], "full_name": member["full_name"], "email": member["email"],
+        })
+    return {"groups": [{**dict(group), "students": grouped.get(group["id"], [])} for group in groups]}
+
+
 @router.post("/admin/accesses")
 async def grant_ent_access(data: AccessIn, user: dict = Depends(require_admin)):
     if data.extra_time_minutes and data.target_type != "student":
         raise HTTPException(422, "Қосымша 40 минут тек жеке оқушыға тағайындалады")
     if data.expires_at and (data.expires_at.tzinfo is None or data.expires_at <= now()):
         raise HTTPException(422, "Аяқталу уақыты уақыт белдеуімен және болашақта болуы керек")
-    if data.allow_retake and data.expires_at is None:
-        raise HTTPException(422, "Шексіз қайта тапсыру режимі үшін аяқталу күні мен уақытын көрсетіңіз")
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
         v = await variant_or_404(conn, data.variant_id, True)
         await ready_content(conn, v)
-        if data.target_type == "student" and not await conn.fetchval("SELECT 1 FROM users WHERE id=$1 AND role='student' AND NOT is_blocked", data.student_id):
-            raise HTTPException(422, "Оқушы табылмады")
+        student_ids = list(dict.fromkeys(data.student_ids or ([data.student_id] if data.student_id else [])))
         if data.target_type == "group" and not await conn.fetchval("SELECT 1 FROM groups WHERE id=$1", data.group_id):
             raise HTTPException(422, "Топ табылмады")
-        aid = await conn.fetchval("""INSERT INTO ent_trial_accesses(
-            granted_by_id,variant_id,combination,target_type,group_id,student_id,expires_at,
-            extra_time_minutes,camera_required,allow_retake
-        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id""",
-            user["id"], data.variant_id, v["combination"], data.target_type,
-            data.group_id if data.target_type == "group" else None,
-            data.student_id if data.target_type == "student" else None,
-            data.expires_at, data.extra_time_minutes, data.camera_required, data.allow_retake)
-    return {"ok": True, "id": aid}
+        if data.target_type == "student":
+            if not student_ids:
+                raise HTTPException(422, "Кемінде бір оқушыны таңдаңыз")
+            if data.student_ids:
+                members = await conn.fetch("""SELECT DISTINCT u.id FROM group_students gs JOIN users u ON u.id=gs.student_id
+                    WHERE u.id=ANY($1::bigint[]) AND u.role='student' AND NOT u.is_blocked""", student_ids)
+            else:
+                members = await conn.fetch("""SELECT id FROM users
+                    WHERE id=ANY($1::bigint[]) AND role='student' AND NOT is_blocked""", student_ids)
+            if {row["id"] for row in members} != set(student_ids):
+                raise HTTPException(422, "Таңдалған оқушы топта жоқ немесе бұғатталған")
+        targets = student_ids if data.target_type == "student" else [None]
+        access_ids = []
+        for student_id in targets:
+            access_ids.append(await conn.fetchval("""INSERT INTO ent_trial_accesses(
+                granted_by_id,variant_id,combination,target_type,group_id,student_id,expires_at,
+                extra_time_minutes,camera_required,max_attempts
+            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id""",
+                user["id"], data.variant_id, v["combination"], data.target_type,
+                data.group_id if data.target_type == "group" else None,
+                student_id, data.expires_at, data.extra_time_minutes, data.camera_required, data.max_attempts))
+    return {"ok": True, "id": access_ids[0], "ids": access_ids, "count": len(access_ids)}
 
 
 @router.delete("/admin/accesses/{access_id}")
@@ -480,6 +507,13 @@ async def revoke_ent_access(access_id: int, user: dict = Depends(require_admin))
 async def get_access_results(access_id: int, user: dict = Depends(require_admin)):
     await finalize_expired()
     pool = await get_pool()
+    access = await pool.fetchrow("""SELECT a.*,v.title variant_title,v.exam_mode,v.single_subject,
+        u.full_name student_name,g.title group_title,g.code group_code
+        FROM ent_trial_accesses a LEFT JOIN ent_variants v ON v.id=a.variant_id
+        LEFT JOIN users u ON u.id=a.student_id LEFT JOIN groups g ON g.id=a.group_id
+        WHERE a.id=$1""", access_id)
+    if not access:
+        raise HTTPException(404, "Рұқсат табылмады")
     rows = await pool.fetch("""SELECT a.*,u.full_name,u.email,
         ROW_NUMBER() OVER (PARTITION BY a.student_id ORDER BY a.started_at)::int attempt_number,
         COUNT(ap.id)::int absence_count,
@@ -488,17 +522,59 @@ async def get_access_results(access_id: int, user: dict = Depends(require_admin)
         LEFT JOIN ent_absence_periods ap ON ap.attempt_id=a.id
         WHERE a.access_id=$1 GROUP BY a.id,u.full_name,u.email
         ORDER BY (a.status='submitted') DESC,a.total_score DESC,a.started_at DESC""", access_id)
-    return {"items": [{k: v for k, v in dict(r).items() if k not in ("snapshot", "responses")} for r in rows]}
+    subject_max = {
+        subject: sum(slot["max_points"] for slot in subject_blueprint(subject)["slots"])
+        for subject in SUBJECT_LABELS
+    }
+    items = []
+    for row in rows:
+        item = dict(row)
+        snapshot = decoded(item.get("snapshot")) or {}
+        exam_mode = snapshot.get("exam_mode") or access["exam_mode"] or "full"
+        single_subject = snapshot.get("single_subject") or access["single_subject"]
+        max_score = int(snapshot.get("max_score") or (subject_max.get(single_subject, 0) if exam_mode == "single" else 140))
+        scores = decoded(item.get("scores_by_subject")) or {}
+        if not scores:
+            if exam_mode == "single" and single_subject in SUBJECT_LABELS:
+                scores = {single_subject: item["total_score"]}
+            else:
+                profile1, profile2 = COMBINATIONS.get(item["combination"], (None, None))
+                scores = {
+                    "kaz_history": item["kaz_history_score"], "reading": item["reading_score"],
+                    "math_literacy": item["math_score"], profile1: item["subject1_score"],
+                    profile2: item["subject2_score"],
+                }
+        subjects = []
+        for subject, label in SUBJECT_LABELS.items():
+            if subject not in scores or scores[subject] is None:
+                continue
+            score = float(scores[subject])
+            part_max = subject_max[subject]
+            subjects.append({
+                "subject": subject, "label": label, "score": score, "max_score": part_max,
+                "percentage": round(score / part_max * 100, 2) if part_max else 0,
+            })
+        item["max_score"] = max_score
+        item["percentage"] = round(float(item["total_score"]) / max_score * 100, 2) if max_score else 0
+        item["subjects"] = subjects
+        item.pop("snapshot", None)
+        item.pop("responses", None)
+        items.append(item)
+    access_data = dict(access)
+    combination_subjects = COMBINATIONS.get(access_data["combination"], ())
+    access_data["combination_label"] = " – ".join(SUBJECT_LABELS.get(subject, subject) for subject in combination_subjects)
+    return {"access": access_data, "items": items}
 
 
 @router.get("/leaderboard")
 async def get_ent_leaderboard(user: dict = Depends(get_current_user)):
-    """Public authenticated rankings: full 140-point ENT and per-subject best scores."""
+    """Public authenticated rankings: every completed full-ENT and subject attempt."""
     await finalize_expired()
     pool = await get_pool()
     rows = await pool.fetch("""SELECT t.id attempt_id,t.student_id,u.full_name,t.total_score,t.submitted_at,
         t.scores_by_subject,t.kaz_history_score,t.reading_score,t.math_score,
         t.subject1_score,t.subject2_score,t.combination,v.title variant_title,
+        ROW_NUMBER() OVER (PARTITION BY t.student_id ORDER BY t.started_at,t.id)::int attempt_number,
         COALESCE(t.snapshot->>'exam_mode',v.exam_mode,'full') exam_mode,
         COALESCE(t.snapshot->>'single_subject',v.single_subject) single_subject,
         NULLIF(t.snapshot->>'max_score','')::int snapshot_max_score
@@ -511,35 +587,40 @@ async def get_ent_leaderboard(user: dict = Depends(get_current_user)):
         subject: sum(slot["max_points"] for slot in subject_blueprint(subject)["slots"])
         for subject in SUBJECT_LABELS
     }
-    general_best: dict[int, dict] = {}
+    general_items_all: list[dict] = []
+    general_students: set[int] = set()
     general_attempts: dict[int, int] = {}
-    subject_best: dict[str, dict[int, dict]] = {subject: {} for subject in SUBJECT_LABELS}
+    subject_items_all: dict[str, list[dict]] = {subject: [] for subject in SUBJECT_LABELS}
+    subject_students: dict[str, set[int]] = {subject: set() for subject in SUBJECT_LABELS}
     subject_attempts: dict[tuple[str, int], int] = {}
     subject_totals = dict.fromkeys(SUBJECT_LABELS, 0)
     general_total = 0
 
-    def record(row, score, max_score):
+    def record(row, score, max_score, scores):
+        subjects = []
+        for subject, label in SUBJECT_LABELS.items():
+            if subject not in scores or scores[subject] is None:
+                continue
+            subject_score = float(scores[subject])
+            subject_max_score = subject_max[subject]
+            subjects.append({
+                "subject": subject, "label": label, "score": subject_score,
+                "max_score": subject_max_score,
+                "percentage": round(subject_score / subject_max_score * 100, 2) if subject_max_score else 0,
+            })
         return {
             "attempt_id": row["attempt_id"], "student_id": row["student_id"],
             "full_name": row["full_name"], "score": float(score), "max_score": max_score,
             "percentage": round(float(score) / max_score * 100, 2) if max_score else 0,
             "submitted_at": row["submitted_at"], "variant_title": row["variant_title"],
+            "attempt_number": row["attempt_number"],
+            "subjects": subjects,
         }
-
-    def prefer(candidate, current):
-        return (candidate["score"], -candidate["attempt_id"]) > (current["score"], -current["attempt_id"])
 
     for row in rows:
         exam_mode = row["exam_mode"]
         max_score = int(row["snapshot_max_score"] or (subject_max.get(row["single_subject"], 0) if exam_mode == "single" else 140))
         student_id = row["student_id"]
-
-        if exam_mode == "full" and max_score == 140:
-            general_total += 1
-            general_attempts[student_id] = general_attempts.get(student_id, 0) + 1
-            candidate = record(row, row["total_score"], 140)
-            if student_id not in general_best or prefer(candidate, general_best[student_id]):
-                general_best[student_id] = candidate
 
         scores = decoded(row["scores_by_subject"]) or {}
         if not scores:
@@ -552,36 +633,42 @@ async def get_ent_leaderboard(user: dict = Depends(get_current_user)):
                     "math_literacy": row["math_score"], profile1: row["subject1_score"],
                     profile2: row["subject2_score"],
                 }
+
+        if exam_mode == "full" and max_score == 140:
+            general_total += 1
+            general_students.add(student_id)
+            general_attempts[student_id] = general_attempts.get(student_id, 0) + 1
+            general_items_all.append(record(row, row["total_score"], 140, scores))
+
         for subject, score in scores.items():
             if subject not in SUBJECT_LABELS:
                 continue
             subject_totals[subject] += 1
+            subject_students[subject].add(student_id)
             key = (subject, student_id)
             subject_attempts[key] = subject_attempts.get(key, 0) + 1
-            candidate = record(row, score, subject_max[subject])
-            if student_id not in subject_best[subject] or prefer(candidate, subject_best[subject][student_id]):
-                subject_best[subject][student_id] = candidate
+            subject_items_all[subject].append(record(row, score, subject_max[subject], scores))
 
-    def ranked(best, attempts):
-        items = sorted(best.values(), key=lambda item: (-item["score"], item["attempt_id"]))[:100]
+    def ranked(candidates, attempts):
+        items = sorted(candidates, key=lambda item: (-item["score"], item["attempt_id"]))[:100]
         for rank, item in enumerate(items, 1):
             item["rank"] = rank
             item["attempt_count"] = attempts[item["student_id"]]
         return items
 
-    general_items = ranked(general_best, general_attempts)
+    general_items = ranked(general_items_all, general_attempts)
     subjects = []
     for subject, label in SUBJECT_LABELS.items():
-        attempts = {student_id: subject_attempts[(subject, student_id)] for student_id in subject_best[subject]}
+        attempts = {student_id: subject_attempts[(subject, student_id)] for student_id in subject_students[subject]}
         subjects.append({
             "subject": subject, "label": label, "max_score": subject_max[subject],
-            "participant_count": len(subject_best[subject]),
+            "participant_count": len(subject_students[subject]),
             "completed_attempt_count": subject_totals[subject],
-            "items": ranked(subject_best[subject], attempts),
+            "items": ranked(subject_items_all[subject], attempts),
         })
     return {
         "general": {"label": "Жалпы ҰБТ", "max_score": 140,
-                    "participant_count": len(general_best), "completed_attempt_count": general_total,
+                    "participant_count": len(general_students), "completed_attempt_count": general_total,
                     "items": general_items},
         "subjects": subjects, "limit": 100,
     }
@@ -638,6 +725,7 @@ async def get_my_accesses(user: dict = Depends(require_student)):
 
 @router.post("/accesses/{access_id}/start")
 async def start_ent_test(access_id: int, user: dict = Depends(require_student)):
+    await finalize_expired(user["id"])
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
         # Lock in the same order as authoring: variant, access, then attempt.
@@ -649,15 +737,21 @@ async def start_ent_test(access_id: int, user: dict = Depends(require_student)):
         access = await conn.fetchrow("SELECT * FROM ent_trial_accesses WHERE id=$1 FOR UPDATE", access_id)
         if not access:
             raise HTTPException(404, "Рұқсат табылмады")
-        existing = await conn.fetchrow("""SELECT id,status FROM ent_trial_attempts
-            WHERE access_id=$1 AND student_id=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE""", access_id, user["id"])
-        if existing and (not access["allow_retake"] or existing["status"] == "in_progress"):
-            return {"ok": True, "attempt_id": existing["id"]}
         authorized = access["target_type"] == "all" or (access["target_type"] == "student" and access["student_id"] == user["id"])
         if access["target_type"] == "group":
             authorized = bool(await conn.fetchval("SELECT 1 FROM group_students WHERE group_id=$1 AND student_id=$2", access["group_id"], user["id"]))
         if not authorized or access["revoked_at"] or (access["expires_at"] and access["expires_at"] <= now()):
             raise HTTPException(403, "Бұл тестке рұқсат жоқ немесе оның мерзімі аяқталған")
+        existing = await conn.fetchrow("""SELECT id,status FROM ent_trial_attempts
+            WHERE access_id=$1 AND student_id=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE""", access_id, user["id"])
+        if existing and existing["status"] == "in_progress":
+            return {"ok": True, "attempt_id": existing["id"]}
+        attempt_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ent_trial_attempts WHERE access_id=$1 AND student_id=$2",
+            access_id, user["id"],
+        )
+        if attempt_count >= access["max_attempts"]:
+            raise HTTPException(409, "Бұл рұқсат бойынша әрекет санының лимиті аяқталды")
         if not access["variant_id"]:
             raise HTTPException(409, "Ескі кездейсоқ тест іске қосылмайды. Әкімші құрылымды вариант тағайындауы керек.")
         qs, contexts = await ready_content(conn, v)
@@ -835,30 +929,50 @@ def public_attempt(attempt):
     snapshot, responses = decoded(attempt["snapshot"]), decoded(attempt["responses"])
     submitted = attempt["status"] == "submitted"
     subjects = snapshot.get("subjects") or list(dict.fromkeys(q["subject"] for q in snapshot["questions"]))
-    grouped = {subject: [] for subject in subjects}
-    for source in snapshot["questions"]:
-        q = copy.deepcopy(source)
-        response = responses.get(str(q["question_id"]), {})
-        q.update({"selected_option_id": response.get("selected_option_id"), "selected_option_ids": response.get("selected_option_ids", []), "matching_answer": response.get("matching_answer", {})})
-        if submitted:
-            q["points_earned"] = q.get("legacy_points_earned", question_score(q, response))
-            q["is_correct"] = q["points_earned"] == q["max_points"]
-        else:
+    grouped = {} if submitted else {subject: [] for subject in subjects}
+    if not submitted:
+        for source in snapshot["questions"]:
+            q = copy.deepcopy(source)
+            response = responses.get(str(q["question_id"]), {})
+            q.update({"selected_option_id": response.get("selected_option_id"), "selected_option_ids": response.get("selected_option_ids", []), "matching_answer": response.get("matching_answer", {})})
             q.pop("explanation", None)
             for option in q["options"]:
                 option.pop("is_correct", None)
             for pair in q["matching_pairs"]:
                 for key in ("right_text", "correct_option_id", "correct_option_position"):
                     pair.pop(key, None)
-        q.pop("legacy_points_earned", None)
-        grouped.setdefault(q["subject"], []).append(q)
+            q.pop("legacy_points_earned", None)
+            grouped.setdefault(q["subject"], []).append(q)
     deadline = attempt["deadline_at"]
     profile1, profile2 = COMBINATIONS[attempt["combination"]]
-    scores_by_subject = decoded(attempt.get("scores_by_subject")) or {
-        "kaz_history": float(attempt["kaz_history_score"]), "reading": float(attempt["reading_score"]),
-        "math_literacy": float(attempt["math_score"]), profile1: float(attempt["subject1_score"]),
-        profile2: float(attempt["subject2_score"])}
+    scores_by_subject = decoded(attempt.get("scores_by_subject")) or {}
+    if not scores_by_subject:
+        calculated = {}
+        if submitted:
+            for question in snapshot["questions"]:
+                calculated[question["subject"]] = calculated.get(question["subject"], 0) + question_score(
+                    question, responses.get(str(question["question_id"]), {}),
+                )
+        if calculated and abs(sum(calculated.values()) - float(attempt["total_score"])) < 0.001:
+            scores_by_subject = calculated
+        elif snapshot.get("exam_mode") == "single" and snapshot.get("single_subject"):
+            scores_by_subject = {snapshot["single_subject"]: float(attempt["total_score"])}
+        else:
+            scores_by_subject = {
+                "kaz_history": float(attempt["kaz_history_score"]), "reading": float(attempt["reading_score"]),
+                "math_literacy": float(attempt["math_score"]), profile1: float(attempt["subject1_score"]),
+                profile2: float(attempt["subject2_score"]),
+            }
     max_score = snapshot.get("max_score", sum(q.get("max_points", 1) for q in snapshot["questions"]))
+    subject_results = []
+    for subject in subjects:
+        subject_max_score = sum(float(q.get("max_points", 1)) for q in snapshot["questions"] if q["subject"] == subject)
+        subject_score = float(scores_by_subject.get(subject, 0))
+        subject_results.append({
+            "subject": subject, "label": SUBJECT_LABELS.get(subject, subject), "score": subject_score,
+            "max_score": subject_max_score,
+            "percentage": round(subject_score / subject_max_score * 100, 2) if subject_max_score else 0,
+        })
     return {"id": attempt["id"], "status": attempt["status"], "combination": attempt["combination"],
             "variant_id": attempt["variant_id"], "rules_version": snapshot["version"], "title": snapshot["title"],
             "started_at": attempt["started_at"], "deadline_at": attempt["deadline_at"], "server_time": now(),
@@ -870,6 +984,7 @@ def public_attempt(attempt):
             "exam_mode": snapshot.get("exam_mode", "full"), "single_subject": snapshot.get("single_subject"),
             "duration_seconds": snapshot.get("duration_seconds", DURATION_SECONDS), "max_score": max_score,
             "scores_by_subject": {k: float(v) for k, v in scores_by_subject.items()},
+            "subjects": subject_results,
             "scores": {"kaz_history": float(attempt["kaz_history_score"]), "reading": float(attempt["reading_score"]),
                        "math_literacy": float(attempt["math_score"]), "subject1": float(attempt["subject1_score"]),
                        "subject2": float(attempt["subject2_score"]), "total": float(attempt["total_score"])}, "questions": grouped}

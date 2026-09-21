@@ -5,7 +5,7 @@ import { useI18n } from '@/lib/i18n'
 import { useAuth } from '@/lib/auth'
 import { api, fetcher } from '@/lib/api'
 import useSWR from 'swr'
-import { Card, Button, Spinner, ErrorState, EmptyState, Badge, PageHeader, Modal, DropdownMenu, DeletionConfirmModal } from '@/components/ui'
+import { Card, Button, Spinner, ErrorState, EmptyState, Badge, PageHeader, Modal, DropdownMenu, DeletionConfirmModal, Field, Select } from '@/components/ui'
 import { ClipboardList, ArrowRight, Plus, Trash2, CheckCircle, Users, Layers, Award, Edit, ChevronDown, FileText, Shuffle, ListChecks, MoreHorizontal, ArrowLeft } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
@@ -28,10 +28,6 @@ export default function EntTrialListPage() {
   const { data: groupsData } = useSWR<{ items: any[] }>(isAdmin ? '/admin/groups?per_page=100' : null, fetcher)
   const [adminTab, setAdminTab] = useState<'variants' | 'grant_access' | 'edit_variant'>('variants')
   const [editingVariantId, setEditingVariantId] = useState<number | null>(null)
-  const [resultsAccessId, setResultsAccessId] = useState<number | null>(null)
-  const [proctorAttemptId, setProctorAttemptId] = useState<number | null>(null)
-  const { data: resultsData } = useSWR<{ items: any[] }>(isAdmin && resultsAccessId ? `/ent-trial/admin/accesses/${resultsAccessId}/results` : null, fetcher)
-  const { data: proctorData } = useSWR<{ items: any[]; absences: any[] }>(isAdmin && proctorAttemptId ? `/ent-trial/admin/attempts/${proctorAttemptId}/proctor-events` : null, fetcher)
 
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -41,6 +37,8 @@ export default function EntTrialListPage() {
   const [pendingDelete, setPendingDelete] = useState<{ id: number; title: string; kind: 'variant' | 'access' } | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [variantModeFilter, setVariantModeFilter] = useState<'all' | 'full' | 'single'>('all')
+  const [variantDetailFilter, setVariantDetailFilter] = useState('')
 
   // Form states for creating variant
   const [newVarTitle, setNewVarTitle] = useState('')
@@ -54,11 +52,16 @@ export default function EntTrialListPage() {
   const [accessCombo, setAccessCombo] = useState('infmat')
   const [accessTarget, setAccessTarget] = useState<'all' | 'group' | 'student'>('all')
   const [accessGroupId, setAccessGroupId] = useState<number | ''>('')
-  const [accessStudentId, setAccessStudentId] = useState<number | ''>('')
+  const [accessStudentIds, setAccessStudentIds] = useState<number[]>([])
+  const [studentFilter, setStudentFilter] = useState('')
   const [extraTime, setExtraTime] = useState(false)
   const [cameraRequired, setCameraRequired] = useState(true)
   const [accessExpiresAt, setAccessExpiresAt] = useState('')
-  const [allowRetake, setAllowRetake] = useState(false)
+  const [maxAttempts, setMaxAttempts] = useState<number | ''>(1)
+  const { data: studentOptionsData, isLoading: studentOptionsLoading } = useSWR<{ groups: Array<{ id: number; code: string; title: string; students: Array<{ id: number; full_name: string; email: string }> }> }>(
+    isAdmin && accessTarget === 'student' ? '/ent-trial/admin/student-options' : null,
+    fetcher,
+  )
 
   if (user?.role === 'teacher') {
     return <ErrorState message="Мұғалімдерге бұл бетке кіруге рұқсат жоқ." />
@@ -70,6 +73,32 @@ export default function EntTrialListPage() {
   const variants = variantsData?.items || []
   const adminAccesses = allAccessesData?.items || []
   const groups = groupsData?.items || []
+  const normalizedStudentFilter = studentFilter.trim().toLocaleLowerCase('kk')
+  const filteredStudentGroups = (studentOptionsData?.groups || []).map(group => ({
+    ...group,
+    students: group.students.filter(student => !normalizedStudentFilter || `${student.full_name} ${student.email}`.toLocaleLowerCase('kk').includes(normalizedStudentFilter)),
+  })).filter(group => group.students.length > 0 || !normalizedStudentFilter)
+  const fullCombinationOptions = Array.from(new Set(
+    variants.filter(v => v.exam_mode !== 'single').map(v => String(v.combination)),
+  )).sort((a, b) => (COMBO_LABELS[a] || a).localeCompare(COMBO_LABELS[b] || b, 'kk'))
+  const singleSubjectOptions = Array.from(new Set(
+    variants.filter(v => v.exam_mode === 'single' && v.single_subject).map(v => String(v.single_subject)),
+  )).sort((a, b) => (rulesData?.subject_labels[a] || a).localeCompare(rulesData?.subject_labels[b] || b, 'kk'))
+  const filteredVariants = variants.filter(variant => {
+    const mode = variant.exam_mode === 'single' ? 'single' : 'full'
+    if (variantModeFilter !== 'all' && mode !== variantModeFilter) return false
+    if (!variantDetailFilter) return true
+    const [detailMode, value] = variantDetailFilter.split(':', 2)
+    return detailMode === 'single'
+      ? mode === 'single' && variant.single_subject === value
+      : mode === 'full' && variant.combination === value
+  })
+  const hasVariantFilters = variantModeFilter !== 'all' || variantDetailFilter !== ''
+
+  function resetVariantFilters() {
+    setVariantModeFilter('all')
+    setVariantDetailFilter('')
+  }
 
   async function handleStart(accessId: number) {
     try {
@@ -125,7 +154,10 @@ export default function EntTrialListPage() {
   async function handleGrantAccess(e: FormEvent) {
     e.preventDefault()
     if (!accessVarId) return alert('Нұсқаны таңдаңыз')
-    if (allowRetake && !accessExpiresAt) return alert('Шексіз қайта тапсыру үшін мерзімді көрсетіңіз')
+    if (accessTarget === 'group' && !accessGroupId) return alert('Топты таңдаңыз')
+    if (accessTarget === 'student' && accessStudentIds.length === 0) return alert('Кемінде бір оқушыны таңдаңыз')
+    const attemptLimit = Number(maxAttempts)
+    if (!Number.isInteger(attemptLimit) || attemptLimit < 1 || attemptLimit > 100) return alert('Тапсыру санын 1 мен 100 аралығында көрсетіңіз')
     try {
       await api('/ent-trial/admin/accesses', {
         method: 'POST',
@@ -134,16 +166,18 @@ export default function EntTrialListPage() {
           combination: accessCombo,
           target_type: accessTarget,
           group_id: accessTarget === 'group' && accessGroupId ? Number(accessGroupId) : null,
-          student_id: accessTarget === 'student' && accessStudentId ? Number(accessStudentId) : null,
+          student_ids: accessTarget === 'student' ? accessStudentIds : [],
           extra_time_minutes: accessTarget === 'student' && extraTime ? 40 : 0,
           camera_required: cameraRequired,
           expires_at: accessExpiresAt ? new Date(accessExpiresAt).toISOString() : null,
-          allow_retake: allowRetake,
+          max_attempts: attemptLimit,
         }
       })
       alert('Рұқсат берілді!')
       setAccessExpiresAt('')
-      setAllowRetake(false)
+      setMaxAttempts(1)
+      setAccessStudentIds([])
+      setStudentFilter('')
       mutateAdminAccesses()
       if (isStudent) mutateAccesses()
     } catch (err: any) {
@@ -255,15 +289,54 @@ export default function EntTrialListPage() {
         {/* TAB 1: Variants */}
         {adminTab === 'variants' && (
           <div className="space-y-4">
-
-
             <div className="space-y-4">
-              <h2 className="text-lg font-bold">Нұсқалар ({variants.length})</h2>
+              <Card className="p-4 sm:p-5">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] md:items-end">
+                  <Field label="Тест форматы">
+                    <Select
+                      value={variantModeFilter}
+                      onChange={event => {
+                        setVariantModeFilter(event.target.value as 'all' | 'full' | 'single')
+                        setVariantDetailFilter('')
+                      }}
+                    >
+                      <option value="all">Барлығы</option>
+                      <option value="full">Толық ҰБТ · 5 пән</option>
+                      <option value="single">Бір пән бойынша</option>
+                    </Select>
+                  </Field>
+                  <Field label={variantModeFilter === 'full' ? 'Пәндер комбинациясы' : variantModeFilter === 'single' ? 'Пән' : 'Пән немесе комбинация'}>
+                    <Select value={variantDetailFilter} onChange={event => setVariantDetailFilter(event.target.value)}>
+                      <option value="">Барлығы</option>
+                      {variantModeFilter !== 'single' && fullCombinationOptions.length > 0 && (
+                        <optgroup label="Толық ҰБТ комбинациялары">
+                          {fullCombinationOptions.map(key => <option key={`full:${key}`} value={`full:${key}`}>{COMBO_LABELS[key] || key}</option>)}
+                        </optgroup>
+                      )}
+                      {variantModeFilter !== 'full' && singleSubjectOptions.length > 0 && (
+                        <optgroup label="Бір пән бойынша">
+                          {singleSubjectOptions.map(key => <option key={`single:${key}`} value={`single:${key}`}>{rulesData?.subject_labels[key] || key}</option>)}
+                        </optgroup>
+                      )}
+                    </Select>
+                  </Field>
+                  {hasVariantFilters && <Button type="button" variant="secondary" onClick={resetVariantFilters}>Сүзгілерді тазалау</Button>}
+                </div>
+              </Card>
+
+              <h2 className="text-lg font-bold">Нұсқалар ({filteredVariants.length})</h2>
               {variants.length === 0 ? (
                 <EmptyState icon={<Layers size={36} />} title="Нұсқалар жоқ" hint="Жаңа нұсқа құрыңыз." />
+              ) : filteredVariants.length === 0 ? (
+                <EmptyState
+                  icon={<Layers size={36} />}
+                  title="Таңдалған сүзгілер бойынша нұсқалар табылмады"
+                  hint="Басқа форматты немесе пәндер комбинациясын таңдаңыз."
+                  action={<Button type="button" variant="secondary" onClick={resetVariantFilters}>Сүзгілерді тазалау</Button>}
+                />
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {variants.map((v) => (
+                  {filteredVariants.map((v) => (
                     <Card key={v.id} className="flex flex-col gap-3 p-5">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -339,11 +412,16 @@ export default function EntTrialListPage() {
 
                 <div>
                   <label htmlFor="ent-field-7" className="block text-sm font-medium mb-1">Кімге</label>
-                  <select id="ent-field-7" value={accessTarget} onChange={(e) => setAccessTarget(e.target.value as any)}
+                  <select id="ent-field-7" value={accessTarget} onChange={(e) => {
+                    const target = e.target.value as 'all' | 'group' | 'student'
+                    setAccessTarget(target)
+                    if (target !== 'group') setAccessGroupId('')
+                    if (target !== 'student') { setAccessStudentIds([]); setStudentFilter('') }
+                  }}
                     className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground">
                     <option value="all">Барлық студенттерге</option>
                     <option value="group">Топқа</option>
-                    <option value="student">Жеке студентке (ID)</option>
+                    <option value="student">Таңдалған студенттерге</option>
                   </select>
                 </div>
 
@@ -361,11 +439,43 @@ export default function EntTrialListPage() {
                 )}
 
                 {accessTarget === 'student' && (
-                  <div>
-                    <label htmlFor="ent-field-9" className="block text-sm font-medium mb-1">Студент ID</label>
-                  <input id="ent-field-9" type="number" required placeholder="Студент ID"
-                      value={accessStudentId} onChange={(e) => setAccessStudentId(e.target.value ? Number(e.target.value) : '')}
-                      className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground" />
+                  <div className="space-y-3">
+                    <div>
+                      <label htmlFor="ent-student-filter" className="block text-sm font-medium mb-1">Топтардан студенттерді таңдаңыз</label>
+                      <input id="ent-student-filter" type="search" placeholder="Аты немесе email бойынша іздеу"
+                        value={studentFilter} onChange={e => setStudentFilter(e.target.value)}
+                        className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground" />
+                      <p className="mt-1 text-xs text-muted">Бірнеше топтан кез келген студенттерді қатар таңдауға болады.</p>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-primary">Таңдалды: {accessStudentIds.length}</span>
+                      {accessStudentIds.length > 0 && <button type="button" className="font-medium text-muted hover:text-foreground" onClick={() => setAccessStudentIds([])}>Барлығын тазалау</button>}
+                    </div>
+                    <div className="max-h-80 space-y-2 overflow-auto rounded-xl border border-border bg-surface-muted p-2">
+                      {studentOptionsLoading ? <Spinner /> : filteredStudentGroups.length === 0 ? (
+                        <p className="p-3 text-sm text-muted">Топтарда сәйкес студенттер табылмады.</p>
+                      ) : filteredStudentGroups.map(group => {
+                        const memberIds = group.students.map(student => student.id)
+                        const allSelected = memberIds.length > 0 && memberIds.every(id => accessStudentIds.includes(id))
+                        return <div key={group.id} className="rounded-lg border border-border bg-surface p-3">
+                          <label className="flex cursor-pointer items-center gap-2 border-b border-border pb-2 text-sm font-bold">
+                            <input type="checkbox" checked={allSelected} disabled={memberIds.length === 0} onChange={() => setAccessStudentIds(current => allSelected
+                              ? current.filter(id => !memberIds.includes(id))
+                              : Array.from(new Set([...current, ...memberIds])))} />
+                            <span className="min-w-0 flex-1 truncate">{group.title} ({group.code})</span>
+                            <span className="text-xs font-medium text-muted">{group.students.length}</span>
+                          </label>
+                          <div className="mt-2 space-y-1">
+                            {group.students.length === 0 ? <p className="py-1 text-xs text-muted">Бұл топта студенттер жоқ.</p> : group.students.map(student => (
+                              <label key={`${group.id}-${student.id}`} className="flex cursor-pointer items-start gap-2 rounded-md p-2 text-sm hover:bg-surface-muted">
+                                <input type="checkbox" className="mt-1" checked={accessStudentIds.includes(student.id)} onChange={() => setAccessStudentIds(current => current.includes(student.id) ? current.filter(id => id !== student.id) : [...current, student.id])} />
+                                <span className="min-w-0"><span className="block truncate font-medium">{student.full_name}</span><span className="block truncate text-xs text-muted">{student.email}</span></span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      })}
+                    </div>
                   </div>
                 )}
 
@@ -375,16 +485,19 @@ export default function EntTrialListPage() {
                     type="datetime-local"
                     value={accessExpiresAt}
                     onChange={(e) => setAccessExpiresAt(e.target.value)}
-                    required={allowRetake}
                     className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground"
                   />
                   <p className="mt-1 text-xs text-muted">Бос қалдырсаңыз, рұқсат қайтарып алынғанша ашық болады.</p>
                 </div>
 
-                <label className="flex items-start gap-2 rounded-xl border border-border bg-surface-muted p-3 text-sm">
-                  <input type="checkbox" checked={allowRetake} onChange={e => setAllowRetake(e.target.checked)} className="mt-1" />
-                  <span><b>Мерзімге дейін шексіз қайта тапсыру</b><span className="mt-1 block text-xs text-muted">Әр аяқталған әрекеттен кейін оқушы жаңа әрекетті бастай алады. Барлық нәтиже сақталады.</span></span>
-                </label>
+                <div>
+                  <label htmlFor="ent-max-attempts" className="block text-sm font-medium mb-1">Тапсыру саны</label>
+                  <input id="ent-max-attempts" type="number" min={1} max={100} step={1} value={maxAttempts}
+                    onChange={e => setMaxAttempts(e.target.value === '' ? '' : Math.min(100, Number(e.target.value)))}
+                    onBlur={() => { if (!Number.isInteger(Number(maxAttempts)) || Number(maxAttempts) < 1) setMaxAttempts(1) }}
+                    className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground" />
+                  <p className="mt-1 text-xs text-muted">Әр оқушы тестті қанша рет тапсыра алатынын көрсетіңіз. Дедлайн аяқталса, қалған әрекеттер қолжетімсіз болады.</p>
+                </div>
 
                 {accessTarget === 'student' && <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={extraTime} onChange={e => setExtraTime(e.target.checked)} className="mt-1" /><span>Қосымша 40 минут (ерекше білім беру қажеттілігіне байланысты құқығы расталған оқушы үшін)</span></label>}
                 <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={cameraRequired} onChange={e => setCameraRequired(e.target.checked)} className="mt-1" /><span>Камераның болуы міндетті</span></label>
@@ -400,9 +513,14 @@ export default function EntTrialListPage() {
                 <EmptyState icon={<Users size={36} />} title="Рұқсаттар жоқ" />
               ) : (
                 adminAccesses.map((a) => (
-                  <Card key={a.id} className="space-y-3 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div>
+                  <Card key={a.id} className="overflow-hidden p-0 transition-colors hover:border-primary/30">
+                    <div className="flex items-stretch">
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 p-4 text-left transition-colors hover:bg-primary-soft/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
+                        onClick={() => router.push(`/ent-trial/accesses/${a.id}/results`)}
+                        aria-label={`${a.variant_title || 'ҰБТ нұсқасы'} нәтижелерін ашу`}
+                      >
                         <p className="font-bold">{a.variant_title || 'ҰБТ нұсқасы'}</p>
                         <p className="text-xs text-muted">
                           {a.target_type === 'all' ? 'Барлық студенттерге' : a.target_type === 'group' ? `Топ: ${a.group_title || a.group_code}` : `Студент: ${a.student_name}`}
@@ -410,16 +528,15 @@ export default function EntTrialListPage() {
                         <p className="text-xs text-muted">{a.exam_mode === 'single' ? `Пән: ${rulesData?.subject_labels[a.single_subject] || a.single_subject}` : `Комбинация: ${COMBO_LABELS[a.combination] || a.combination}`}</p>
                         <p className="text-xs text-muted">
                           {a.expires_at ? `Мерзімі: ${formatDate(a.expires_at)}` : 'Мерзімі жоқ'}
-                          {' · '}{a.allow_retake ? 'шексіз қайта тапсыру' : 'бір әрекет'}
+                          {' · '}{a.max_attempts ?? 1} әрекетке дейін
                         </p>
+                        <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-primary">Нәтижелерді ашу <ArrowRight size={14} /></span>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-2 border-l border-border px-3">
+                        <Button variant="secondary" size="sm" onClick={() => router.push(`/ent-trial/accesses/${a.id}/results`)}>Нәтижелер</Button>
+                        <Button variant="danger-ghost" size="sm" aria-label="Рұқсатты қайтарып алу" onClick={() => { setDeleteError(''); setPendingDelete({ id: a.id, title: a.variant_title || 'Сынақ ҰБТ', kind: 'access' }) }}><Trash2 size={14} /></Button>
                       </div>
-                      <div className="flex shrink-0 gap-2"><Button variant="secondary" size="sm" onClick={() => { setResultsAccessId(resultsAccessId === a.id ? null : a.id); setProctorAttemptId(null) }}>Нәтижелер</Button><Button variant="danger-ghost" size="sm" aria-label="Рұқсатты қайтарып алу" onClick={() => { setDeleteError(''); setPendingDelete({ id: a.id, title: a.variant_title || 'Сынақ ҰБТ', kind: 'access' }) }}><Trash2 size={14} /></Button></div>
                     </div>
-                    {resultsAccessId === a.id && <div className="space-y-3 border-t border-border pt-3"><div><h3 className="font-bold">Оқушылар нәтижесі және прокторинг</h3><p className="text-xs text-muted">Аяқталған әрекеттер ең жоғары ұпайдан бастап сұрыпталған.</p></div>
-                      {!resultsData ? <Spinner /> : resultsData.items.length === 0 ? <p className="text-sm text-muted">Бұл рұқсат бойынша тестті әлі ешкім бастаған жоқ.</p> : resultsData.items.map(item => <div key={item.id} className="rounded-xl border border-border p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{item.full_name} · {item.attempt_number}-әрекет</p><p className="text-xs text-muted">{item.status === 'submitted' ? `Нәтиже: ${item.total_score}` : 'Тест орындалуда'} · {formatDate(item.started_at)} · тесттен шығу: {item.absence_count ?? 0} · тесттен тыс: {Math.floor((item.absence_seconds ?? 0) / 60)} мин</p></div><Button size="sm" variant="secondary" onClick={() => setProctorAttemptId(proctorAttemptId === item.id ? null : item.id)}>Тесттен шығу журналы</Button></div>
-                        {proctorAttemptId === item.id && <div className="mt-3 max-h-52 space-y-2 overflow-auto text-xs">{!proctorData ? <Spinner /> : proctorData.absences?.length ? proctorData.absences.map(absence => <div key={`absence-${absence.id}`} className="rounded-lg bg-warning/10 p-2"><b>Тесттен шығу</b> · {Math.floor((absence.duration_seconds ?? 0) / 60)} мин {(absence.duration_seconds ?? 0) % 60} сек · {formatDate(absence.started_at)}</div>) : <p className="text-muted">Тесттен шығу тіркелмеген.</p>}</div>}
-                      </div>)}</div>}
                   </Card>
                 ))
               )}
@@ -443,7 +560,7 @@ export default function EntTrialListPage() {
             const isCompleted = a.attempt_status === 'submitted'
             const expired = Boolean(a.revoked_at) || (a.expires_at && new Date(a.expires_at) <= new Date())
             const cannotStart = !a.attempt_id && (expired || !a.variant_ready)
-            const canRetake = isCompleted && a.allow_retake && !expired && a.variant_ready
+            const canRetake = isCompleted && (a.completed_attempt_count ?? 0) < (a.max_attempts ?? 1) && !expired && a.variant_ready
             return (
               <Card key={a.id} className="p-6 flex flex-col justify-between hover:shadow-lg transition-all">
                 <div>
@@ -459,7 +576,7 @@ export default function EntTrialListPage() {
                     <p><span className="font-semibold text-foreground">Формат:</span> {a.question_count ?? '—'} сұрақ, {a.max_score ?? '—'} балл, {a.duration_seconds ? Math.round(a.duration_seconds / 60) + (a.extra_time_minutes ?? 0) : '—'} мин</p>
                     <p><span className="font-semibold text-foreground">Бақылау:</span> камера және толық экран міндетті</p>
                     {a.expires_at && <p><span className="font-semibold text-foreground">Мерзімі:</span> {formatDate(a.expires_at)}</p>}
-                    {a.allow_retake && <p><span className="font-semibold text-foreground">Әрекеттер:</span> мерзімге дейін шексіз · аяқталғаны {a.completed_attempt_count ?? 0}</p>}
+                    <p><span className="font-semibold text-foreground">Әрекеттер:</span> {a.completed_attempt_count ?? 0} / {a.max_attempts ?? 1} аяқталды</p>
                   </div>
                   {isCompleted && a.attempt_score !== null && (
                     <div className="mt-4 p-3 bg-success/10 rounded-xl border border-success/20 flex items-center justify-between">
@@ -467,7 +584,7 @@ export default function EntTrialListPage() {
                       <span className="text-lg font-bold text-success">{a.attempt_score} / {a.max_score ?? 140} балл</span>
                     </div>
                   )}
-                  {a.allow_retake && a.best_score !== null && a.completed_attempt_count > 0 && <p className="mt-2 text-right text-xs font-medium text-muted">Ең жақсы нәтиже: {a.best_score} / {a.max_score ?? 140}</p>}
+                  {(a.max_attempts ?? 1) > 1 && a.best_score !== null && a.completed_attempt_count > 0 && <p className="mt-2 text-right text-xs font-medium text-muted">Ең жақсы нәтиже: {a.best_score} / {a.max_score ?? 140}</p>}
                 </div>
                 <div className="mt-6 pt-4 border-t border-border flex justify-end">
                   {isCompleted ? (
