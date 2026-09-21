@@ -29,6 +29,7 @@ import {
 import { useI18n, type TKey } from '@/lib/i18n'
 import { useAuth } from '@/lib/auth'
 import { api, fetcher } from '@/lib/api'
+import { SUBJECT_NAMES } from '@/lib/ent'
 import CourseEntVariants from '@/components/course-ent-variants'
 import {
   Badge,
@@ -139,6 +140,9 @@ export default function CoursePage() {
   const [expandedGroupIds, setExpandedGroupIds] = useState<number[]>([])
   const [contentExpanded, setContentExpanded] = useState(true)
   const [entExpanded, setEntExpanded] = useState(true)
+  const [entSubjectDraft, setEntSubjectDraft] = useState('')
+  const [savingEntSubject, setSavingEntSubject] = useState(false)
+  const [entSubjectError, setEntSubjectError] = useState<string | null>(null)
   
   // Delete course states
   const [menuOpen, setMenuOpen] = useState(false)
@@ -152,6 +156,22 @@ export default function CoursePage() {
   const completed = items.filter((i) => i.completed).length
   const isOwner = !!course.is_owner
   const courseId = course.id
+  const currentEntSubject = course.ent_subject || ''
+
+  async function saveEntSubject() {
+    const subject = entSubjectDraft || currentEntSubject
+    if (!subject) return
+    setSavingEntSubject(true)
+    setEntSubjectError(null)
+    try {
+      await api(`/courses/${courseId}/ent-subject`, { method: 'PUT', body: { subject } })
+      await mutate()
+    } catch (err) {
+      setEntSubjectError((err as Error).message || t('errorOccurred'))
+    } finally {
+      setSavingEntSubject(false)
+    }
+  }
 
   async function createItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -529,6 +549,39 @@ export default function CoursePage() {
             <span className="block text-sm font-normal text-muted">Курс пәні бойынша варианттарды құру және редакциялау</span>
           </span>
         </button>
+        {entExpanded && user?.role === 'admin' && (
+          <Card className="space-y-3 border-primary/20 bg-primary-soft/30">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Курс пәні</p>
+              <p className="mt-1 text-sm text-muted">
+                Пәндік сынақ нұсқаларын құру үшін курсқа ҰБТ пәнін бекітіңіз.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="flex-1">
+                <Field label="Пәнді таңдаңыз">
+                  <Select
+                    value={entSubjectDraft || currentEntSubject}
+                    onChange={(event) => setEntSubjectDraft(event.target.value)}
+                  >
+                    <option value="">Пәнді таңдаңыз</option>
+                    {Object.entries(SUBJECT_NAMES).map(([key, label]) => (
+                      <option key={key} value={key}>{label}</option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+              <Button
+                type="button"
+                onClick={saveEntSubject}
+                disabled={savingEntSubject || !(entSubjectDraft || currentEntSubject)}
+              >
+                {savingEntSubject ? t('loading') : 'Пәнді сақтау'}
+              </Button>
+            </div>
+            {entSubjectError && <ErrorState message={entSubjectError} />}
+          </Card>
+        )}
         {entExpanded && <CourseEntVariants
           courseId={courseId}
           subject={course.ent_subject ?? null}
@@ -543,6 +596,7 @@ export default function CoursePage() {
           <Field label={t('content')}>
             <Select value={itemType} onChange={(e) => setItemType(e.target.value as ItemType)}>
               <option value="lesson">{t('lesson')}</option>
+              <option value="quiz">Тараулық тест</option>
               <option value="homework">{t('homework')}</option>
             </Select>
           </Field>

@@ -64,7 +64,7 @@ const dictionaries = {
     student: 'Оқушы',
     admin: 'Әкімші',
     lesson: 'Сабақ',
-    quiz: 'Тест',
+    quiz: 'Тараулық тест',
     homework: 'Үй тапсырмасы',
     progress: 'Прогресс',
     finalGrade: 'Қорытынды баға',
