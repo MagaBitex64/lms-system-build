@@ -10,13 +10,13 @@ import {
   Lightbulb, MapPin, Menu, MonitorPlay, Quote, School, Sparkles,
   Trophy, UserRound, X, Zap,
 } from 'lucide-react'
-import styles from './landing.module.css'
+import styles from './landing-v2.module.css'
 
-const whatsappUrl = 'https://api.whatsapp.com/send?phone=7474794383'
+const whatsappUrl = 'https://api.whatsapp.com/send?phone=77474794383'
 const mapUrl = 'https://2gis.kz/shymkent/geo/70000001026160761/69.614394,42.304299'
 
 const landingImages = {
-  hero: '/landing/hero/students.jpg',
+  hero: '/landing/hero/fenomen-students.png',
   results: [
     '/landing/results/student-1.jpg',
     '/landing/results/student-2.jpg',
@@ -123,19 +123,23 @@ function SectionHead({ eyebrow, title, text, light = false }: { eyebrow: string;
 
 function LandingHeader() {
   const [open, setOpen] = useState(false)
-  return <header className={styles.header}><div className={styles.headerInner}><a href="#top" aria-label="Басты бет"><Brand /></a><nav className={`${styles.nav} ${open ? styles.navOpen : ''}`}>{navItems.map(([label, id]) => <a key={id} href={`#${id}`} onClick={() => setOpen(false)}>{label}</a>)}<a className={styles.consultLink} href="#contact" onClick={() => setOpen(false)}>Кеңес алу</a><Link className={styles.loginCta} href="/login" onClick={() => setOpen(false)}>Кіру</Link></nav><button className={styles.menu} onClick={() => setOpen(!open)} aria-label="Мәзірді ашу">{open ? <X /> : <Menu />}</button></div></header>
+  return <header className={styles.header}><div className={styles.headerInner}><a href="#top" aria-label="Басты бет"><Brand /></a><nav id="landing-navigation" className={`${styles.nav} ${open ? styles.navOpen : ''}`}>{navItems.map(([label, id]) => <a key={id} href={`#${id}`} onClick={() => setOpen(false)}>{label}</a>)}<a className={styles.consultLink} href="#contact" onClick={() => setOpen(false)}>Кеңес алу</a><Link className={styles.loginCta} href="/login" onClick={() => setOpen(false)}>Кіру</Link></nav><button className={styles.menu} type="button" onClick={() => setOpen(!open)} aria-controls="landing-navigation" aria-expanded={open} aria-label={open ? 'Мәзірді жабу' : 'Мәзірді ашу'}>{open ? <X /> : <Menu />}</button></div></header>
 }
 
 function HeroSection() {
-  return <section id="top" className={styles.heroWrap}><div className={styles.hero}><div className={styles.heroCopy}><span className={styles.badge}><Sparkles size={16} /> Бірінші апта — тегін оқу</span><h1>ҰБТ-ға дайындық<br /><em>енді бір жүйеде</em></h1><p>Fenomen.kaz-та курс, бейнесабақ, тапсырма мен нәтижені бақылау бір жерде жиналған. Сіз мақсатқа қарай жүресіз, біз әр қадамды бақылаймыз.</p><div className={styles.heroActions}><a className={styles.primaryButton} href="#contact">Курсқа қосылу <ArrowRight size={18} /></a><a className={styles.ghostButton} href="#courses">Курстарды көру</a><a className={`${styles.whatsappButton} ${styles.heroWhatsapp}`} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp арқылы жазылу</a></div><div className={styles.heroStats}><span><b>500+</b> оқушы</span><span><b>20+</b> мұғалім</span></div></div><div className={styles.heroVisual}><Picture src={landingImages.hero} alt="Fenomen оқушылары" /><div className={`${styles.floatCard} ${styles.cardTop}`}><CalendarCheck /><span><b>Апталық тест</b><small>Ілгерілеу әр аптада көрінеді</small></span></div><div className={`${styles.floatCard} ${styles.cardBottom}`}><Laptop /><span><b>Онлайн және филиалда</b><small>Өзіңізге ыңғайлы тәсілді таңдаңыз</small></span></div></div></div></section>
+  return <section id="top" className={styles.heroWrap}><div className={styles.hero}><div className={styles.heroCopy}><span className={styles.badge}><span className={styles.badgeDot} /> ҰБТ-ДАН ЖОҒАРЫ НӘТИЖЕГЕ</span><h1>Болашағың<br /><em>осы жерден</em><br />басталады<span className={styles.heroPeriod}>.</span></h1><p>Өзіңе сенімділік беретін дайындық. Мықты ұстаздар, нақты оқу жоспары және әр қадамыңды көрсететін платформа — бәрі Fenomen-де.</p><div className={styles.heroActions}><a className={styles.primaryButton} href="#contact">Алғашқы аптаны бастау <ArrowRight size={19} /></a><a className={styles.ghostButton} href="#courses">Бағыттарды көру <ArrowRight size={17} /></a></div><div className={styles.heroBottom}><span>01 / 05 &nbsp; FENOMEN ӘЛЕМІ</span><a href="#advantages">Төмен қарай зертте <span>↓</span></a></div></div><div className={styles.heroVisual}><div className={styles.heroImageFrame}><Picture src={landingImages.hero} alt="Fenomen оқушылары бірге дайындалуда" /></div><div className={styles.heroStamp}><span>FENOMEN</span><b>өз жолыңды<br />тап.</b><Sparkles size={24} /></div><div className={styles.heroCaption}><span className={styles.captionLine} /> Білім. Сенім. Нәтиже.</div></div></div><div className={styles.heroStats}><span><b>500+</b><small>бізбен дайындалған оқушы</small></span><span><b>20+</b><small>тәжірибелі мұғалім</small></span><span><b>7 күн</b><small>тегін танысу аптасы</small></span><a href="#results">Нәтижелерді көр <ArrowRight size={19} /></a></div></section>
+}
+
+function Marquee() {
+  return <div className={styles.marquee} aria-hidden="true"><div>{Array.from({ length: 4 }, (_, index) => <span key={index}>БІЛІМНЕН КҮШ АЛ <i>✳</i> ӨЗ ЖОЛЫҢДЫ ТАП <i>✳</i> ҮЛКЕН МАҚСАТ ҚОЙ <i>✳</i> </span>)}</div></div>
 }
 
 function FeatureCards() {
-  return <section id="advantages" className={styles.section}><SectionHead eyebrow="Неліктен Fenomen?" title="Әр күнгі нақты жоспар" text="Жүйелі сабақ, тәжірибелі мұғалім және нәтижені үнемі бақылау — дайындықтың басты тірегі." /><div className={styles.featureGrid}>{features.map(({ icon: Icon, title, text, tone }) => <article key={title} className={`${styles.featureCard} ${styles[tone]}`}><span className={styles.iconBox}><Icon /></span><h3>{title}</h3><p>{text}</p><span className={styles.cardArrow}><ArrowRight /></span></article>)}</div></section>
+  return <section id="advantages" className={styles.section}><SectionHead eyebrow="FENOMEN ТӘСІЛІ" title="Сенің амбицияңа сай дайындық." text="Жақсы нәтиже кездейсоқ келмейді. Ол дұрыс ортадан, айқын жоспардан және күнделікті кішкентай жеңістерден басталады." /><div className={styles.featureGrid}>{features.map(({ icon: Icon, title, text, tone }, index) => <article key={title} className={`${styles.featureCard} ${styles[tone]}`}><span className={styles.featureNumber}>0{index + 1} / FENOMEN</span><span className={styles.iconBox}><Icon /></span><h3>{title}</h3><p>{text}</p><span className={styles.cardArrow}><ArrowRight /></span></article>)}</div></section>
 }
 
 function CoursesSection() {
-  return <section id="courses" className={`${styles.section} ${styles.softSection}`}><SectionHead eyebrow="Бағыттар" title="ҰБТ курстары" text="Міндетті және бейіндік пәндерді бос орынсыз жаттамай, түсініп меңгеріңіз." /><div className={styles.courseGrid}>{courses.map(({ icon: Icon, title, text }) => <article className={styles.courseCard} key={title}><div className={styles.courseTop}><span className={styles.courseIcon}><Icon /></span><span className={styles.courseBadge}>ҰБТ пәні</span></div><h3>{title}</h3><p>{text}</p><a href="#contact">Курсты таңдау <ArrowRight size={16} /></a></article>)}</div></section>
+  return <section id="courses" className={`${styles.section} ${styles.softSection}`}><SectionHead eyebrow="ӨЗ БАҒЫТЫҢДЫ ТАҢДА" title="Болашақтың пәндері. Сенің таңдауың." text="Міндетті және бейіндік пәндерді жаттап қана қоймай, шынымен түсініп меңгер." /><div className={styles.courseGrid}>{courses.map(({ icon: Icon, title, text }, index) => <article className={styles.courseCard} key={title}><div className={styles.courseTop}><span className={styles.courseIcon}><Icon /></span><span className={styles.courseBadge}>{String(index + 1).padStart(2, '0')} / 08</span></div><h3>{title}</h3><p>{text}</p><a href="#contact">Бағытты таңдау <ArrowRight size={16} /></a></article>)}</div></section>
 }
 
 function HowItWorksSection() {
@@ -143,11 +147,11 @@ function HowItWorksSection() {
 }
 
 function PlatformSection() {
-  return <section className={`${styles.section} ${styles.platform}`}><div className={styles.platformIntro}><span className={styles.badgeDark}>FENOMEN ПЛАТФОРМАСЫ</span><h2>Оқуға қажеттінің<br />бәрі бір жерде</h2><p>Оқушы не оқу керек екенін біледі, мұғалім нәтижені көреді, ал ата-ана баласының ілгерілеуінен хабардар болады.</p><a href="#contact" className={styles.primaryButton}>Алғашқы аптаны бастау <ArrowRight size={18} /></a></div><div className={styles.platformGrid}>{platformItems.map(({ icon: Icon, title, text }) => <article key={title}><span><Icon /></span><h3>{title}</h3><p>{text}</p></article>)}</div></section>
+  return <section className={`${styles.section} ${styles.platform}`}><div className={styles.platformIntro}><span className={styles.badgeDark}>БІР ПЛАТФОРМА. БАРЛЫҚ МҮМКІНДІК.</span><h2>Оқу барысы<br /><em>алақаныңда.</em></h2><p>Сабақтар, тапсырмалар, тесттер мен ілгерілеу — бәрі түсінікті бір кеңістікте. Бүгін қайда тұрғаныңды және ертең қайда баратыныңды көр.</p><a href="/login" className={styles.primaryButton}>Платформаға кіру <ArrowRight size={18} /></a></div><div className={styles.platformGrid}>{platformItems.map(({ icon: Icon, title, text }, index) => <article key={title}><span><Icon /></span><small>0{index + 1} / ҚҰРАЛ</small><h3>{title}</h3><p>{text}</p></article>)}</div></section>
 }
 
 function ResultsSection() {
-  return <section id="results" className={styles.section}><SectionHead eyebrow="Баллдан бұрын — еңбек" title="Оқушыларымыздың нәтижесі" text="Бұл баллдардың артында күнделікті еңбек, мұғалімнің қолдауы және дұрыс құрылған жоспар тұр." /><div className={styles.resultsGrid}>{results.map((student) => <article className={styles.resultCard} key={student.name}><Picture src={student.image} alt={`${student.name} — ${student.score}`} /><div className={styles.score}>{student.score}</div><div className={styles.resultText}><Quote /><p>«{student.quote}»</p><h3>{student.name}</h3><span>{student.subjects}</span></div></article>)}</div></section>
+  return <section id="results" className={styles.section}><SectionHead eyebrow="НӘТИЖЕ СӨЙЛЕСІН" title="Олардың жетістігі — сенің шабытың." text="Әр баллдың артында еңбек, ұстаздың қолдауы және өзіне сенуді үйренген оқушы тұр." /><div className={styles.resultsGrid}>{results.map((student) => <article className={styles.resultCard} key={student.name}><Picture src={student.image} alt={`${student.name} — ${student.score}`} /><div className={styles.score}>{student.score}</div><div className={styles.resultText}><Quote /><p>«{student.quote}»</p><h3>{student.name}</h3><span>{student.subjects}</span></div></article>)}</div></section>
 }
 
 function TeachersSection() {
@@ -217,13 +221,12 @@ function LeadFormSection() {
         formElement.reset()
       } catch {
         setErrors({ form: 'Өтінімді жіберу мүмкін болмады. Қайтадан көріңіз.' })
-        window.alert('Өтінімді жіберу мүмкін болмады. Қайтадан көріңіз.')
       } finally {
         setBusy(false)
       }
     }
   }
-  return <section id="contact" className={`${styles.section} ${styles.contact}`}><div className={styles.contactCopy}><span className={styles.badgeDark}>БІРІНШІ ҚАДАМ</span><h2>Кеңес алуға өтінім қалдырыңыз</h2><p>Менеджеріміз сізбен хабарласып, оқу тәсілі, курс мазмұны мен филиал туралы сұрақтарыңызға жауап береді.</p><ul><li><Check /> Деңгейіңізге сай дайындық бағыты</li><li><Check /> Өзіңізге ыңғайлы оқу тәсілі</li><li><Check /> Алғашқы апта тегін</li></ul><a className={styles.whatsappButton} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp арқылы жазылу</a></div><form className={styles.form} onSubmit={submit} noValidate><label>Аты-жөніңіз<input name="name" placeholder="Аты-жөніңізді жазыңыз" />{errors.name && <small>{errors.name}</small>}</label><label>Телефон нөміріңіз<input name="phone" type="tel" placeholder="+7 (___) ___-__-__" />{errors.phone && <small>{errors.phone}</small>}</label><label>Қызықтырған курс<select name="course" defaultValue=""><option value="" disabled>Курсты таңдаңыз</option>{courses.map(course => <option key={course.title}>{course.title}</option>)}</select>{errors.course && <small>{errors.course}</small>}</label><label>Филиал<input value="Шымкент, Төле би, 32А" readOnly /></label><button className={styles.primaryButton}>Өтінім қалдыру <ArrowRight size={18} /></button>{sent && <p className={styles.success}><Check /> Өтініміңіз қабылданды! Менеджеріміз жақын арада хабарласады.</p>}</form></section>
+  return <section id="contact" className={`${styles.section} ${styles.contact}`}><div className={styles.contactCopy}><span className={styles.badgeDark}>БІРІНШІ ҚАДАМ</span><h2>Кеңес алуға өтінім қалдырыңыз</h2><p>Менеджеріміз сізбен хабарласып, оқу тәсілі, курс мазмұны мен филиал туралы сұрақтарыңызға жауап береді.</p><ul><li><Check /> Деңгейіңізге сай дайындық бағыты</li><li><Check /> Өзіңізге ыңғайлы оқу тәсілі</li><li><Check /> Алғашқы апта тегін</li></ul><a className={styles.whatsappButton} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp арқылы жазылу</a></div><form className={styles.form} onSubmit={submit} noValidate><label>Аты-жөніңіз<input name="name" autoComplete="name" placeholder="Аты-жөніңізді жазыңыз" />{errors.name && <small>{errors.name}</small>}</label><label>Телефон нөміріңіз<input name="phone" type="tel" autoComplete="tel" placeholder="+7 (___) ___-__-__" />{errors.phone && <small>{errors.phone}</small>}</label><label>Қызықтырған курс<select name="course" defaultValue=""><option value="" disabled>Курсты таңдаңыз</option>{courses.map(course => <option key={course.title}>{course.title}</option>)}</select>{errors.course && <small>{errors.course}</small>}</label><label>Филиал<input value="Шымкент, Төле би, 32А" readOnly /></label><button className={styles.primaryButton} disabled={busy}>{busy ? 'Жіберілуде...' : 'Өтінім қалдыру'} {!busy && <ArrowRight size={18} />}</button>{errors.form && <p className={styles.formError} role="alert">{errors.form}</p>}{sent && <p className={styles.success} role="status"><Check /> Өтініміңіз қабылданды! Менеджеріміз жақын арада хабарласады.</p>}</form></section>
 }
 
 function FAQSection() {
@@ -231,9 +234,27 @@ function FAQSection() {
 }
 
 function LandingFooter() {
-  return <footer className={styles.footer}><div className={styles.footerMain}><div className={styles.footerBrand}><Brand /><p>ҰБТ-ға дайындықты жоспарлы, түсінікті және нәтижелі ететін оқу ортасы.</p><a className={`${styles.whatsappButton} ${styles.footerWhatsapp}`} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp-қа жазу</a></div><div><h3>Fenomen.kaz</h3><a href="#courses">Курстар</a><a href="#teachers">Мұғалімдер</a><a href="#results">Нәтижелер</a></div><div><h3>Мекенжай</h3><a href={mapUrl} target="_blank" rel="noreferrer">Шымкент филиалы</a><span>Төле би, 32А</span></div><div><h3>Байланыс</h3><a href={whatsappUrl} target="_blank" rel="noreferrer">+7 747 794 38 83</a><a href="#contact">Instagram</a></div></div><div className={styles.footerBottom}>© 2026 Fenomen.kaz. Барлық құқықтар қорғалған.<a href="#top">Жоғарыға көтерілу ↑</a></div></footer>
+  return <footer className={styles.footer}><div className={styles.footerMain}><div className={styles.footerBrand}><Brand /><p>ҰБТ-ға дайындықты жоспарлы, түсінікті және нәтижелі ететін оқу ортасы.</p><a className={`${styles.whatsappButton} ${styles.footerWhatsapp}`} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp-қа жазу</a></div><div><h3>Fenomen.kaz</h3><a href="#courses">Курстар</a><a href="#teachers">Мұғалімдер</a><a href="#results">Нәтижелер</a></div><div><h3>Мекенжай</h3><a href={mapUrl} target="_blank" rel="noreferrer">Шымкент филиалы</a><span>Төле би, 32А</span></div><div><h3>Байланыс</h3><a href={whatsappUrl} target="_blank" rel="noreferrer">+7 747 479 43 83</a><a href="#contact">Кеңес алуға жазылу</a></div></div><div className={styles.footerBottom}>© 2026 Fenomen.kaz. Барлық құқықтар қорғалған.<a href="#top">Жоғарыға көтерілу ↑</a></div></footer>
 }
 
 export default function HomePage() {
-  return <main className={styles.landing}><LandingHeader /><HeroSection /><FeatureCards /><CoursesSection /><HowItWorksSection /><PlatformSection /><ResultsSection /><TeachersSection /><BranchSection /><LeadFormSection /><FAQSection /><LandingFooter /></main>
+  useEffect(() => {
+    const sections = document.querySelectorAll('[data-reveal]')
+    if (!('IntersectionObserver' in window)) {
+      sections.forEach(section => section.classList.add(styles.visible))
+      return
+    }
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add(styles.visible)
+          observer.unobserve(entry.target)
+        }
+      })
+    }, { threshold: 0.08 })
+    sections.forEach(section => observer.observe(section))
+    return () => observer.disconnect()
+  }, [])
+
+  return <main className={styles.landing}><LandingHeader /><HeroSection /><Marquee /><div data-reveal><FeatureCards /></div><div data-reveal><CoursesSection /></div><div data-reveal><PlatformSection /></div><div data-reveal><ResultsSection /></div><div data-reveal><TeachersSection /></div><div data-reveal><HowItWorksSection /></div><div data-reveal><BranchSection /></div><div data-reveal><LeadFormSection /></div><div data-reveal><FAQSection /></div><LandingFooter /></main>
 }
