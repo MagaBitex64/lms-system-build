@@ -212,3 +212,102 @@
 @media(max-width:580px){.headerInner{padding:9px 16px}.brand b{font-size:16px}.brand small{font-size:7px}.logo{width:41px;height:41px}.heroWrap{padding:0 15px}.hero{padding-top:45px}.badge{font-size:8px;letter-spacing:.12em}.hero h1{font-size:clamp(49px,13.2vw,74px);line-height:.97;letter-spacing:-.07em;margin:25px 0 20px}.hero h1 em{white-space:normal}.heroCopy>p{font-size:14px;line-height:1.6}.heroActions{gap:16px;margin-top:25px}.primaryButton{width:100%;min-height:55px}.ghostButton{min-height:38px}.heroVisual{height:390px;padding:25px 8px 32px}.heroImageFrame{max-height:320px}.heroStamp{width:102px;height:102px;left:-4px;bottom:38px;box-shadow:6px 7px 0 rgba(7,61,75,.15)}.heroStamp span{font-size:6px}.heroStamp b{font-size:18px;margin:3px}.heroStamp svg{width:16px}.heroCaption{font-size:8px}.heroStats{grid-template-columns:repeat(3,1fr);min-height:105px}.heroStats>span{padding:0 10px}.heroStats b{font-size:23px}.heroStats small{font-size:8px;line-height:1.3}.marquee{height:50px}.marquee span{font-size:14px}.section{padding:74px 18px}.sectionHead{margin-bottom:35px}.sectionHead>span,.kicker{font-size:9px;letter-spacing:.17em;margin-bottom:16px}.sectionHead h2,.branchCopy h2,.contact h2{font-size:clamp(39px,10vw,55px)}.sectionHead p{font-size:13px;margin-top:15px}.featureGrid{grid-template-columns:1fr;gap:10px}.featureCard{min-height:250px;padding:24px}.featureCard:nth-child(1),.featureCard:nth-child(4){grid-column:auto}.featureCard h3{font-size:27px}.featureCard p{font-size:12px}.softSection{padding-left:18px;padding-right:18px}.courseGrid{grid-template-columns:1fr}.courseCard{min-height:142px;padding:20px 44px 20px 0}.courseCard h3{font-size:21px}.courseCard p{font-size:11px}.platform{margin:0 12px;padding:50px 21px;gap:25px}.platformIntro h2{font-size:46px}.platformIntro>p{font-size:13px}.platformGrid{gap:8px}.platformGrid article{min-height:225px;padding:17px}.platformGrid article>span{width:39px;height:39px}.platformGrid h3{font-size:17px}.platformGrid p{font-size:10px}.resultsGrid{grid-template-columns:1fr;gap:16px}.resultCard>.picture{height:360px}.resultText p{min-height:0;font-size:17px}.teacherCard{flex-basis:calc(100% - 45px)}.teacherPhoto{height:320px}.teacherDescription{min-height:0}.steps{grid-template-columns:1fr;gap:0}.steps article{display:grid;grid-template-columns:60px 1fr;gap:15px;border-bottom:1px solid var(--line);padding:17px 0}.steps h3{margin:0 0 5px}.steps p{font-size:11px}.branchMap{min-height:300px;padding:10px}.branchMap iframe{min-height:280px!important}.branchCopy{padding:35px 23px}.branchCopy p{font-size:13px}.branchActions>*{width:100%}.contact{margin:0 12px;padding:45px 22px}.contactCopy ul{margin:23px 0}.form{grid-template-columns:1fr;padding:23px 17px}.form label,.form button{grid-column:1}.faq summary{font-size:14px;padding:20px 0}.footer{padding:58px 23px 23px}.footerMain{grid-template-columns:1fr 1fr;gap:35px 20px}.footerBrand{grid-column:1/-1}.footerMain>div:last-child{grid-column:auto}.footerBottom{gap:15px;flex-direction:column;margin-top:45px}}
 @media(max-width:380px){.hero h1{font-size:48px}.heroStats b{font-size:20px}.heroStats small{font-size:7px}.platformGrid{grid-template-columns:1fr}.platformGrid article{min-height:170px}.footerMain{grid-template-columns:1fr}.footerBrand,.footerMain>div:last-child{grid-column:auto}}
 @media(prefers-reduced-motion:reduce){.landing *, .landing *:before,.landing *:after{animation:none!important;scroll-behavior:auto!important;transition:none!important}.landing [data-reveal]{opacity:1;transform:none}}
+
+/* Concept B: Afterhours — ambitious, cinematic, high-energy study culture. */
+.landing{--teal:#79e3d2;--deep:#031d28;--ink:#edf6f1;--cream:#061f2b;--yellow:#dcf35b;--line:rgba(206,239,231,.21);background:#061f2b;color:#edf6f1}
+.header{background:rgba(4,27,38,.94);border-bottom-color:#295362}
+.brand,.nav>a{color:#f2f8f3}
+.brand small{color:#8ab8bb}
+.nav>a:hover{color:var(--yellow)}
+.nav .loginCta{background:var(--yellow);color:#082b35}
+.nav .loginCta:hover{background:#ecff86;color:#082b35}
+.menu{background:var(--yellow);color:#062b33}
+.heroWrap{background:radial-gradient(circle at 67% 36%,#185366 0,transparent 36%),#061f2b}
+.hero{min-height:780px;grid-template-columns:.94fr 1.06fr;gap:30px}
+.hero:before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(150,215,213,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(150,215,213,.055) 1px,transparent 1px);background-size:52px 52px;pointer-events:none}
+.heroCopy{z-index:4}
+.badge{border-color:var(--yellow);color:var(--yellow);background:#113744}
+.badgeDot{background:var(--yellow);box-shadow:0 0 0 4px #52692a}
+.hero h1{font-size:clamp(75px,7vw,124px);max-width:850px;margin-right:-160px;line-height:.9;color:#fff;text-transform:uppercase;letter-spacing:-.085em}
+.hero h1 em{color:var(--yellow);font-style:italic;letter-spacing:-.08em;text-transform:none}
+.heroPeriod{color:var(--teal)}
+.heroCopy>p{color:#b6d2d3;max-width:470px}
+.primaryButton{background:var(--yellow);border-color:var(--yellow);color:#082c34;box-shadow:6px 6px 0 #72d5cc}
+.primaryButton:hover{background:#efff83;box-shadow:3px 3px 0 #72d5cc}
+.ghostButton{color:#e4f4f0;border-color:#e4f4f0}
+.ghostButton:hover{color:var(--yellow)}
+.heroBottom{color:#73aab0}
+.heroBottom a{color:#d8f2eb}
+.heroVisual{height:680px;padding:25px 0 35px 10px}
+.heroVisual:before{width:86%;height:82%;right:0;top:9%;background:var(--yellow);border-radius:0;transform:rotate(8deg);box-shadow:0 0 0 17px rgba(220,243,91,.08)}
+.heroVisual:after{width:180px;height:180px;right:-38px;top:-15px;border:2px solid rgba(220,243,91,.55)}
+.heroImageFrame{max-height:620px;border:0;border-radius:0;transform:rotate(-3deg);clip-path:polygon(6% 0,100% 0,94% 100%,0 100%);box-shadow:0 30px 80px rgba(0,0,0,.35)}
+.heroImageFrame .picture img{object-position:58% center;transform:scale(1.08)}
+.heroStamp{left:-12px;bottom:0;width:160px;height:160px;border-radius:0;background:var(--yellow);box-shadow:12px 12px 0 #0f6170;transform:rotate(7deg);color:#082d36}
+.heroCaption{color:#cbece7}
+.captionLine{background:var(--yellow)}
+.heroStats{background:var(--yellow);color:#082b35;border-top:1px solid #102e35}
+.heroStats>span{border-right-color:rgba(8,43,53,.24)}
+.heroStats small{color:#42666b}
+.heroStats>a{color:#072d36}
+.marquee{background:#0b5b6a;border-color:var(--yellow)}
+.marquee span{color:#f1faf4}
+.marquee i{color:var(--yellow)}
+.sectionHead>span,.kicker{color:var(--yellow)}
+.sectionHead h2{color:#f2f7f2}
+.sectionHead p{color:#9fc4c7}
+.featureCard{border-color:#39626b;color:#edf7f1}
+.featureCard:nth-child(1){background:#0d5b69}
+.featureCard:nth-child(2){background:var(--yellow);color:#062c35}
+.featureCard:nth-child(3){background:#103745;color:#edf7f1}
+.featureCard:nth-child(4){background:#e9f0e8;color:#082c35}
+.softSection{background:#0b3644}
+.courseCard{border-top-color:#4b7780}
+.courseCard:hover{background:#13596a}
+.courseIcon{background:var(--yellow);color:#0b3440}
+.courseBadge{color:#7fb8b7}
+.courseCard h3{color:#f0faf6}
+.courseCard p{color:#9ec1c4}
+.courseCard a{border-color:#7ca7aa;color:var(--yellow)}
+.courseCard a:hover{background:var(--yellow);color:#072b35}
+.platform{background:#dcef6b;color:#0a3038}
+.platform:before{border-color:rgba(10,48,56,.2);box-shadow:0 0 0 90px rgba(10,48,56,.04),0 0 0 180px rgba(10,48,56,.03)}
+.badgeDark{color:#0b5a66}
+.platformIntro h2 em{color:#0b6d77}
+.platformIntro>p{color:#416a69}
+.platform .primaryButton{background:#0b3945;border-color:#0b3945;color:#fff;box-shadow:6px 6px 0 #fff}
+.platformGrid article{background:#ecf3d0;color:#0b3945;border-color:#bdd07c}
+.platformGrid article:first-child{background:#0b3945;color:#fff;border-color:#0b3945}
+.platformGrid article:hover{background:#fff}
+.platformGrid article:first-child:hover{background:#115163}
+.resultCard{background:#0d3542;border-color:#3a6770;color:#eef7f2}
+.resultText span{color:#9cc8ca}
+.score{background:var(--yellow);color:#092e37;box-shadow:4px 4px 0 #0b5e6b}
+.teachersSection{background:#dce9e4;color:#0a3340}
+.teachersSection .sectionHead h2{color:#0a3340}
+.teachersSection .sectionHead p{color:#567478}
+.teachersSection .sectionHead>span{color:#0b6572}
+.teacherCard{color:#0a3340}
+.teacherBody>a,.teacherExperience,.teacherTitle{color:#0b6875}
+.teacherPhoto>span{background:var(--yellow)}
+.carouselControls button{border-color:#0b4553;color:#0b4553}
+.carouselControls button:not(:disabled):hover{background:#0b4553}
+.steps article>span{color:var(--yellow)}
+.steps p{color:#a4c4c7}
+.branch{background:#e0ebe5;color:#0b3340}
+.branchCopy p{color:#527276}
+.branchCopy .kicker{color:#0a6876}
+.address{color:#0b3340;border-color:rgba(11,51,64,.2)}
+.address>svg{color:#0a6574}
+.branch .outlineButton{color:#0b3340;border-color:#0b3340}
+.branch .outlineButton:hover{background:#0b3340;color:#fff}
+.contact{background:#0d5363}
+.contactCopy>p{color:#c4e0df}
+.form{background:#eaf0e8;color:#0b3340}
+.form .primaryButton{color:#0b3340}
+.faq{border-color:#b8d4d2}
+.faq details{border-color:#3b6870}
+.faq details p{color:#a7c6c8}
+.footer{background:#031720}
+@media(max-width:850px){.nav{background:#092b39;border-color:#3c6470}.nav>a{color:#fff}.hero{min-height:0}.hero h1{font-size:clamp(61px,10vw,89px);margin-right:0}.heroVisual{height:520px}.heroStamp{width:125px;height:125px}}
+@media(max-width:580px){.hero h1{font-size:clamp(49px,12.2vw,68px);margin:24px 0;letter-spacing:-.075em}.heroVisual{height:390px}.heroImageFrame{max-height:330px}.heroStamp{width:100px;height:100px;left:0;bottom:30px}.heroStamp b{font-size:18px}.heroStats small{color:#315961}.platformGrid article{min-height:225px}.teacherCard{background:#fff}}
