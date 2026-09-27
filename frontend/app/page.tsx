@@ -16,7 +16,7 @@ const whatsappUrl = 'https://api.whatsapp.com/send?phone=77474794383'
 const mapUrl = 'https://2gis.kz/shymkent/geo/70000001026160761/69.614394,42.304299'
 
 const landingImages = {
-  hero: '/landing/hero/fenomen-students.png',
+  hero: '/landing/hero/fenomen-atlas.png',
   results: [
     '/landing/results/student-1.jpg',
     '/landing/results/student-2.jpg',
@@ -127,7 +127,7 @@ function LandingHeader() {
 }
 
 function HeroSection() {
-  return <section id="top" className={styles.heroWrap}><div className={styles.hero}><div className={styles.heroCopy}><span className={styles.badge}><span className={styles.badgeDot} /> ҰБТ-ДАН ЖОҒАРЫ НӘТИЖЕГЕ</span><h1>Болашағың<br /><em>осы жерден</em><br />басталады<span className={styles.heroPeriod}>.</span></h1><p>Өзіңе сенімділік беретін дайындық. Мықты ұстаздар, нақты оқу жоспары және әр қадамыңды көрсететін платформа — бәрі Fenomen-де.</p><div className={styles.heroActions}><a className={styles.primaryButton} href="#contact">Алғашқы аптаны бастау <ArrowRight size={19} /></a><a className={styles.ghostButton} href="#courses">Бағыттарды көру <ArrowRight size={17} /></a></div><div className={styles.heroBottom}><span>01 / 05 &nbsp; FENOMEN ӘЛЕМІ</span><a href="#advantages">Төмен қарай зертте <span>↓</span></a></div></div><div className={styles.heroVisual}><div className={styles.heroImageFrame}><Picture src={landingImages.hero} alt="Fenomen оқушылары бірге дайындалуда" /></div><div className={styles.heroStamp}><span>FENOMEN</span><b>өз жолыңды<br />тап.</b><Sparkles size={24} /></div><div className={styles.heroCaption}><span className={styles.captionLine} /> Білім. Сенім. Нәтиже.</div></div></div><div className={styles.heroStats}><span><b>500+</b><small>бізбен дайындалған оқушы</small></span><span><b>20+</b><small>тәжірибелі мұғалім</small></span><span><b>7 күн</b><small>тегін танысу аптасы</small></span><a href="#results">Нәтижелерді көр <ArrowRight size={19} /></a></div></section>
+  return <section id="top" className={styles.heroWrap}><div className={styles.hero}><div className={styles.heroCopy}><span className={styles.badge}><span className={styles.badgeDot} /> ЖАҢА КӨЗҚАРАСТАҒЫ ДАЙЫНДЫҚ</span><h1>Жүйе бар.<br /><em>Жетістік сенде.</em><span className={styles.heroPeriod}>.</span></h1><p>Түсінуден басталатын дайындық. Жеке оқу бағыты, тәжірибелі ұстаздар және өсуіңді көрсететін бір кеңістік.</p><div className={styles.heroActions}><a className={styles.primaryButton} href="#contact">Өз бағытыңды тап <ArrowRight size={19} /></a><a className={styles.ghostButton} href="#courses">Бағыттарды көру <ArrowRight size={17} /></a></div><div className={styles.heroBottom}><span>01 / 05 &nbsp; FENOMEN ӘЛЕМІ</span><a href="#advantages">Төмен қарай зертте <span>↓</span></a></div></div><div className={styles.heroVisual}><div className={styles.heroImageFrame}><Picture src={landingImages.hero} alt="Fenomen оқушылары бірге дайындалуда" /></div><div className={styles.heroStamp}><span>FENOMEN</span><b>өз жолыңды<br />тап.</b><Sparkles size={24} /></div><div className={styles.heroCaption}><span className={styles.captionLine} /> Білім. Сенім. Нәтиже.</div></div></div><div className={styles.heroStats}><span><b>500+</b><small>бізбен дайындалған оқушы</small></span><span><b>20+</b><small>тәжірибелі мұғалім</small></span><span><b>7 күн</b><small>тегін танысу аптасы</small></span><a href="#results">Нәтижелерді көр <ArrowRight size={19} /></a></div></section>
 }
 
 function Marquee() {

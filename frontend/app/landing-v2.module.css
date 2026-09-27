@@ -212,3 +212,93 @@
 @media(max-width:580px){.headerInner{padding:9px 16px}.brand b{font-size:16px}.brand small{font-size:7px}.logo{width:41px;height:41px}.heroWrap{padding:0 15px}.hero{padding-top:45px}.badge{font-size:8px;letter-spacing:.12em}.hero h1{font-size:clamp(49px,13.2vw,74px);line-height:.97;letter-spacing:-.07em;margin:25px 0 20px}.hero h1 em{white-space:normal}.heroCopy>p{font-size:14px;line-height:1.6}.heroActions{gap:16px;margin-top:25px}.primaryButton{width:100%;min-height:55px}.ghostButton{min-height:38px}.heroVisual{height:390px;padding:25px 8px 32px}.heroImageFrame{max-height:320px}.heroStamp{width:102px;height:102px;left:-4px;bottom:38px;box-shadow:6px 7px 0 rgba(7,61,75,.15)}.heroStamp span{font-size:6px}.heroStamp b{font-size:18px;margin:3px}.heroStamp svg{width:16px}.heroCaption{font-size:8px}.heroStats{grid-template-columns:repeat(3,1fr);min-height:105px}.heroStats>span{padding:0 10px}.heroStats b{font-size:23px}.heroStats small{font-size:8px;line-height:1.3}.marquee{height:50px}.marquee span{font-size:14px}.section{padding:74px 18px}.sectionHead{margin-bottom:35px}.sectionHead>span,.kicker{font-size:9px;letter-spacing:.17em;margin-bottom:16px}.sectionHead h2,.branchCopy h2,.contact h2{font-size:clamp(39px,10vw,55px)}.sectionHead p{font-size:13px;margin-top:15px}.featureGrid{grid-template-columns:1fr;gap:10px}.featureCard{min-height:250px;padding:24px}.featureCard:nth-child(1),.featureCard:nth-child(4){grid-column:auto}.featureCard h3{font-size:27px}.featureCard p{font-size:12px}.softSection{padding-left:18px;padding-right:18px}.courseGrid{grid-template-columns:1fr}.courseCard{min-height:142px;padding:20px 44px 20px 0}.courseCard h3{font-size:21px}.courseCard p{font-size:11px}.platform{margin:0 12px;padding:50px 21px;gap:25px}.platformIntro h2{font-size:46px}.platformIntro>p{font-size:13px}.platformGrid{gap:8px}.platformGrid article{min-height:225px;padding:17px}.platformGrid article>span{width:39px;height:39px}.platformGrid h3{font-size:17px}.platformGrid p{font-size:10px}.resultsGrid{grid-template-columns:1fr;gap:16px}.resultCard>.picture{height:360px}.resultText p{min-height:0;font-size:17px}.teacherCard{flex-basis:calc(100% - 45px)}.teacherPhoto{height:320px}.teacherDescription{min-height:0}.steps{grid-template-columns:1fr;gap:0}.steps article{display:grid;grid-template-columns:60px 1fr;gap:15px;border-bottom:1px solid var(--line);padding:17px 0}.steps h3{margin:0 0 5px}.steps p{font-size:11px}.branchMap{min-height:300px;padding:10px}.branchMap iframe{min-height:280px!important}.branchCopy{padding:35px 23px}.branchCopy p{font-size:13px}.branchActions>*{width:100%}.contact{margin:0 12px;padding:45px 22px}.contactCopy ul{margin:23px 0}.form{grid-template-columns:1fr;padding:23px 17px}.form label,.form button{grid-column:1}.faq summary{font-size:14px;padding:20px 0}.footer{padding:58px 23px 23px}.footerMain{grid-template-columns:1fr 1fr;gap:35px 20px}.footerBrand{grid-column:1/-1}.footerMain>div:last-child{grid-column:auto}.footerBottom{gap:15px;flex-direction:column;margin-top:45px}}
 @media(max-width:380px){.hero h1{font-size:48px}.heroStats b{font-size:20px}.heroStats small{font-size:7px}.platformGrid{grid-template-columns:1fr}.platformGrid article{min-height:170px}.footerMain{grid-template-columns:1fr}.footerBrand,.footerMain>div:last-child{grid-column:auto}}
 @media(prefers-reduced-motion:reduce){.landing *, .landing *:before,.landing *:after{animation:none!important;scroll-behavior:auto!important;transition:none!important}.landing [data-reveal]{opacity:1;transform:none}}
+
+/* Concept C: Atlas — crisp academic editorial, graphic and optimistic. */
+.landing{--teal:#006d82;--deep:#075266;--ink:#063a4b;--cream:#fbfcf8;--yellow:#ffd94b;--line:rgba(6,58,75,.23);background:#fbfcf8;color:#063a4b}
+.header{background:rgba(251,252,248,.96);border-bottom:2px solid #063a4b}
+.brand small{color:#507e83}
+.nav>a{font-weight:850}
+.nav .loginCta{border-radius:0;background:#ffd94b;color:#063a4b;border:1px solid #063a4b;box-shadow:3px 3px 0 #063a4b}
+.nav .loginCta:hover{background:#ffe673;color:#063a4b}
+.menu{border-radius:0;background:#063a4b}
+.heroWrap{background-color:#fbfcf8;background-image:linear-gradient(rgba(6,58,75,.047) 1px,transparent 1px),linear-gradient(90deg,rgba(6,58,75,.047) 1px,transparent 1px);background-size:43px 43px}
+.hero{min-height:715px;grid-template-columns:.96fr 1.04fr;gap:55px}
+.badge{border:0;border-left:5px solid #ffd94b;background:#e5f1ef;padding:11px 15px;color:#075266}
+.badgeDot{width:0;height:0;box-shadow:none}
+.hero h1{font-size:clamp(70px,6.8vw,116px);line-height:.96;letter-spacing:-.085em;margin-right:-110px;color:#063a4b}
+.hero h1 em{font-style:italic;color:#007b90;white-space:normal;font-size:.92em}
+.heroPeriod{color:#ffc928}
+.heroCopy>p{color:#41666c;max-width:490px}
+.primaryButton{background:#ffd94b;border:1px solid #063a4b;color:#063a4b;box-shadow:5px 5px 0 #063a4b}
+.primaryButton:hover{background:#ffe678;box-shadow:2px 2px 0 #063a4b}
+.ghostButton{color:#063a4b;border-color:#063a4b}
+.heroBottom{color:#5f8589}
+.heroBottom a{color:#063a4b}
+.heroVisual{height:590px;padding:30px 24px 35px 0}
+.heroVisual:before{width:91%;height:88%;right:0;top:4%;background:#ffd94b;border-radius:0;transform:rotate(0);box-shadow:14px 14px 0 #cde8e4}
+.heroVisual:after{width:112px;height:112px;border:2px solid #007b90;top:-23px;right:-20px}
+.heroImageFrame{max-height:520px;border:2px solid #063a4b;border-radius:0;transform:none;box-shadow:15px 15px 0 #063a4b}
+.heroImageFrame .picture img{object-position:57% center;transform:scale(1.02)}
+.heroStamp{width:155px;height:155px;left:-30px;bottom:22px;border-radius:0;background:#075266;color:#fff;box-shadow:7px 7px 0 #ffd94b;transform:rotate(-6deg)}
+.heroStamp b{font-size:27px}
+.heroCaption{color:#063a4b}
+.heroStats{background:#fbfcf8;color:#063a4b;border-top:2px solid #063a4b;border-bottom:2px solid #063a4b}
+.heroStats>span{border-right:1px solid #85a8a8}
+.heroStats b{font-family:Georgia,serif;font-weight:400;font-size:46px;color:#00758a}
+.heroStats small{color:#53777b}
+.heroStats>a{color:#063a4b}
+.marquee{background:#075266;border-color:#075266}
+.marquee span{color:#fff}
+.marquee i{color:#ffd94b}
+.sectionHead>span,.kicker{color:#00758a}
+.sectionHead h2{max-width:970px;font-weight:780}
+.sectionHead p{color:#52777b}
+.featureGrid{grid-template-columns:repeat(4,1fr);gap:10px}
+.featureCard,.featureCard:nth-child(1),.featureCard:nth-child(4){grid-column:auto;min-height:360px;border:1px solid #063a4b;box-shadow:5px 5px 0 rgba(6,58,75,.1)}
+.featureCard:nth-child(1){background:#075266;color:#fff}
+.featureCard:nth-child(2){background:#e3f1ee;color:#063a4b}
+.featureCard:nth-child(3){background:#ffd94b;color:#063a4b}
+.featureCard:nth-child(4){background:#fff;color:#063a4b}
+.featureCard h3{font-size:clamp(22px,2.05vw,30px)}
+.featureCard p{font-size:12px}
+.softSection{background:#f1f3e9}
+.courseCard{border-top:2px solid #063a4b}
+.courseCard:hover{background:#fff8d7}
+.courseIcon{background:#075266}
+.courseCard a{border-color:#075266}
+.platform{background:#cfeae4;color:#063a4b;border-top:2px solid #063a4b;border-bottom:2px solid #063a4b}
+.platform:before{border-color:rgba(6,58,75,.22);box-shadow:0 0 0 90px rgba(6,58,75,.03),0 0 0 180px rgba(6,58,75,.025)}
+.badgeDark{color:#006f82}
+.platformIntro h2 em{color:#006f82}
+.platformIntro>p{color:#416e70}
+.platform .primaryButton{background:#075266;color:#fff;border-color:#075266;box-shadow:5px 5px 0 #fff}
+.platformGrid article{background:#fff;color:#063a4b;border:1px solid #82aeb0;box-shadow:5px 5px 0 rgba(6,58,75,.12)}
+.platformGrid article:first-child{background:#ffd94b;border-color:#063a4b}
+.platformGrid article:hover{background:#f2fbf5}
+.platformGrid article:first-child:hover{background:#ffe57e}
+.resultCard{border:1px solid #063a4b;box-shadow:5px 5px 0 #d5e8e3}
+.score{background:#ffd94b;border:1px solid #063a4b;box-shadow:3px 3px 0 #063a4b}
+.teachersSection{background:#075266;color:#fff}
+.teachersSection .sectionHead>span{color:#ffd94b}
+.teachersSection .sectionHead h2{color:#fff}
+.teachersSection .sectionHead p{color:#bddadd}
+.teacherCard{border:1px solid #7bb4b9}
+.teacherPhoto>span{background:#ffd94b}
+.carouselControls button{border-color:#fff;color:#fff}
+.carouselControls button:not(:disabled):hover{background:#fff;color:#075266}
+.steps{border-top:2px solid #063a4b}
+.branch{background:#fff;border:1px solid #063a4b}
+.branchMap{background:#e8efdf}
+.branchCopy p{color:#52777b}
+.contact{background:#ffd94b;color:#063a4b;border:2px solid #063a4b}
+.contact .badgeDark{color:#075266}
+.contactCopy>p{color:#315b60}
+.contactCopy li{color:#063a4b}
+.contactCopy li svg{color:#075266}
+.form{background:#fff;color:#063a4b;border:1px solid #063a4b;box-shadow:9px 9px 0 #075266}
+.contact .whatsappButton{border-color:#073e3b}
+.faq{border-top:2px solid #063a4b}
+.footer{background:#075266}
+@media(max-width:1150px){.featureGrid{grid-template-columns:repeat(2,1fr)}.featureCard,.featureCard:nth-child(1),.featureCard:nth-child(4){min-height:310px}}
+@media(max-width:850px){.hero{grid-template-columns:1fr;gap:0}.hero h1{font-size:clamp(65px,10vw,92px);margin-right:0}.heroVisual{height:520px}.nav{background:#fbfcf8}.featureGrid{grid-template-columns:1fr 1fr}}
+@media(max-width:580px){.hero h1{font-size:clamp(50px,12vw,72px)}.heroVisual{height:370px;padding:15px 20px 25px 0}.heroImageFrame{max-height:310px;box-shadow:9px 9px 0 #063a4b}.heroStamp{width:105px;height:105px;left:-5px;bottom:20px}.heroStamp b{font-size:18px}.heroStats b{font-size:26px}.featureGrid{grid-template-columns:1fr}.featureCard,.featureCard:nth-child(1),.featureCard:nth-child(4){min-height:250px}.platformGrid article{min-height:225px}}
