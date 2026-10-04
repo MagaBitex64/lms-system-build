@@ -164,6 +164,54 @@ async def content(conn, variant):
                                           variant.get("exam_mode", "full"), variant.get("single_subject"))
 
 
+async def content_many(conn, variants):
+    variant_ids = [variant["id"] for variant in variants]
+    if not variant_ids:
+        return {}
+    question_rows = await conn.fetch(
+        "SELECT q.* FROM ent_questions q WHERE q.variant_id = ANY($1::bigint[]) ORDER BY q.variant_id,q.subject,q.position,q.id",
+        variant_ids,
+    )
+    question_ids = [question["id"] for question in question_rows]
+    option_rows = await conn.fetch(
+        "SELECT * FROM ent_options WHERE question_id = ANY($1::bigint[]) ORDER BY question_id,position,id",
+        question_ids,
+    ) if question_ids else []
+    pair_rows = await conn.fetch(
+        "SELECT * FROM ent_matching_pairs WHERE question_id = ANY($1::bigint[]) ORDER BY question_id,position,id",
+        question_ids,
+    ) if question_ids else []
+    context_rows = await conn.fetch(
+        "SELECT * FROM ent_contexts WHERE variant_id = ANY($1::bigint[]) ORDER BY variant_id,subject,start_position",
+        variant_ids,
+    )
+    options_by_question: dict[int, list[dict]] = {}
+    pairs_by_question: dict[int, list[dict]] = {}
+    questions_by_variant: dict[int, list[dict]] = {}
+    contexts_by_variant: dict[int, list[dict]] = {}
+    for option in option_rows:
+        options_by_question.setdefault(option["question_id"], []).append(dict(option))
+    for pair in pair_rows:
+        pairs_by_question.setdefault(pair["question_id"], []).append(dict(pair))
+    for question in question_rows:
+        item = dict(question)
+        item.pop("created_at", None)
+        item["options"] = options_by_question.get(question["id"], [])
+        item["matching_pairs"] = pairs_by_question.get(question["id"], [])
+        questions_by_variant.setdefault(question["variant_id"], []).append(item)
+    for context in context_rows:
+        contexts_by_variant.setdefault(context["variant_id"], []).append(dict(context))
+    result = {}
+    for variant in variants:
+        qs = questions_by_variant.get(variant["id"], [])
+        contexts = contexts_by_variant.get(variant["id"], [])
+        result[variant["id"]] = (qs, contexts, validate_variant(
+            variant["combination"], qs, contexts,
+            variant.get("exam_mode", "full"), variant.get("single_subject"),
+        ))
+    return result
+
+
 async def ready_content(conn, variant):
     qs, contexts, validation = await content(conn, variant)
     if not validation["ready"]:
@@ -238,8 +286,10 @@ async def list_variants(user: dict = Depends(require_admin)):
     pool = await get_pool()
     items = []
     async with pool.acquire() as conn:
-        for row in await conn.fetch("SELECT * FROM ent_variants ORDER BY created_at DESC"):
-            _, _, validation = await content(conn, row)
+        rows = await conn.fetch("SELECT * FROM ent_variants ORDER BY created_at DESC")
+        contents = await content_many(conn, rows)
+        for row in rows:
+            _, _, validation = contents[row["id"]]
             items.append({**dict(row), **{k: value for k, value in validation.items() if k != "issues"}, "issue_count": len(validation["issues"])})
     return {"items": items}
 
@@ -289,8 +339,9 @@ async def list_course_ent_variants(course_id: int, user: dict = Depends(require_
     items = []
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM ent_variants WHERE course_id=$1 ORDER BY created_at DESC", course_id)
+        contents = await content_many(conn, rows)
         for row in rows:
-            _, _, validation = await content(conn, row)
+            _, _, validation = contents[row["id"]]
             items.append({
                 **dict(row),
                 **{key: value for key, value in validation.items() if key != "issues"},
