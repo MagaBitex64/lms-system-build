@@ -289,9 +289,18 @@ async def import_questions_docx(
         raise HTTPException(status_code=404, detail="Бұл элементке тест қосуға болмайды")
     if not (file.filename or "").lower().endswith(".docx"):
         raise HTTPException(status_code=422, detail="Тек .docx Word файлын жүктеңіз")
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Word файлы 10 МБ-тан аспауы керек")
+    chunks: list[bytes] = []
+    content_size = 0
+    while chunk := await file.read(1024 * 1024):
+        content_size += len(chunk)
+        if content_size > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Word файлы 10 МБ-тан аспауы керек")
+        chunks.append(chunk)
+    content = b"".join(chunks)
+    try:
+        storage.validate_content(file.filename or "questions.docx", content)
+    except FileValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     questions = parse_docx_questions(content)
     if preview:
         preview_questions = []
