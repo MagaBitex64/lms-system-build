@@ -1,22 +1,22 @@
 'use client'
 
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { api } from '@/lib/api'
 import {
-  ArrowRight, Atom, BarChart3, BookOpen, Bot, CalendarCheck, Check,
+  ArrowRight, Atom, BarChart3, BookOpen, Check,
   ChevronDown, ChevronLeft, ChevronRight, Clock3, ExternalLink, FlaskConical, GraduationCap, History, Laptop,
-  Lightbulb, MapPin, Menu, MonitorPlay, Quote, School, Sparkles,
-  Trophy, UserRound, X, Zap,
+  MapPin, Menu, MonitorPlay, Quote, School,
+  Trophy, UserRound, UsersRound, Calculator, Leaf, X,
 } from 'lucide-react'
 import styles from './landing.module.css'
+import { CourseArt } from './components/landing-course-art'
 
 const whatsappUrl = 'https://api.whatsapp.com/send?phone=7474794383'
 const mapUrl = 'https://2gis.kz/shymkent/geo/70000001026160761/69.614394,42.304299'
 
 const landingImages = {
-  hero: '/landing/hero/students.jpg',
   results: [
     '/landing/results/student-1.jpg',
     '/landing/results/student-2.jpg',
@@ -38,27 +38,20 @@ const landingImages = {
 }
 
 const navItems = [
-  ['Артықшылықтарымыз', 'advantages'], ['Курстар', 'courses'],
-  ['Нәтижелеріміз', 'results'], ['Мұғалімдер', 'teachers'],
-  ['Байланыс', 'contact'],
+  ['Басты бет', 'top'], ['Курстар', 'courses'],
+  ['Нәтижелер', 'results'], ['Мұғалімдер', 'teachers'],
+  ['Біз туралы', 'branch'],
 ] as const
 
-const features = [
-  { icon: Zap, title: 'Алғашқы 7 күн тегін', text: 'Сабаққа қатысып, мұғалімнің әдісі мен оқу жүйесін өзіңіз бағалап көріңіз.', tone: 'yellow' },
-  { icon: Trophy, title: 'Мақсатқа сай дайындық', text: 'Әр пәнге арналған нақты жоспар, түсінікті сабақ және мол тәжірибе бар.', tone: 'blue' },
-  { icon: Laptop, title: 'Өзіңізге ыңғайлы оқу', text: 'Филиалға келіп оқуға да, бейнесабақтарды кез келген уақытта көруге де болады.', tone: 'mint' },
-  { icon: CalendarCheck, title: 'Әр аптадағы нәтиже', text: 'Бақылау тестері қай тақырыпты нығайту керек екенін дәл көрсетеді.', tone: 'violet' },
-]
-
 const courses = [
-  { icon: Lightbulb, title: 'Математикалық сауаттылық', text: 'Логикалық есептерді тез түсініп, дұрыс тәсілмен шешуге дағдыланыңыз.' },
-  { icon: History, title: 'Қазақстан тарихы', text: 'Оқиғалар арасындағы байланысты түсініп, даталарды жүйелі түрде есте сақтаңыз.' },
-  { icon: BookOpen, title: 'Оқу сауаттылығы', text: 'Мәтіннің негізгі ойын ажыратып, сұраққа дәл жауап беруді меңгеріңіз.' },
-  { icon: BarChart3, title: 'Математика', text: 'Теорияны есеппен бекітіп, күрделі тақырыптарды кезең-кезеңімен игеріңіз.' },
-  { icon: Atom, title: 'Физика', text: 'Заңдар мен формулалардың мәнін түсініп, оларды есепте дұрыс қолданыңыз.' },
-  { icon: Sparkles, title: 'Биология', text: 'Күрделі үдерістерді сызба, кесте және нақты мысалдар арқылы оңай меңгеріңіз.' },
-  { icon: FlaskConical, title: 'Химия', text: 'Реакцияларды түсініп, теңдеулер мен есептерді жүйелі түрде орындаңыз.' },
-  { icon: Bot, title: 'Информатика', text: 'Алгоритмдік ойлауды дамытып, код жазу мен ақпаратты талдауды үйреніңіз.' },
+  { icon: Calculator, title: 'Математика', text: 'Теория, есептер, ҰБТ форматы', tone: 'Math', art: 'math' },
+  { icon: Atom, title: 'Физика', text: 'Формулалар, заңдар және есептер', tone: 'Physics', art: 'physics' },
+  { icon: Leaf, title: 'Биология', text: 'Тірі ағзалар, жүйелер және практика', tone: 'Biology', art: 'biology' },
+  { icon: FlaskConical, title: 'Химия', text: 'Реакциялар, теңдеулер және есептер', tone: 'Chemistry', art: 'chemistry' },
+  { icon: History, title: 'Қазақстан тарихы', text: 'Негізгі оқиғалар, даталар және талдау', tone: 'History', art: 'history' },
+  { icon: BookOpen, title: 'Оқу сауаттылығы', text: 'Мәтінмен жұмыс, талдау және жауап стратегиялары', tone: 'Reading', art: 'reading' },
+  { icon: BarChart3, title: 'Математикалық сауаттылық', text: 'Күнделікті өмірдегі есептер және логика', tone: 'Literacy', art: 'literacy' },
+  { icon: Laptop, title: 'Информатика', text: 'Алгоритмдер, код, ақпараттық технологиялар', tone: 'Informatics', art: 'informatics' },
 ]
 
 const steps = [
@@ -123,19 +116,141 @@ function SectionHead({ eyebrow, title, text, light = false }: { eyebrow: string;
 
 function LandingHeader() {
   const [open, setOpen] = useState(false)
-  return <header className={styles.header}><div className={styles.headerInner}><a href="#top" aria-label="Басты бет"><Brand /></a><nav className={`${styles.nav} ${open ? styles.navOpen : ''}`}>{navItems.map(([label, id]) => <a key={id} href={`#${id}`} onClick={() => setOpen(false)}>{label}</a>)}<a className={styles.consultLink} href="#contact" onClick={() => setOpen(false)}>Кеңес алу</a><Link className={styles.loginCta} href="/login" onClick={() => setOpen(false)}>Кіру</Link></nav><button className={styles.menu} onClick={() => setOpen(!open)} aria-label="Мәзірді ашу">{open ? <X /> : <Menu />}</button></div></header>
+  const [scrolled, setScrolled] = useState(false)
+
+  useEffect(() => {
+    const update = () => setScrolled(window.scrollY > 12)
+    update()
+    window.addEventListener('scroll', update, { passive: true })
+    return () => window.removeEventListener('scroll', update)
+  }, [])
+
+  function navigateTo(event: MouseEvent<HTMLAnchorElement>, id: string) {
+    setOpen(false)
+    const target = document.getElementById(id)
+    if (!target || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    event.preventDefault()
+    window.history.pushState(null, '', `${window.location.pathname}${window.location.search}#${id}`)
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  return <header className={`${styles.header} ${scrolled ? styles.headerScrolled : ''}`}><div className={styles.headerInner}><a href="#top" aria-label="Басты бет" onClick={(event) => navigateTo(event, 'top')}><Brand /></a><nav id="landing-navigation" className={`${styles.nav} ${open ? styles.navOpen : ''}`}>{navItems.map(([label, id]) => <a key={id} href={`#${id}`} onClick={(event) => navigateTo(event, id)}>{label}</a>)}<div className={styles.headerActions}><Link className={styles.loginCta} href="/login" onClick={() => setOpen(false)}>Кіру</Link></div></nav><button className={styles.menu} type="button" onClick={() => setOpen(!open)} aria-label={open ? 'Мәзірді жабу' : 'Мәзірді ашу'} aria-expanded={open} aria-controls="landing-navigation">{open ? <X /> : <Menu />}</button></div></header>
 }
 
 function HeroSection() {
-  return <section id="top" className={styles.heroWrap}><div className={styles.hero}><div className={styles.heroCopy}><span className={styles.badge}><Sparkles size={16} /> Бірінші апта — тегін оқу</span><h1>ҰБТ-ға дайындық<br /><em>енді бір жүйеде</em></h1><p>Fenomen.kaz-та курс, бейнесабақ, тапсырма мен нәтижені бақылау бір жерде жиналған. Сіз мақсатқа қарай жүресіз, біз әр қадамды бақылаймыз.</p><div className={styles.heroActions}><a className={styles.primaryButton} href="#contact">Курсқа қосылу <ArrowRight size={18} /></a><a className={styles.ghostButton} href="#courses">Курстарды көру</a><a className={`${styles.whatsappButton} ${styles.heroWhatsapp}`} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp арқылы жазылу</a></div><div className={styles.heroStats}><span><b>500+</b> оқушы</span><span><b>20+</b> мұғалім</span></div></div><div className={styles.heroVisual}><Picture src={landingImages.hero} alt="Fenomen оқушылары" /><div className={`${styles.floatCard} ${styles.cardTop}`}><CalendarCheck /><span><b>Апталық тест</b><small>Ілгерілеу әр аптада көрінеді</small></span></div><div className={`${styles.floatCard} ${styles.cardBottom}`}><Laptop /><span><b>Онлайн және филиалда</b><small>Өзіңізге ыңғайлы тәсілді таңдаңыз</small></span></div></div></div></section>
+  return <section id="top" className={styles.heroWrap}><div className={styles.hero}>
+    <div className={styles.heroPhoto}><Image src="/landing/hero/approved-students-composite.jpg" alt="Fenomen мектебінің үш түлегі" fill priority quality={90} sizes="100vw" /></div>
+    <div className={styles.heroPhotoShade} aria-hidden="true" />
+    <div className={styles.heroCopy}>
+      <span className={styles.badge}><span className={styles.badgeDot} /> Бірінші апта тегін</span>
+      <h1>Түлектерге ҰБТ-ға<br />дайындалуға<br /><em>көмектесіп келеміз</em></h1>
+      <p>Курс, бейнесабақ, тапсырма, сынақ тесттері және нәтижені бақылау — бәрі бір платформада.</p>
+      <div className={styles.heroActions}><a className={styles.primaryButton} href="#contact">Алғашқы апта тегін <ArrowRight size={20} /></a><a className={styles.ghostButton} href="#courses">Курстарды көру</a></div>
+      <div className={styles.subjectTags} aria-label="ҰБТ пәндері"><span><Calculator size={16} />Математика</span><span><Atom size={16} />Физика</span><span><Leaf size={16} />Биология</span><span><FlaskConical size={16} />Химия</span><span><BookOpen size={16} />Қазақстан тарихы</span></div>
+    </div>
+    <div className={styles.heroFloating}><BarChart3 size={30} /><span><b>Апталық тест</b><small>Нәтижеңді бақыла</small></span></div>
+  </div></section>
 }
 
-function FeatureCards() {
-  return <section id="advantages" className={styles.section}><SectionHead eyebrow="Неліктен Fenomen?" title="Әр күнгі нақты жоспар" text="Жүйелі сабақ, тәжірибелі мұғалім және нәтижені үнемі бақылау — дайындықтың басты тірегі." /><div className={styles.featureGrid}>{features.map(({ icon: Icon, title, text, tone }) => <article key={title} className={`${styles.featureCard} ${styles[tone]}`}><span className={styles.iconBox}><Icon /></span><h3>{title}</h3><p>{text}</p><span className={styles.cardArrow}><ArrowRight /></span></article>)}</div></section>
+function AnimatedStat({ value, rangeStart, suffix = '' }: { value: number; rangeStart?: number; suffix?: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [current, setCurrent] = useState(value)
+
+  useEffect(() => {
+    const node = ref.current
+    if (!node || window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return
+    let frame = 0
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return
+      observer.disconnect()
+      const start = performance.now()
+      const tick = (now: number) => {
+        const progress = Math.min((now - start) / 1250, 1)
+        const eased = 1 - Math.pow(1 - progress, 3)
+        setCurrent(Math.round(value * eased))
+        if (progress < 1) frame = requestAnimationFrame(tick)
+      }
+      frame = requestAnimationFrame(tick)
+    }, { threshold: 0.35 })
+    observer.observe(node)
+    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
+  }, [value])
+
+  const startValue = rangeStart === undefined ? '' : `${Math.round(rangeStart * current / value)}–`
+  const finalLabel = rangeStart === undefined ? `${value}${suffix}` : `${rangeStart}–${value}${suffix}`
+  return <span ref={ref} aria-label={finalLabel}>{startValue}{current}{suffix}</span>
+}
+
+function ResultsStatsSection() {
+  const sectionRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return
+    const cards = sectionRef.current?.querySelectorAll<HTMLElement>('[data-stats-reveal]')
+    if (!cards) return
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return
+        entry.target.classList.add(styles.resultsStatsRevealed)
+        observer.unobserve(entry.target)
+      })
+    }, { threshold: 0.15 })
+    cards.forEach((card) => { card.classList.add(styles.resultsStatsPending); observer.observe(card) })
+    return () => observer.disconnect()
+  }, [])
+
+  return <section ref={sectionRef} className={styles.resultsStats} aria-labelledby="results-stats-title">
+    <div className={styles.resultsStatsInner}>
+      <div className={styles.resultsStatsIntro}>
+        <span className={styles.resultsStatsEyebrow}><i /> FENOMEN ЖЕТІСТІКТЕРІ</span>
+        <h2 id="results-stats-title">10 жылдық еңбектің <em>нәтижесі</em></h2>
+        <p>Әр оқушының жетістігі — біздің мақтанышымыз.</p>
+      </div>
+      <div className={styles.resultsStatsGrid}>
+        <article className={styles.resultsStatsCard} data-stats-reveal>
+          <div className={styles.resultsStatsImage}><Image src="/landing/stats/academic-books.jpg" alt="Оқулықтар, қаламдар және глобус" fill sizes="(max-width: 780px) 100vw, 370px" /></div>
+          <div className={styles.resultsStatsCardContent}><span className={styles.resultsStatsIcon}><UsersRound size={27} /></span><strong><AnimatedStat value={1000} suffix="+" /></strong><p>10 жылдан бері оқушы<br />бізді таңдайды</p></div>
+        </article>
+        <article className={styles.resultsStatsCard} data-stats-reveal>
+          <div className={styles.resultsStatsImage}><Image src="/landing/stats/exam-sheet.jpg" alt="ҰБТ жауап парағы мен қалам" fill sizes="(max-width: 780px) 100vw, 370px" /></div>
+          <div className={styles.resultsStatsCardContent}><span className={styles.resultsStatsIcon}><Trophy size={27} /></span><strong><AnimatedStat value={140} rangeStart={130} /></strong><p>балл иегерлерін<br />дайындаймыз</p></div>
+        </article>
+        <article className={styles.resultsStatsCard} data-stats-reveal>
+          <div className={styles.resultsStatsImage}><Image src="/landing/stats/graduation-campus.jpg" alt="Университет ғимараты мен академиялық қалпақ" fill sizes="(max-width: 780px) 100vw, 370px" /></div>
+          <div className={styles.resultsStatsCardContent}><span className={styles.resultsStatsIcon}><GraduationCap size={28} /></span><strong><AnimatedStat value={90} suffix="%" /></strong><p>түлектеріміз мемлекеттік<br />грант иегері атанды</p></div>
+        </article>
+      </div>
+    </div>
+  </section>
 }
 
 function CoursesSection() {
-  return <section id="courses" className={`${styles.section} ${styles.softSection}`}><SectionHead eyebrow="Бағыттар" title="ҰБТ курстары" text="Міндетті және бейіндік пәндерді бос орынсыз жаттамай, түсініп меңгеріңіз." /><div className={styles.courseGrid}>{courses.map(({ icon: Icon, title, text }) => <article className={styles.courseCard} key={title}><div className={styles.courseTop}><span className={styles.courseIcon}><Icon /></span><span className={styles.courseBadge}>ҰБТ пәні</span></div><h3>{title}</h3><p>{text}</p><a href="#contact">Курсты таңдау <ArrowRight size={16} /></a></article>)}</div></section>
+  const gridRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return
+    const cards = gridRef.current?.querySelectorAll<HTMLElement>('[data-course-reveal]')
+    if (!cards) return
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return
+        entry.target.classList.add(styles.courseVisible)
+        observer.unobserve(entry.target)
+      })
+    }, { threshold: 0.12 })
+    cards.forEach((card) => { card.classList.add(styles.coursePending); observer.observe(card) })
+    return () => observer.disconnect()
+  }, [])
+
+  return <section id="courses" className={styles.coursesSection}>
+    <div className={styles.coursesInner}>
+      <div className={styles.coursesHeader}>
+        <div className={styles.coursesHeading}><span>БАҒЫТТАР</span><h2>ҰБТ <em>курстары</em></h2><p>Міндетті және бейіндік пәндерді түсінікті, жүйелі және нәтижеге бағытталған форматта оқыңыз.</p></div>
+        <div className={styles.coursesHighlights}><span><GraduationCap size={25} /><b>ҰБТ форматы<small>нақты бағдарлама</small></b></span><span><BarChart3 size={25} /><b>Тәжірибелі<small>мұғалімдер</small></b></span><span><BookOpen size={25} /><b>Жүйелі оқу<small>қадам-қадаммен</small></b></span></div>
+      </div>
+      <div ref={gridRef} className={styles.courseGrid}>{courses.map(({ icon: Icon, title, text, tone, art }, index) => <div className={styles.courseRevealSlot} data-course-reveal key={title} style={{ transitionDelay: `${index * 65}ms` }}><article className={`${styles.courseCard} ${styles[`courseTone${tone}`]}`}><span className={styles.courseIcon}><Icon size={26} /></span><div className={styles.courseArtwork}><CourseArt subject={art} /></div><div className={styles.courseCardCopy}><h3>{title}</h3><p>{text}</p></div><a href="#contact"><span>Курсты таңдау <ArrowRight size={17} /></span><span className={styles.courseArrowCircle}><ArrowRight size={21} /></span></a></article></div>)}</div>
+    </div>
+  </section>
 }
 
 function HowItWorksSection() {
@@ -235,5 +350,5 @@ function LandingFooter() {
 }
 
 export default function HomePage() {
-  return <main className={styles.landing}><LandingHeader /><HeroSection /><FeatureCards /><CoursesSection /><HowItWorksSection /><PlatformSection /><ResultsSection /><TeachersSection /><BranchSection /><LeadFormSection /><FAQSection /><LandingFooter /></main>
+  return <main className={styles.landing}><LandingHeader /><HeroSection /><ResultsStatsSection /><CoursesSection /><HowItWorksSection /><PlatformSection /><ResultsSection /><TeachersSection /><BranchSection /><LeadFormSection /><FAQSection /><LandingFooter /></main>
 }
