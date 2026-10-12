@@ -77,6 +77,32 @@ export async function downloadFile(fileId: number, filename: string) {
   URL.revokeObjectURL(downloadUrl)
 }
 
+export async function downloadApiFile(path: string, filename: string) {
+  const token = getToken()
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    let detail = 'Download failed'
+    try {
+      const data = await res.json()
+      if (typeof data.detail === 'string') detail = data.detail
+    } catch {
+      // keep fallback message
+    }
+    throw new ApiError(res.status, detail)
+  }
+  const blob = await res.blob()
+  const downloadUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = downloadUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(downloadUrl)
+}
+
 export function getFileUrl(fileId: number): string {
   const token = getToken()
   const url = `${API_BASE}/files/${fileId}/download`

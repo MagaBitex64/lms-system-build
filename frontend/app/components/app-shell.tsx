@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { Fragment, useState, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import Image from 'next/image'
@@ -118,24 +118,28 @@ function AuthedShell({ children }: { children: ReactNode }) {
       </Link>
 
       {/* Navigation */}
-      <nav className="flex flex-1 flex-col gap-1 px-4 py-4" aria-label="Негізгі навигация">
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-4 py-4" aria-label="Негізгі навигация">
+        <p className="px-4 pb-2 text-xs font-semibold tracking-wider text-sidebar-muted">ОҚУ</p>
         {nav.map((n) => {
           const active = pathname === n.href || (n.href !== '/admin' && pathname.startsWith(n.href + '/'))
           return (
+            <Fragment key={n.href}>
+            {n.href === '/admin' && <p className="px-4 pb-2 pt-5 text-xs font-semibold tracking-wider text-sidebar-muted">БАСҚАРУ</p>}
             <Link
-              key={n.href}
               href={n.href}
               onClick={() => setMenuOpen(false)}
+              aria-current={active ? 'page' : undefined}
               className={cx(
-                'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-150',
+                'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary',
                 active
-                  ? 'bg-primary-soft text-primary'
+                  ? 'bg-primary-soft text-primary-hover'
                   : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-foreground',
               )}
             >
-              <span className="flex-shrink-0">{n.icon}</span>
+              <span className={cx('flex-shrink-0', active && 'text-primary')}>{n.icon}</span>
               <span>{t(n.label)}</span>
             </Link>
+            </Fragment>
           )
         })}
       </nav>
@@ -157,7 +161,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
   )
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className={cx('platform-ui min-h-screen bg-background', user.role === 'admin' && 'admin-ui')}>
       {/* Desktop Sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-sidebar-border lg:block bg-sidebar">
         {sidebar}
@@ -218,6 +222,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
                     placeholder={t('searchPlaceholder')}
+                    aria-label={t('searchPlaceholder')}
                     className="w-full h-10 pl-10 pr-4 rounded-lg border border-border bg-surface-muted text-foreground placeholder:text-muted/60 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                   />
                 </div>

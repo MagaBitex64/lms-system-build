@@ -131,7 +131,9 @@ CREATE TABLE IF NOT EXISTS quizzes (
     open_at TIMESTAMPTZ,
     deadline_at TIMESTAMPTZ,
     close_at TIMESTAMPTZ,
-    time_limit_minutes INTEGER
+    time_limit_minutes INTEGER,
+    shuffle_questions BOOLEAN NOT NULL DEFAULT TRUE,
+    shuffle_options BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE IF NOT EXISTS quiz_questions (
@@ -325,6 +327,7 @@ CREATE TABLE IF NOT EXISTS ent_trial_accesses (
     student_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ,
     allow_retake BOOLEAN NOT NULL DEFAULT FALSE,
+    max_attempts INTEGER NOT NULL DEFAULT 1 CHECK (max_attempts BETWEEN 1 AND 100),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ent_accesses_student ON ent_trial_accesses(student_id);
@@ -388,69 +391,9 @@ MIGRATIONS = [
     "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ",
     "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS close_at TIMESTAMPTZ",
     "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS time_limit_minutes INTEGER",
+    "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS shuffle_questions BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS shuffle_options BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE groups ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 20",
-    """
-    DO $$
-    DECLARE
-        quiz_item RECORD;
-        target_lesson_id BIGINT;
-    BEGIN
-        FOR quiz_item IN
-            SELECT ci.id, ci.course_id, ci.position, q.max_score, q.weight_pct,
-                   q.open_at, q.deadline_at, q.close_at, q.time_limit_minutes
-            FROM course_items ci
-            JOIN quizzes q ON q.item_id = ci.id
-            WHERE ci.type = 'quiz'
-            ORDER BY ci.course_id, ci.position
-        LOOP
-            SELECT lesson.id INTO target_lesson_id
-            FROM course_items lesson
-            LEFT JOIN quizzes existing_quiz ON existing_quiz.item_id = lesson.id
-            WHERE lesson.course_id = quiz_item.course_id
-              AND lesson.type = 'lesson'
-              AND lesson.position < quiz_item.position
-              AND existing_quiz.item_id IS NULL
-            ORDER BY lesson.position DESC
-            LIMIT 1;
-
-            IF target_lesson_id IS NOT NULL THEN
-                INSERT INTO quizzes (item_id, max_score, weight_pct, open_at, deadline_at, close_at, time_limit_minutes)
-                VALUES (
-                    target_lesson_id,
-                    quiz_item.max_score,
-                    quiz_item.weight_pct,
-                    quiz_item.open_at,
-                    quiz_item.deadline_at,
-                    quiz_item.close_at,
-                    quiz_item.time_limit_minutes
-                )
-                ON CONFLICT (item_id) DO NOTHING;
-
-                INSERT INTO item_group_access (item_id, group_id, opened_at)
-                SELECT target_lesson_id, group_id, opened_at
-                FROM item_group_access
-                WHERE item_id = quiz_item.id
-                ON CONFLICT DO NOTHING;
-
-                INSERT INTO item_student_access (item_id, student_id, opened_at)
-                SELECT target_lesson_id, student_id, opened_at
-                FROM item_student_access
-                WHERE item_id = quiz_item.id
-                ON CONFLICT DO NOTHING;
-
-                UPDATE quiz_questions SET quiz_id = target_lesson_id WHERE quiz_id = quiz_item.id;
-                UPDATE quiz_attempts SET quiz_id = target_lesson_id WHERE quiz_id = quiz_item.id;
-                UPDATE quiz_starts SET quiz_id = target_lesson_id WHERE quiz_id = quiz_item.id;
-
-                DELETE FROM quizzes WHERE item_id = quiz_item.id;
-                DELETE FROM course_items WHERE id = quiz_item.id;
-                UPDATE course_items
-                SET position = position - 1
-                WHERE course_id = quiz_item.course_id AND position > quiz_item.position;
-            END IF;
-        END LOOP;
-    END $$;
-    """,
 ]
 
 
@@ -458,6 +401,10 @@ ENT_MIGRATIONS = [
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS extra_time_minutes INTEGER NOT NULL DEFAULT 0 CHECK (extra_time_minutes IN (0,40))",
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS camera_required BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS allow_retake BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS max_attempts INTEGER NOT NULL DEFAULT 1 CHECK (max_attempts BETWEEN 1 AND 100)",
+    """UPDATE ent_trial_accesses a SET max_attempts=GREATEST(3,(
+        SELECT COUNT(*)::int FROM ent_trial_attempts t WHERE t.access_id=a.id
+    )),allow_retake=FALSE WHERE a.allow_retake=TRUE""",
     "ALTER TABLE ent_trial_attempts DROP CONSTRAINT IF EXISTS ent_trial_attempts_access_id_student_id_key",
     "CREATE INDEX IF NOT EXISTS idx_ent_attempts_access_student ON ent_trial_attempts(access_id,student_id,id DESC)",
     "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS difficulty TEXT",

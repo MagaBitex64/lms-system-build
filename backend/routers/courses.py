@@ -85,6 +85,7 @@ async def list_catalog(
                u.full_name AS teacher_name,
                (SELECT COUNT(*) FROM course_items ci WHERE ci.course_id = c.id AND ci.is_visible) AS item_count,
                (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id AND e.status = 'approved') AS student_count,
+               (SELECT e.status FROM enrollments e WHERE e.course_id = c.id AND e.student_id = $5) AS enrollment_status,
                COUNT(*) OVER() AS total
         FROM courses c JOIN users u ON u.id = c.teacher_id
         WHERE c.is_published AND ($1 = '' OR c.title ILIKE $2 OR c.description ILIKE $2)
@@ -95,6 +96,7 @@ async def list_catalog(
         like,
         per_page,
         offset,
+        user["id"],
     )
     total = rows[0]["total"] if rows else 0
     items = []
@@ -103,10 +105,9 @@ async def list_catalog(
         d.pop("total")
         d["created_at"] = str(d["created_at"])
         if user["role"] == "student":
-            e = await pool.fetchrow(
-                "SELECT status FROM enrollments WHERE course_id = $1 AND student_id = $2", r["id"], user["id"]
-            )
-            d["enrollment_status"] = e["status"] if e else None
+            d["enrollment_status"] = r["enrollment_status"]
+        else:
+            d.pop("enrollment_status", None)
         items.append(d)
     return {"items": items, "total": total, "page": page, "per_page": per_page}
 
@@ -397,21 +398,27 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
             """,
             course_id,
         )
+        student_ids = [student["id"] for student in student_rows]
+        group_membership_rows = await pool.fetch(
+            """
+            SELECT gs.student_id, g.id, g.code
+            FROM group_students gs
+            JOIN groups g ON g.id = gs.group_id
+            JOIN course_groups cg ON cg.group_id = g.id AND cg.course_id = $1
+            WHERE gs.student_id = ANY($2::bigint[])
+            ORDER BY gs.student_id, g.code
+            """,
+            course_id,
+            student_ids,
+        ) if student_ids else []
+        groups_by_student: dict[int, list[dict]] = {}
+        for group in group_membership_rows:
+            groups_by_student.setdefault(group["student_id"], []).append(
+                {"id": group["id"], "code": group["code"]}
+            )
         students = []
         for student in student_rows:
-            student_groups = await pool.fetch(
-                """
-                SELECT g.id, g.code
-                FROM group_students gs
-                JOIN groups g ON g.id = gs.group_id
-                JOIN course_groups cg ON cg.group_id = g.id AND cg.course_id = $1
-                WHERE gs.student_id = $2
-                ORDER BY g.code
-                """,
-                course_id,
-                student["id"],
-            )
-            students.append(dict(student) | {"groups": [dict(g) for g in student_groups]})
+            students.append(dict(student) | {"groups": groups_by_student.get(student["id"], [])})
 
     return {
         "id": course["id"],
@@ -626,11 +633,21 @@ async def get_lesson(item_id: int, user: dict = Depends(get_current_user)):
         if is_owner:
             quiz_started = True
         if is_owner or quiz_started:
+            question_ids = [q["id"] for q in raw_questions]
+            option_rows = await pool.fetch(
+                """
+                SELECT id, question_id, text, image_file_id, is_correct, position
+                FROM question_options
+                WHERE question_id = ANY($1::bigint[])
+                ORDER BY question_id, position
+                """,
+                question_ids,
+            ) if question_ids else []
+            options_by_question: dict[int, list] = {}
+            for option in option_rows:
+                options_by_question.setdefault(option["question_id"], []).append(option)
             for q in raw_questions:
-                opts = await pool.fetch(
-                    "SELECT id, text, image_file_id, is_correct, position FROM question_options WHERE question_id = $1 ORDER BY position",
-                    q["id"],
-                )
+                opts = options_by_question.get(q["id"], [])
                 qd = {
                     "id": q["id"],
                     "type": q["type"],
@@ -710,12 +727,21 @@ async def add_material(item_id: int, data: MaterialIn, user: dict = Depends(requ
     if data.kind == "link" and not data.url:
         raise HTTPException(status_code=422, detail="url required for link materials")
     pool = await get_pool()
+    if data.kind == "file":
+        file_exists = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM files WHERE id = $1 AND (owner_id = $2 OR $3))",
+            data.file_id,
+            user["id"],
+            user["role"] == "admin",
+        )
+        if not file_exists:
+            raise HTTPException(status_code=422, detail="File must belong to the current teacher")
     row = await pool.fetchrow(
         "INSERT INTO lesson_materials (lesson_id, kind, file_id, url, label) VALUES ($1,$2,$3,$4,$5) RETURNING id",
         item_id,
         data.kind,
-        data.file_id,
-        data.url.strip(),
+        data.file_id if data.kind == "file" else None,
+        data.url.strip() if data.kind == "link" else "",
         data.label.strip(),
     )
     return {"id": row["id"]}

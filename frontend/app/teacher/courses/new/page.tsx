@@ -55,7 +55,7 @@ export default function NewCoursePage() {
           <Field label={t('announcement')}>
             <Textarea value={announcement} onChange={(e) => setAnnouncement(e.target.value)} rows={3} placeholder={t('announcement')} />
           </Field>
-          <Field label="Курс пәні" hint="Курстағы тапсырмалар мен пробный ҰБТ осы пәнге байланады.">
+          <Field label="Курс пәні" hint="Курстағы тапсырмалар мен сынақ ҰБТ осы пәнге байланады.">
             <Select value={entSubject} onChange={(event) => setEntSubject(event.target.value)} required>
               <option value="">Пәнді таңдаңыз</option>
               {Object.entries(SUBJECT_NAMES).map(([key, label]) => <option key={key} value={key}>{label}</option>)}

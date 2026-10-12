@@ -21,7 +21,8 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
-import { api, downloadFile, getFileUrl, ApiError } from '@/lib/api'
+import { api, downloadApiFile, downloadFile, getFileUrl, ApiError } from '@/lib/api'
+import LatexText from '@/components/latex-text'
 import {
   Badge,
   Button,
@@ -78,6 +79,7 @@ type QuizAttempt = {
 type ItemDetail = {
   type?: ItemType
   is_owner?: boolean
+  course_subject?: string | null
   item: { id: number; title: string; note?: string; course_id: number }
   content?: string
   youtube_url?: string
@@ -90,6 +92,8 @@ type ItemDetail = {
   deadline_at?: string | null
   close_at?: string | null
   time_limit_minutes?: number | null
+  shuffle_questions?: boolean
+  shuffle_options?: boolean
   max_score?: number
   weight_pct?: number
   total_points?: number
@@ -153,6 +157,16 @@ function questionLabel(type: QuestionType, t: (key: TKey) => string) {
   if (type === 'multiple') return t('multipleChoice')
   if (type === 'short_text') return t('shortText')
   return t('longText')
+}
+
+const QUIZ_LATEX_SUBJECTS = new Set(['mathematics', 'math_literacy'])
+
+function quizUsesLatex(data: ItemDetail) {
+  return !!data.course_subject && QUIZ_LATEX_SUBJECTS.has(data.course_subject)
+}
+
+function QuizText({ text, enabled, className }: { text: string; enabled: boolean; className?: string }) {
+  return enabled ? <LatexText text={text} className={className} /> : <div className={className}>{text}</div>
 }
 
 function inferType(data: ItemDetail): ItemType {
@@ -516,6 +530,7 @@ function QuizEditor({ data, reload }: { data: ItemDetail; reload: () => Promise<
   return (
     <div className="space-y-6">
       <QuizSettings data={data} reload={reload} />
+      <QuizWordTools data={data} reload={reload} />
       <QuestionBuilder data={data} reload={reload} />
       <QuizAttemptsPanel itemId={data.item.id} />
     </div>
@@ -530,6 +545,8 @@ function QuizSettings({ data, reload }: { data: ItemDetail; reload: () => Promis
   const [deadlineAt, setDeadlineAt] = useState(toDateInput(data.deadline_at))
   const [closeAt, setCloseAt] = useState(toDateInput(data.close_at))
   const [timeLimit, setTimeLimit] = useState(data.time_limit_minutes ? String(data.time_limit_minutes) : '')
+  const [shuffleQuestions, setShuffleQuestions] = useState(data.shuffle_questions ?? true)
+  const [shuffleOptions, setShuffleOptions] = useState(data.shuffle_options ?? true)
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
 
@@ -540,6 +557,8 @@ function QuizSettings({ data, reload }: { data: ItemDetail; reload: () => Promis
     setDeadlineAt(toDateInput(data.deadline_at))
     setCloseAt(toDateInput(data.close_at))
     setTimeLimit(data.time_limit_minutes ? String(data.time_limit_minutes) : '')
+    setShuffleQuestions(data.shuffle_questions ?? true)
+    setShuffleOptions(data.shuffle_options ?? true)
   }, [data])
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
@@ -556,6 +575,8 @@ function QuizSettings({ data, reload }: { data: ItemDetail; reload: () => Promis
           deadline_at: fromDateInput(deadlineAt),
           close_at: fromDateInput(closeAt),
           time_limit_minutes: timeLimit ? Number(timeLimit) : null,
+          shuffle_questions: shuffleQuestions,
+          shuffle_options: shuffleOptions,
         },
       })
       await reload()
@@ -572,6 +593,16 @@ function QuizSettings({ data, reload }: { data: ItemDetail; reload: () => Promis
         <div className="flex items-center gap-2">
           <ListChecks size={18} className="text-primary" />
           <h2 className="text-base font-semibold">{t('settings')}</h2>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="flex items-start gap-3 rounded-lg border border-border bg-surface-muted p-3 text-sm">
+            <input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} />
+            <span><strong className="block">Сұрақтарды араластыру</strong><span className="text-muted">Әр оқушыға сұрақтардың реті бөлек көрсетіледі.</span></span>
+          </label>
+          <label className="flex items-start gap-3 rounded-lg border border-border bg-surface-muted p-3 text-sm">
+            <input type="checkbox" checked={shuffleOptions} onChange={(event) => setShuffleOptions(event.target.checked)} />
+            <span><strong className="block">Жауаптарды араластыру</strong><span className="text-muted">Жауап нұсқалары әр оқушыға басқа ретпен көрсетіледі.</span></span>
+          </label>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Field label={t('maxScore')}>
@@ -603,6 +634,141 @@ function QuizSettings({ data, reload }: { data: ItemDetail; reload: () => Promis
   )
 }
 
+type ImportedQuestion = {
+  prompt: string
+  options: Array<{ text: string; is_correct: boolean }>
+  image_data_url?: string | null
+}
+
+function QuizWordTools({ data, reload }: { data: ItemDetail; reload: () => Promise<unknown> }) {
+  const [file, setFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<ImportedQuestion[]>([])
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const latexEnabled = quizUsesLatex(data)
+
+  async function previewImport() {
+    if (!file) return
+    setWorking(true)
+    setError(null)
+    setMessage(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const result = await api<{ questions: ImportedQuestion[]; count: number }>(
+        `/quizzes/${data.item.id}/import-docx?preview=true`,
+        { formData },
+      )
+      setPreview(result.questions)
+      setMessage(`${result.count} сұрақ табылды. Тексеріп, импортты растаңыз.`)
+    } catch (err) {
+      setPreview([])
+      setError((err as Error).message)
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  async function confirmImport() {
+    if (!file || preview.length === 0) return
+    setWorking(true)
+    setError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const result = await api<{ imported: number }>(`/quizzes/${data.item.id}/import-docx?preview=false`, { formData })
+      setMessage(`${result.imported} сұрақ сәтті импортталды.`)
+      setPreview([])
+      setFile(null)
+      await reload()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  async function exportWord() {
+    setWorking(true)
+    setError(null)
+    try {
+      await downloadApiFile(`/quizzes/${data.item.id}/export-docx`, `${data.item.title}.docx`)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <Card className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold">Word арқылы импорт және экспорт</h2>
+          <p className="mt-1 text-sm text-muted">
+            Формат: &lt;question&gt;, &lt;variant_correct&gt;, &lt;variant&gt;. Импорт алдында сұрақтар тексеруге көрсетіледі.
+          </p>
+        </div>
+        <Button type="button" variant="outline" onClick={exportWord} disabled={working}>
+          <Download size={16} /> Word-қа экспорттау
+        </Button>
+      </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <input
+          type="file"
+          accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          onChange={(event) => {
+            setFile(event.target.files?.[0] ?? null)
+            setPreview([])
+            setMessage(null)
+            setError(null)
+          }}
+          className="block flex-1 text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-primary-soft file:px-3 file:py-2 file:text-sm file:font-medium file:text-primary"
+        />
+        <Button type="button" variant="outline" onClick={previewImport} disabled={!file || working}>
+          <Upload size={16} /> Word-тан импорттау
+        </Button>
+      </div>
+      {message && <p className="text-sm font-medium text-success">{message}</p>}
+      {error && <ErrorState message={error} />}
+      {preview.length > 0 && (
+        <div className="space-y-3 rounded-xl border border-border bg-surface-muted p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="font-semibold">Алдын ала қарау · {preview.length} сұрақ</h3>
+            <Button type="button" onClick={confirmImport} disabled={working}>Импортты растау</Button>
+          </div>
+          <div className="max-h-96 space-y-3 overflow-auto pr-1">
+            {preview.map((question, index) => (
+              <div key={index} className="rounded-lg border border-border bg-surface p-3">
+                <div className="flex items-start gap-1 text-sm font-semibold">
+                  <span>{index + 1}.</span>
+                  <QuizText text={question.prompt} enabled={latexEnabled} />
+                </div>
+                {question.image_data_url && (
+                  <img
+                    src={question.image_data_url}
+                    alt={`Сұрақ ${index + 1}`}
+                    className="mt-3 max-h-64 max-w-full rounded-lg border border-border bg-white object-contain"
+                  />
+                )}
+                <div className="mt-2 space-y-1">
+                  {question.options.map((option, optionIndex) => (
+                    <div key={optionIndex} className={option.is_correct ? 'flex gap-1 text-sm font-medium text-success' : 'flex gap-1 text-sm text-muted'}>
+                      <span>{option.is_correct ? '✓' : '○'}</span>
+                      <QuizText text={option.text} enabled={latexEnabled} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Promise<unknown> }) {
   const { t } = useI18n()
   const [type, setType] = useState<QuestionType>('single')
@@ -619,6 +785,7 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
   const [imagePreview, setImagePreview] = useState<string | null>(null)
 
   const isChoice = type === 'single' || type === 'multiple'
+  const latexEnabled = quizUsesLatex(data)
 
   async function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
     const items = event.clipboardData?.items
@@ -868,7 +1035,7 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
                       <Badge tone="primary">{questionLabel(q.type, t)}</Badge>
                       <Badge tone="neutral">{q.points} {t('points')}</Badge>
                     </div>
-                    <p className="mt-2 whitespace-pre-line text-sm font-medium text-foreground">{q.prompt}</p>
+                    <QuizText text={q.prompt} enabled={latexEnabled} className="mt-2 text-sm font-medium text-foreground" />
                   </div>
                   <Button variant="danger" size="sm" onClick={() => deleteQuestion(q.id)} aria-label={t('delete')}>
                     <Trash2 size={14} />
@@ -880,14 +1047,14 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
                       <div key={o.id} className="flex items-center gap-2 rounded-md bg-surface px-3 py-2 text-sm">
                         {o.is_correct ? <CheckCircle2 size={14} className="text-success" /> : <span className="size-3 rounded-full border border-border" />}
                         <div className="min-w-0">
-                          {o.text && <span>{o.text}</span>}
+                          {o.text && <QuizText text={o.text} enabled={latexEnabled} />}
                           {o.image_file_id && <img src={getFileUrl(o.image_file_id)} alt={o.text || 'Вариант ответа'} className="mt-2 max-h-40 rounded-md border border-border" />}
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
-                {q.explanation && <p className="mt-3 text-xs text-muted">{t('explanation')}: {q.explanation}</p>}
+                {q.explanation && <div className="mt-3 text-xs text-muted"><span className="font-medium">{t('explanation')}:</span><QuizText text={q.explanation} enabled={latexEnabled} /></div>}
               </div>
             ))}
           </div>
@@ -909,6 +1076,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
   const questions = data.questions ?? []
   const notOpen = isBefore(data.open_at)
   const closed = isAfter(data.close_at)
+  const latexEnabled = quizUsesLatex(data)
 
   useEffect(() => {
     if (!data.time_limit_minutes || data.attempt || !data.quiz_started) return
@@ -998,7 +1166,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                     {answer?.awarded_points ?? t('pendingReview')} / {q.points}
                   </Badge>
                 </div>
-                <p className="mt-3 whitespace-pre-line text-sm font-medium">{q.prompt}</p>
+                <QuizText text={q.prompt} enabled={latexEnabled} className="mt-3 text-sm font-medium" />
                 {q.options.length > 0 && (
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     {q.options.map((option) => {
@@ -1007,7 +1175,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                         <div key={option.id} className="flex items-center gap-2 rounded-md bg-surface px-3 py-2 text-sm">
                           {option.is_correct ? <CheckCircle2 size={14} className="text-success" /> : <span className="size-3 rounded-full border border-border" />}
                           <div className={selected ? 'font-semibold text-foreground' : 'text-muted'}>
-                            {option.text && <span>{option.text}</span>}
+                            {option.text && <QuizText text={option.text} enabled={latexEnabled} />}
                             {option.image_file_id && <img src={getFileUrl(option.image_file_id)} alt={option.text || 'Вариант ответа'} className="mt-2 max-h-40 rounded-md border border-border" />}
                           </div>
                         </div>
@@ -1016,7 +1184,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                   </div>
                 )}
                 {answer?.text_answer && <p className="mt-3 whitespace-pre-line text-sm text-muted">{t('yourAnswer')}: {answer.text_answer}</p>}
-                {q.explanation && <p className="mt-3 text-xs text-muted">{t('explanation')}: {q.explanation}</p>}
+                {q.explanation && <div className="mt-3 text-xs text-muted"><span className="font-medium">{t('explanation')}:</span><QuizText text={q.explanation} enabled={latexEnabled} /></div>}
               </div>
             )
           })}
@@ -1070,7 +1238,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                   <Badge tone="primary">{questionLabel(q.type, t)}</Badge>
                   <Badge tone="neutral">{q.points} {t('points')}</Badge>
                 </div>
-                <p className="mt-3 whitespace-pre-line text-sm font-medium">{q.prompt}</p>
+                <QuizText text={q.prompt} enabled={latexEnabled} className="mt-3 text-sm font-medium" />
                 {q.image_file_id && (
                   <div className="mt-3">
                     <img
@@ -1091,7 +1259,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                           onChange={(e) => setChoice(q, option.id, e.target.checked)}
                         />
                         <div className="min-w-0">
-                          {option.text && <span>{option.text}</span>}
+                          {option.text && <QuizText text={option.text} enabled={latexEnabled} />}
                           {option.image_file_id && <img src={getFileUrl(option.image_file_id)} alt={option.text || 'Вариант ответа'} className="mt-2 max-h-56 max-w-full rounded-md border border-border" />}
                         </div>
                       </label>
@@ -1149,6 +1317,7 @@ type AttemptDetail = {
   auto_score: number
   manual_score: number | null
   status: string
+  course_subject?: string | null
   answers: Array<{
     id: number
     question_id: number
@@ -1230,6 +1399,7 @@ function QuizAttemptsPanel({ itemId }: { itemId: number }) {
 
 function AttemptReview({ detail, refresh }: { detail: AttemptDetail; refresh: () => Promise<unknown> }) {
   const { t } = useI18n()
+  const latexEnabled = !!detail.course_subject && QUIZ_LATEX_SUBJECTS.has(detail.course_subject)
   return (
     <div className="space-y-3">
       <div className="rounded-lg border border-border bg-surface-muted px-4 py-3">
@@ -1239,7 +1409,7 @@ function AttemptReview({ detail, refresh }: { detail: AttemptDetail; refresh: ()
       {detail.answers.map((answer) => (
         <div key={answer.id} className="rounded-lg border border-border bg-surface-muted p-4">
           <Badge tone="primary">{questionLabel(answer.type, t)}</Badge>
-          <p className="mt-2 whitespace-pre-line text-sm font-medium">{answer.prompt}</p>
+          <QuizText text={answer.prompt} enabled={latexEnabled} className="mt-2 text-sm font-medium" />
           {answer.text_answer && <p className="mt-3 whitespace-pre-line rounded-md bg-surface p-3 text-sm text-muted">{answer.text_answer}</p>}
           {answer.selected_option_ids.length > 0 && (
             <p className="mt-2 text-xs text-muted">{t('yourAnswer')}: {answer.selected_option_ids.join(', ')}</p>

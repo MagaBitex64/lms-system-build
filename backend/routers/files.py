@@ -10,9 +10,8 @@ router = APIRouter(prefix="/files", tags=["files"])
 
 @router.post("/upload")
 async def upload_file(file: UploadFile, user: dict = Depends(get_current_user)):
-    content = await file.read()
     try:
-        stored_name, mime = storage.save(file.filename or "file", content)
+        stored_name, mime, size = await storage.save_upload(file.filename or "file", file)
     except FileValidationError as e:
         raise HTTPException(status_code=422, detail=str(e))
     pool = await get_pool()
@@ -26,7 +25,7 @@ async def upload_file(file: UploadFile, user: dict = Depends(get_current_user)):
         file.filename or "file",
         stored_name,
         mime,
-        len(content),
+        size,
     )
     return dict(row) | {"created_at": str(row["created_at"])}
 

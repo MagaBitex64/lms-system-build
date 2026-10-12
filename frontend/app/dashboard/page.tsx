@@ -61,13 +61,13 @@ export default function DashboardPage() {
     return (
       <div className="space-y-8 max-w-7xl mx-auto">
         {/* Welcome Section */}
-        <div className="bg-gradient-to-r from-primary-soft via-primary-extra-light to-surface rounded-3xl border border-primary/10 p-8 md:p-10">
+        <div className="bg-gradient-to-r from-primary-soft via-primary-extra-light to-surface rounded-3xl border border-primary/10 px-6 py-5 md:px-8 md:py-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div>
-              <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-2">
+              <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
                 {t('welcomeBack')}, {firstName}!
               </h1>
-              <p className="text-base md:text-lg text-muted max-w-lg">
+              <p className="text-sm md:text-base text-muted max-w-lg">
                 {t('continueLearning')}. Өтіңіз немесе жаңа материалды ашыңыз.
               </p>
             </div>
@@ -138,13 +138,13 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
       {/* Welcome Section */}
-      <div className="bg-gradient-to-r from-primary-soft via-primary-extra-light to-surface rounded-3xl border border-primary/10 p-8 md:p-10">
+      <div className="bg-gradient-to-r from-primary-soft via-primary-extra-light to-surface rounded-3xl border border-primary/10 px-6 py-5 md:px-8 md:py-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-2">
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
               {t('welcomeBack')}, {firstName}!
             </h1>
-            <p className="text-base md:text-lg text-muted max-w-lg">
+            <p className="text-sm md:text-base text-muted max-w-lg">
               Курстарыңызды басқарыңыз, оқушыларыңызды қадағалаңыз және оқу материалдарын ұйымдастырыңыз.
             </p>
           </div>
@@ -169,7 +169,7 @@ export default function DashboardPage() {
       <section className="space-y-4">
         <div>
           <h2 className="text-lg font-semibold text-foreground mb-1">{t('statistics')}</h2>
-          <p className="text-sm text-muted">Сіздің платформасының түлік көрсеткіші</p>
+          <p className="text-sm text-muted">Платформаңыздың негізгі көрсеткіштері</p>
         </div>
         
         {isAdmin && stats.data ? (
@@ -191,11 +191,11 @@ export default function DashboardPage() {
       {/* Quick Actions for Admin */}
       {isAdmin && (
         <section className="space-y-4">
-          <h2 className="text-lg font-semibold text-foreground">Түйінді шолу</h2>
+          <h2 className="text-lg font-semibold text-foreground">{t('quickActions')}</h2>
           <div className="grid gap-4 sm:grid-cols-3">
             <QuickLink href="/admin" icon={<BarChart3 size={20} />} title={t('statistics')} desc="Барлық метрикалар және есептеулер" />
             <QuickLink href="/admin/users" icon={<Users size={20} />} title={t('users')} desc="Пайдаланушыларды басқару" />
-            <QuickLink href="/teacher" icon={<GraduationCap size={20} />} title={t('myCourses')} desc="Курстарды ауытқылау" />
+            <QuickLink href="/teacher" icon={<GraduationCap size={20} />} title={t('myCourses')} desc="Курстарды басқару" />
           </div>
         </section>
       )}
@@ -258,9 +258,9 @@ function QuickLink({
   desc: string 
 }) {
   return (
-    <Link href={href} className="group">
-      <Card interactive className="flex items-center gap-4 p-6">
-        <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary group-hover:text-primary-hover transition-colors">
+    <Link href={href} className="group min-w-0">
+      <Card interactive className="flex items-center gap-4 p-5">
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary group-hover:text-primary-hover transition-colors">
           {icon}
         </div>
         <div className="min-w-0 flex-1">

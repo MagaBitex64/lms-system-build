@@ -68,7 +68,7 @@ export default function TeacherEntVariantPage() {
 
   if (courseLoading || variantsLoading) return <Spinner className="mt-20" />
   if (courseError || variantsError) return <ErrorState message={(courseError || variantsError)?.message ?? 'Деректерді жүктеу мүмкін болмады'} />
-  if (!course?.is_owner || !variant) return <ErrorState message="Вариант табылмады немесе оны редакциялауға рұқсат жоқ." />
+  if (!course?.is_owner || !variant) return <ErrorState message="Нұсқа табылмады немесе оны өңдеуге рұқсат жоқ." />
 
   return <div className="space-y-7">
     <Button asChild variant="ghost" size="sm" className="-ml-2">
@@ -76,19 +76,19 @@ export default function TeacherEntVariantPage() {
     </Button>
 
     <PageHeader
-      eyebrow="Пәндік пробный ҰБТ"
+      eyebrow="Пәндік сынақ ҰБТ"
       title={variant.title}
-      description="Варианттың атауын, ортақ контекстерін және сұрақтарын осы жеке бетте редакциялаңыз."
+      description="Нұсқаның атауын, ортақ контекстерін және сұрақтарын осы жеке бетте өңдеңіз."
       actions={<div className="flex flex-wrap gap-2">
         <Badge tone="primary">{SUBJECT_NAMES[variant.single_subject] ?? variant.single_subject}</Badge>
-        <Badge tone={variant.ready ? 'success' : 'warning'}>{variant.ready ? 'Дайын' : 'Жоба'}</Badge>
+        <Badge tone={variant.ready ? 'success' : 'warning'}>{variant.ready ? 'Дайын' : 'Толықтыру қажет'}</Badge>
       </div>}
     />
 
     <Card>
       <form onSubmit={updateVariant} className="space-y-4">
         <div>
-          <h2 className="font-semibold">Вариант туралы</h2>
+          <h2 className="font-semibold">Нұсқа туралы</h2>
           <p className="mt-1 text-sm text-muted">Пән курстан автоматты түрде алынады және бұл жерде өзгертілмейді.</p>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
@@ -98,7 +98,7 @@ export default function TeacherEntVariantPage() {
         {message && <ErrorState message={message} />}
         <div className="flex items-center gap-3">
           <Button type="submit" disabled={busy || !title.trim()}>{busy ? 'Сақталуда…' : 'Өзгерістерді сақтау'}</Button>
-          {saved && <span className="inline-flex items-center gap-1 text-sm text-success"><CheckCircle2 size={16} /> Сақталды</span>}
+          {saved && <span className="inline-flex items-center gap-1 text-sm text-success-foreground"><CheckCircle2 size={16} /> Сақталды</span>}
         </div>
       </form>
     </Card>

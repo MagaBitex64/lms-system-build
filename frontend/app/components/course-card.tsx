@@ -27,25 +27,25 @@ export function CourseCard({ course }: { course: CourseSummary }) {
   const status = course.enrollment_status ?? undefined
 
   return (
-    <Link href={`/courses/${course.id}`} className="group block">
+    <Link href={`/courses/${course.id}`} className="group block h-full">
       <div className="flex h-full flex-col rounded-2xl border border-border bg-surface shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
-        <div className="flex items-start justify-between gap-3 border-b border-border p-5">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
+        <div className="flex items-start justify-between gap-3 px-5 pb-3 pt-4">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
             <BookOpen size={20} />
           </div>
           <div className="flex flex-wrap justify-end gap-1.5">
             {status && (
               <Badge tone={ENROLLMENT_TONE[status] ?? 'neutral'}>{t(status as TKey)}</Badge>
             )}
-            <Badge tone={course.is_published ? 'primary' : 'neutral'}>
+            <Badge tone={course.is_published ? 'success' : 'neutral'}>
               {course.is_published ? t('published') : t('draft')}
             </Badge>
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col gap-3 p-5">
+        <div className="flex flex-1 flex-col gap-3 px-5 pb-3">
           <div className="space-y-1.5">
-            <h3 className="text-base font-semibold text-foreground text-pretty group-hover:text-primary">
+            <h3 className="break-words text-base font-semibold text-foreground text-pretty group-hover:text-primary">
               {course.title}
             </h3>
             <p className="line-clamp-2 text-sm leading-relaxed text-muted">
@@ -71,7 +71,7 @@ export function CourseCard({ course }: { course: CourseSummary }) {
           </div>
         </div>
 
-        <div className="border-t border-border p-4">
+        <div className="px-4 pb-3">
           <Button
             variant="ghost"
             size="sm"

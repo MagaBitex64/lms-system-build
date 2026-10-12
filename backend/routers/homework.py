@@ -168,15 +168,24 @@ async def list_submissions(item_id: int, user: dict = Depends(require_teacher)):
         item_id,
     )
     hw = await pool.fetchrow("SELECT deadline_at, max_score FROM homework WHERE item_id = $1", item_id)
+    submission_ids = [row["id"] for row in rows]
+    file_rows = await pool.fetch(
+        """
+        SELECT sf.submission_id, f.id, f.original_name, f.mime, f.size
+        FROM submission_files sf
+        JOIN files f ON f.id = sf.file_id
+        WHERE sf.submission_id = ANY($1::bigint[])
+        ORDER BY sf.submission_id, f.id
+        """,
+        submission_ids,
+    ) if submission_ids else []
+    files_by_submission: dict[int, list[dict]] = {}
+    for file_row in file_rows:
+        files_by_submission.setdefault(file_row["submission_id"], []).append(
+            {key: file_row[key] for key in ("id", "original_name", "mime", "size")}
+        )
     out = []
     for r in rows:
-        files = await pool.fetch(
-            """
-            SELECT f.id, f.original_name, f.mime, f.size FROM submission_files sf
-            JOIN files f ON f.id = sf.file_id WHERE sf.submission_id = $1
-            """,
-            r["id"],
-        )
         out.append(
             {
                 "id": r["id"],
@@ -189,7 +198,7 @@ async def list_submissions(item_id: int, user: dict = Depends(require_teacher)):
                 "feedback": r["feedback"],
                 "status": r["status"],
                 "late": bool(hw["deadline_at"] and r["submitted_at"] > hw["deadline_at"]),
-                "files": [dict(f) for f in files],
+                "files": files_by_submission.get(r["id"], []),
             }
         )
     return {"submissions": out, "max_score": hw["max_score"]}
