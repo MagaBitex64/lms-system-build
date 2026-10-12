@@ -223,6 +223,23 @@ async def add_question(item_id: int, data: QuestionIn, user: dict = Depends(requ
         if any(not o.text.strip() and o.image_file_id is None for o in data.options):
             raise HTTPException(status_code=422, detail="Each option needs text or an image")
     pool = await get_pool()
+    image_file_ids = {
+        file_id
+        for file_id in [data.image_file_id, *(option.image_file_id for option in data.options)]
+        if file_id is not None
+    }
+    if image_file_ids:
+        owned_image_count = await pool.fetchval(
+            """
+            SELECT COUNT(*) FROM files
+            WHERE id = ANY($1::bigint[]) AND (owner_id = $2 OR $3) AND mime LIKE 'image/%'
+            """,
+            list(image_file_ids),
+            user["id"],
+            user["role"] == "admin",
+        )
+        if owned_image_count != len(image_file_ids):
+            raise HTTPException(status_code=422, detail="Question images must belong to the current teacher")
     await ensure_quiz_row(pool, item_id)
     if await pool.fetchval("SELECT EXISTS(SELECT 1 FROM quiz_attempts WHERE quiz_id=$1)", item_id):
         raise HTTPException(
@@ -272,9 +289,18 @@ async def import_questions_docx(
         raise HTTPException(status_code=404, detail="Бұл элементке тест қосуға болмайды")
     if not (file.filename or "").lower().endswith(".docx"):
         raise HTTPException(status_code=422, detail="Тек .docx Word файлын жүктеңіз")
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Word файлы 10 МБ-тан аспауы керек")
+    chunks: list[bytes] = []
+    content_size = 0
+    while chunk := await file.read(1024 * 1024):
+        content_size += len(chunk)
+        if content_size > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Word файлы 10 МБ-тан аспауы керек")
+        chunks.append(chunk)
+    content = b"".join(chunks)
+    try:
+        storage.validate_content(file.filename or "questions.docx", content)
+    except FileValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     questions = parse_docx_questions(content)
     if preview:
         preview_questions = []
@@ -439,11 +465,21 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
         )
 
     out_questions = []
+    question_ids = [q["id"] for q in questions]
+    option_rows = await pool.fetch(
+        """
+        SELECT id, question_id, text, image_file_id, is_correct, position
+        FROM question_options
+        WHERE question_id = ANY($1::bigint[])
+        ORDER BY question_id, position
+        """,
+        question_ids,
+    ) if question_ids else []
+    options_by_question: dict[int, list] = {}
+    for option in option_rows:
+        options_by_question.setdefault(option["question_id"], []).append(option)
     for q in questions:
-        opts = await pool.fetch(
-            "SELECT id, text, image_file_id, is_correct, position FROM question_options WHERE question_id = $1 ORDER BY position",
-            q["id"],
-        )
+        opts = options_by_question.get(q["id"], [])
         option_values = [dict(o) for o in opts]
         if user["role"] == "student" and quiz["shuffle_options"]:
             option_values = stable_shuffle(option_values, f'{item_id}:{user["id"]}:options:{q["id"]}')

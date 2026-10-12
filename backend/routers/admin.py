@@ -466,20 +466,29 @@ async def teacher_profile(teacher_id: int, user: dict = Depends(require_admin)):
         """,
         teacher_id,
     )
-    course_items = []
-    for c in courses:
-        groups = await pool.fetch(
-            """
-            SELECT g.id, g.code, g.title, g.direction,
-                   (SELECT COUNT(*) FROM group_students gs WHERE gs.group_id = g.id) AS student_count
-            FROM course_groups cg
-            JOIN groups g ON g.id = cg.group_id
-            WHERE cg.course_id = $1
-            ORDER BY g.code
-            """,
-            c["id"],
+    course_ids = [course["id"] for course in courses]
+    group_rows = await pool.fetch(
+        """
+        SELECT cg.course_id, g.id, g.code, g.title, g.direction,
+               COUNT(gs.student_id) AS student_count
+        FROM course_groups cg
+        JOIN groups g ON g.id = cg.group_id
+        LEFT JOIN group_students gs ON gs.group_id = g.id
+        WHERE cg.course_id = ANY($1::bigint[])
+        GROUP BY cg.course_id, g.id
+        ORDER BY cg.course_id, g.code
+        """,
+        course_ids,
+    ) if course_ids else []
+    groups_by_course: dict[int, list[dict]] = {}
+    for group in group_rows:
+        groups_by_course.setdefault(group["course_id"], []).append(
+            {key: group[key] for key in ("id", "code", "title", "direction", "student_count")}
         )
-        course_items.append(dict(c) | {"groups": [dict(g) for g in groups]})
+    course_items = [
+        dict(course) | {"groups": groups_by_course.get(course["id"], [])}
+        for course in courses
+    ]
     active_students = await pool.fetchval(
         """
         SELECT COUNT(DISTINCT e.student_id) FROM enrollments e
