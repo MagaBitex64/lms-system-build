@@ -7,11 +7,13 @@ import { api } from '@/lib/api'
 import {
   ArrowRight, Atom, BarChart3, BookOpen, Check,
   ChevronDown, ChevronLeft, ChevronRight, Clock3, ExternalLink, FlaskConical, GraduationCap, History, Laptop,
-  MapPin, Menu, MonitorPlay, Quote, School,
-  Trophy, UserRound, UsersRound, Calculator, Leaf, X,
+  MapPin, Menu, MonitorPlay, Quote, ClipboardCheck, ClipboardList,
+  Trophy, UsersRound, Calculator, Leaf, X,
 } from 'lucide-react'
 import styles from './landing.module.css'
 import { CourseArt } from './components/landing-course-art'
+import { ProcessArt } from './components/landing-process-art'
+import { PlatformDashboardPreview, PlatformFeatureArt } from './components/landing-platform-preview'
 
 const whatsappUrl = 'https://api.whatsapp.com/send?phone=7474794383'
 const mapUrl = 'https://2gis.kz/shymkent/geo/70000001026160761/69.614394,42.304299'
@@ -55,25 +57,25 @@ const courses = [
 ]
 
 const steps = [
-  ['Кеңеске жазылу', 'Өтінім қалдырыңыз — менеджеріміз сізбен хабарласады.'],
-  ['Деңгейді анықтау', 'Қазіргі білім деңгейін бағалап, мақсатқа сай дайындық жоспарын ұсынамыз.'],
-  ['Курсқа қосылу', 'Әкімші жеке кабинетті ашып, таңдалған курсқа кіруге рұқсат береді.'],
-  ['Жүйелі оқу', 'Бейнесабақты көріп, тапсырманы орындайсыз және мұғалімнен кері байланыс аласыз.'],
-  ['Нәтижені бақылау', 'Апталық тесттер арқылы өсімді көріп, әлсіз тақырыптарды уақтылы нығайтасыз.'],
+  ['Өтінім қалдыру', 'Өтінім қалдырыңыз. Менеджеріміз сізбен байланысып, оқу бағдарламасы туралы толық ақпарат береді.'],
+  ['Деңгейді анықтау', 'Бастапқы білім деңгейіңізді бағалап, мақсатыңызға сай дайындық бағытын таңдаймыз.'],
+  ['Оқуды бастау', 'Жеке кабинетіңіз ашылып, таңдаған курсыңыздың сабақтары мен материалдарына қол жеткізесіз.'],
+  ['Жүйелі дайындалу', 'Бейнесабақтарды көріп, тапсырмаларды орындайсыз және мұғалімдерден кері байланыс аласыз.'],
+  ['Нәтижеге жету', 'Апталық сынақ тесттері арқылы жетістігіңізді бақылап, әлсіз тақырыптарыңызды жақсартасыз.'],
 ]
 
 const platformItems = [
-  { icon: UserRound, title: 'Оқушы кабинеті', text: 'Курстар, сабақтар, тапсырмалар мен тест нәтижелері бір жерде жиналған.' },
-  { icon: GraduationCap, title: 'Мұғалім кабинеті', text: 'Мұғалім оқу материалдарын жүктейді, тапсырма береді және әр оқушының нәтижесін бақылайды.' },
-  { icon: School, title: 'Әкімші панелі', text: 'Оқушылар, мұғалімдер, курстар мен өтінімдер бір жүйе арқылы басқарылады.' },
-  { icon: MonitorPlay, title: 'Бейнесабақтар', text: 'Өзіңізге ашылған сабақты кез келген уақытта көріп, күрделі тақырыпты қайталай аласыз.' },
+  { icon: MonitorPlay, title: 'Бейнесабақтар', text: 'Тақырыптарды өзіңізге ыңғайлы уақытта оқып, қайталайсыз.' },
+  { icon: ClipboardCheck, title: 'Тапсырмалар', text: 'Әр сабақтан кейін алған біліміңізді тәжірибеде бекітесіз.' },
+  { icon: ClipboardList, title: 'Апталық сынақ тесттері', text: 'Біліміңізді тексеріп, ҰБТ форматына дайындаласыз.' },
+  { icon: BarChart3, title: 'Нәтижені бақылау', text: 'Жетістіктеріңізді бақылап, қай тақырыпқа көбірек көңіл бөлу керегін анықтайсыз.' },
 ]
 
 const results = [
-  { name: 'Жарқынбай Даяна', score: '126 балл', subjects: 'Химия – Биология', quote: 'Түсінбеген тақырыптарымды ретке келтіріп, балымды біртіндеп көтердім.', image: landingImages.results[0] },
-  { name: 'Балқыбек Сұңқар', score: '124 балл', subjects: 'География – Математика', quote: 'Әр аптадағы бақылау қай жерге көбірек күш салу керек екенін анық көрсетті.', image: landingImages.results[1] },
-  { name: 'Туйчи Шыңғысхан', score: '125 балл', subjects: 'Информатика – Математика', quote: 'Есептің жауабын жаттағаннан гөрі, шешу жолын түсінуді үйрендім.', image: landingImages.results[2] },
-  { name: 'Хусайнова Медина', score: '121 балл', subjects: 'Ағылшын тілі – Дүниежүзі тарихы', quote: 'Сабақтың түсіндірілуі мен мұғалімнің қолдауы өзіме деген сенімімді арттырды.', image: landingImages.results[3] },
+  { name: 'Жарқынбай Диана', score: '126 балл', subjects: 'Химия — Биология', quote: 'Түсінбеген тақырыптарымды ретке келтіріп, баллымды біртіндеп көтердім.', image: landingImages.results[0] },
+  { name: 'Балқыбек Сұңқар', score: '124 балл', subjects: 'География — Математика', quote: 'Әр аптадағы бақылау қай жерге көбірек күш салу керек екенін анық көрсетті.', image: landingImages.results[1] },
+  { name: 'Түйіш Шыңғысхан', score: '125 балл', subjects: 'Информатика — Математика', quote: 'Есептің жауабын жаттағаннан гөрі, шешу жолын түсінуді үйрендім.', image: landingImages.results[2] },
+  { name: 'Хусайнова Медина', score: '121 балл', subjects: 'Ағылшын тілі — Дүниежүзі тарихы', quote: 'Сабақтың түсіндірілуі мен мұғалімнің қолдауы өзіме деген сенімімді арттырды.', image: landingImages.results[3] },
 ]
 
 const teachers = [
@@ -254,18 +256,114 @@ function CoursesSection() {
 }
 
 function HowItWorksSection() {
-  return <section className={styles.section}><SectionHead eyebrow="Барлығы түсінікті" title="Оқу қалай өтеді?" text="Кеңестен бастап, ҰБТ күніне дейін қай қадамды қалай жасау керек екенін біліп отырасыз." /><div className={styles.steps}>{steps.map(([title, text], index) => <article key={title}><span>{String(index + 1).padStart(2, '0')}</span><div><h3>{title}</h3><p>{text}</p></div>{index < steps.length - 1 && <i />}</article>)}</div></section>
+  const sectionRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const section = sectionRef.current
+    if (!section || window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return
+      section.classList.add(styles.processRevealed)
+      observer.disconnect()
+    }, { threshold: 0.08 })
+    section.classList.add(styles.processPending)
+    observer.observe(section)
+    return () => observer.disconnect()
+  }, [])
+
+  return <section ref={sectionRef} className={styles.processSection} aria-labelledby="process-title">
+    <div className={styles.processInner}>
+      <div className={styles.processHeading}>
+        <span>5 ҚАРАПАЙЫМ ҚАДАМ</span>
+        <h2 id="process-title">Fenomen-де <em>оқу</em> қалай өтеді?</h2>
+        <p>Өтінім қалдырудан бастап ҰБТ нәтижесіне дейін — әр қадамыңызда сізге қолдау көрсетеміз.</p>
+      </div>
+      <ol className={styles.processTimeline}>{steps.map(([title, text], index) => <li key={title}>
+        <span className={styles.processNumber} aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+        <article className={styles.processCard}>
+          <div className={styles.processIllustration}><ProcessArt step={index + 1} /></div>
+          <h3>{title}</h3><p>{text}</p>
+        </article>
+      </li>)}</ol>
+    </div>
+  </section>
 }
 
 function PlatformSection() {
-  return <section className={`${styles.section} ${styles.platform}`}><div className={styles.platformIntro}><span className={styles.badgeDark}>FENOMEN ПЛАТФОРМАСЫ</span><h2>Оқуға қажеттінің<br />бәрі бір жерде</h2><p>Оқушы не оқу керек екенін біледі, мұғалім нәтижені көреді, ал ата-ана баласының ілгерілеуінен хабардар болады.</p><a href="#contact" className={styles.primaryButton}>Алғашқы аптаны бастау <ArrowRight size={18} /></a></div><div className={styles.platformGrid}>{platformItems.map(({ icon: Icon, title, text }) => <article key={title}><span><Icon /></span><h3>{title}</h3><p>{text}</p></article>)}</div></section>
+  const sectionRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const section = sectionRef.current
+    if (!section || window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return
+      section.classList.add(styles.showcaseRevealed)
+      observer.disconnect()
+    }, { threshold: 0.08 })
+    section.classList.add(styles.showcasePending)
+    observer.observe(section)
+    return () => observer.disconnect()
+  }, [])
+
+  return <section ref={sectionRef} className={styles.platformShowcaseWrap} aria-labelledby="platform-showcase-title">
+    <div className={styles.platformShowcase}>
+      <div className={styles.showcaseCopy}>
+        <span className={styles.showcaseEyebrow}><i />FENOMEN ПЛАТФОРМАСЫ</span>
+        <h2 id="platform-showcase-title">Дайындыққа қажеттінің бәрі <em>бір жерде</em></h2>
+        <p>Бейнесабақтар, тапсырмалар, сынақ тесттері және оқу нәтижелері — барлығы бір платформада.</p>
+        <a href="#contact" className={`${styles.primaryButton} ${styles.showcaseCta}`}>Алғашқы аптаны бастау <ArrowRight size={18} /></a>
+      </div>
+      <PlatformDashboardPreview />
+      <div className={styles.showcaseFeatures}>{platformItems.map(({ icon: Icon, title, text }, index) => <article className={`${styles.showcaseFeature} ${styles[`showcaseTone${index + 1}`]}`} key={title}>
+        <div className={styles.showcaseFeatureVisual}><span><Icon size={25} /></span><PlatformFeatureArt feature={index + 1} /></div>
+        <h3>{title}</h3><p>{text}</p>
+      </article>)}</div>
+    </div>
+  </section>
 }
 
 function ResultsSection() {
-  return <section id="results" className={styles.section}><SectionHead eyebrow="Баллдан бұрын — еңбек" title="Оқушыларымыздың нәтижесі" text="Бұл баллдардың артында күнделікті еңбек, мұғалімнің қолдауы және дұрыс құрылған жоспар тұр." /><div className={styles.resultsGrid}>{results.map((student) => <article className={styles.resultCard} key={student.name}><Picture src={student.image} alt={`${student.name} — ${student.score}`} /><div className={styles.score}>{student.score}</div><div className={styles.resultText}><Quote /><p>«{student.quote}»</p><h3>{student.name}</h3><span>{student.subjects}</span></div></article>)}</div></section>
+  const sectionRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const section = sectionRef.current
+    if (!section || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        section.classList.add(styles.studentResultsRevealed)
+        observer.disconnect()
+      }
+    }, { threshold: 0.08 })
+    section.classList.add(styles.studentResultsPending)
+    observer.observe(section)
+    return () => observer.disconnect()
+  }, [])
+
+  return <section ref={sectionRef} id="results" className={styles.studentResults} aria-labelledby="student-results-title">
+    <div className={styles.studentResultsInner}>
+      <div className={styles.studentResultsHeading}>
+        <span className={styles.studentResultsEyebrow}>НАҚТЫ НӘТИЖЕЛЕР</span>
+        <h2 id="student-results-title">Оқушыларымыздың <em>жетістіктері</em></h2>
+        <p>Әр нәтиженің артында жүйелі дайындық, ұстаздардың қолдауы және оқушының еңбегі бар.</p>
+      </div>
+      <div className={styles.studentResultsGrid}>
+        {results.map((student) => <article className={styles.studentResultCard} key={student.name}>
+          <div className={styles.studentResultPhoto}>
+            <Image src={student.image} alt={student.name} fill sizes="(max-width: 640px) 100vw, (max-width: 1100px) 50vw, 25vw" />
+            <strong className={styles.studentResultScore}>{student.score}</strong>
+          </div>
+          <div className={styles.studentResultContent}>
+            <Quote aria-hidden="true" className={styles.studentResultQuoteIcon} />
+            <blockquote>{student.quote}</blockquote>
+            <div className={styles.studentResultIdentity}><h3>{student.name}</h3><p>{student.subjects}</p></div>
+          </div>
+        </article>)}
+      </div>
+    </div>
+  </section>
 }
 
 function TeachersSection() {
+  const sectionRef = useRef<HTMLElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
   const [canPrev, setCanPrev] = useState(false)
   const [canNext, setCanNext] = useState(true)
@@ -282,7 +380,7 @@ function TeachersSection() {
     const card = track?.firstElementChild as HTMLElement | null
     if (!track || !card) return
     const gap = Number.parseFloat(getComputedStyle(track).columnGap || '16')
-    track.scrollBy({ left: direction * (card.offsetWidth + gap), behavior: 'smooth' })
+    track.scrollBy({ left: direction * (card.offsetWidth + gap), behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
   }
 
   useEffect(() => {
@@ -291,10 +389,49 @@ function TeachersSection() {
     updateControls()
     const onResize = () => updateControls()
     window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    const section = sectionRef.current
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && section) {
+        section.classList.add(styles.facultyRevealed)
+        observer.disconnect()
+      }
+    }, { threshold: 0.08 })
+    if (section && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      section.classList.add(styles.facultyPending)
+      observer.observe(section)
+    }
+    return () => { window.removeEventListener('resize', onResize); observer.disconnect() }
   }, [])
 
-  return <section id="teachers" className={`${styles.section} ${styles.softSection} ${styles.teachersSection}`}><div className={styles.teachersHeader}><SectionHead eyebrow="Білімі мол ұстаздар" title="Мұғалімдеріміз" text="Әр пән бойынша тәжірибелі ұстаздар оқушының деңгейін ескеріп, нәтижеге бағытталған дайындық жүргізеді." /></div><div className={styles.teachersCarousel}><div ref={trackRef} className={styles.teachersTrack} onScroll={updateControls}>{teachers.map(teacher => <article className={styles.teacherCard} key={teacher.name}><div className={styles.teacherPhoto}><Picture src={teacher.image} alt={`${teacher.name} — ${teacher.subject} мұғалімі`} /><span>{teacher.subject}</span></div><div className={styles.teacherBody}>{teacher.title && <strong className={styles.teacherTitle}>{teacher.title}</strong>}<h3>{teacher.name}</h3><p className={styles.teacherExperience}><Clock3 size={14} /> {teacher.experience}</p><p className={styles.teacherDescription}>{teacher.description}</p><a href="#contact">Толығырақ <ArrowRight size={16} /></a></div></article>)}</div></div><div className={styles.carouselControls}><button type="button" onClick={() => move(-1)} disabled={!canPrev} aria-label="Алдыңғы мұғалім"><ChevronLeft /></button><button type="button" onClick={() => move(1)} disabled={!canNext} aria-label="Келесі мұғалім"><ChevronRight /></button></div></section>
+  return <section ref={sectionRef} id="teachers" className={styles.facultySection} aria-labelledby="faculty-title">
+    <div className={styles.facultyInner}>
+      <div className={styles.facultyHeader}>
+        <div className={styles.facultyHeading}>
+          <span className={styles.facultyEyebrow}>БІЛІКТІ ҰСТАЗДАР</span>
+          <h2 id="faculty-title">Мұғалімд<em>еріміз</em></h2>
+          <p>Тәжірибелі ұстаздарымыз күрделі тақырыптарды түсінікті жеткізіп, әр оқушының нәтижеге бағытталған дайындығына көмектеседі.</p>
+        </div>
+        <div className={styles.facultyControls}>
+          <button type="button" onClick={() => move(-1)} disabled={!canPrev} aria-label="Алдыңғы мұғалім"><ChevronLeft /></button>
+          <button type="button" onClick={() => move(1)} disabled={!canNext} aria-label="Келесі мұғалім"><ChevronRight /></button>
+        </div>
+      </div>
+      <div ref={trackRef} className={styles.facultyTrack} onScroll={updateControls} role="region" aria-label="Мұғалімдер тізімі" tabIndex={0}>
+        {teachers.map(teacher => {
+          const [experience, ...qualifications] = teacher.experience.split(' · ')
+          return <article className={styles.facultyCard} key={teacher.name}>
+            <div className={styles.facultyPhoto}><Picture src={teacher.image} alt={`${teacher.name} — ${teacher.subject} мұғалімі`} /><span>{teacher.subject}</span></div>
+            <div className={styles.facultyBody}>
+              <div className={styles.facultyIdentity}>{teacher.title && <strong className={styles.facultyFounder}>{teacher.title}</strong>}<h3>{teacher.name}</h3></div>
+              <div className={styles.facultyExperience}><Clock3 size={20} aria-hidden="true" /><p><strong>{experience}</strong>{qualifications.length > 0 && <span>{qualifications.join(' · ')}</span>}</p></div>
+              <p className={styles.facultyDescription}>{teacher.description}</p>
+              <a href="#contact">Толығырақ <ArrowRight size={20} aria-hidden="true" /></a>
+            </div>
+          </article>
+        })}
+      </div>
+    </div>
+  </section>
 }
 
 function BranchSection() {
