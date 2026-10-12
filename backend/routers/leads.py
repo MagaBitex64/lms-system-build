@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from core.db import get_pool
 from core.deps import require_admin
+from core.rate_limit import check_rate_limit, client_key
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 admin_router = APIRouter(prefix="/admin/leads", tags=["admin"])
@@ -33,7 +34,8 @@ def public_lead(row) -> dict:
 
 
 @router.post("")
-async def create_lead(data: LeadCreateIn):
+async def create_lead(data: LeadCreateIn, request: Request):
+    await check_rate_limit('lead:'+client_key(request), 20, 60)
     pool = await get_pool()
     row = await pool.fetchrow(
         """

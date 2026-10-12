@@ -8,6 +8,7 @@ import { SUBJECT_NAMES, TYPE_NAMES } from '@/lib/ent'
 import { Button, Spinner, ErrorState, cx } from '@/components/ui'
 import { Clock, Flag, ChevronLeft, ChevronRight } from 'lucide-react'
 import EntExamTools from '@/components/ent-exam-tools'
+import AuthImage from '@/components/auth-image'
 import LatexText from '@/components/latex-text'
 
 type Answer = { selected_option_id: number | null; selected_option_ids: number[]; matching_answer: Record<string, number | string> }
@@ -22,7 +23,7 @@ function answered(q: Question, a: Answer) {
 
 function QuestionPrompt({ q }: { q: Question }) {
   const src = q.image_file_id ? getFileUrl(q.image_file_id) : q.image_url
-  const picture = src ? <img src={src} alt={q.image_alt || 'Сұраққа арналған сурет'} className="max-h-[520px] max-w-full rounded-xl object-contain" style={{ width: q.image_width || 640 }} /> : null
+  const picture = q.image_file_id ? <AuthImage fileId={q.image_file_id} alt={q.image_alt || "Сұраққа арналған сурет"} className="max-h-[520px] max-w-full rounded-xl object-contain" style={{ width: q.image_width || 640 }} /> : src ? <img src={src} alt={q.image_alt || 'Сұраққа арналған сурет'} className="max-h-[520px] max-w-full rounded-xl object-contain" style={{ width: q.image_width || 640 }} /> : null
   const text = (value: string) => <LatexText text={value.replaceAll('{{image}}', '')} className="text-lg leading-relaxed" />
   if (!picture) return text(q.prompt)
   if (q.image_placement === 'before') return <div className="space-y-4">{picture}{text(q.prompt)}</div>
@@ -71,11 +72,12 @@ export default function EntTestPage() {
   const cameraRequired = data?.camera_required ?? true
 
   useEffect(() => {
-    if (!data || initialized.current === data.id) return
-    initialized.current = data.id; revision.current = data.revision
-    setSubject(Object.keys(data.questions)[0] ?? 'kaz_history'); setIndex(0); setViolations(data.proctor_violations ?? 0)
+    if (!data) return
     sessionId.current = sessionStorage.getItem(`ent-proctor-${data.id}`) || crypto.randomUUID()
     sessionStorage.setItem(`ent-proctor-${data.id}`, sessionId.current)
+    if (initialized.current === data.id || !Object.values(data.questions).some(questions => questions.length)) return
+    initialized.current = data.id; revision.current = data.revision
+    setSubject(Object.keys(data.questions)[0] ?? 'kaz_history'); setIndex(0); setViolations(data.proctor_violations ?? 0)
     const initial = Object.fromEntries(Object.values(data.questions).flat().map(q => [q.question_id, { selected_option_id: q.selected_option_id, selected_option_ids: q.selected_option_ids, matching_answer: q.matching_answer }]))
     latest.current = initial; setAnswers(initial)
     try { setFlags(JSON.parse(sessionStorage.getItem(`ent-flags-${data.id}`) || '{}')) } catch { /* optional local bookmarks */ }

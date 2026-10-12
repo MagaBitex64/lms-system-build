@@ -3,6 +3,9 @@ from fastapi.responses import FileResponse
 
 from core.db import get_pool
 from core.deps import get_current_user
+from core.access import ensure_item_access
+from core.config import MAX_USER_FILES, MAX_USER_STORAGE_BYTES
+from core.rate_limit import check_rate_limit
 from storage.local import FileValidationError, storage
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -10,52 +13,26 @@ router = APIRouter(prefix="/files", tags=["files"])
 
 @router.post("/upload")
 async def upload_file(file: UploadFile, user: dict = Depends(get_current_user)):
+    await check_rate_limit('upload:'+str(user['id']), 30, 60)
     try:
         stored_name, mime, size = await storage.save_upload(file.filename or "file", file)
-    except FileValidationError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        """
-        INSERT INTO files (owner_id, original_name, stored_name, mime, size)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, original_name, mime, size, created_at
-        """,
-        user["id"],
-        file.filename or "file",
-        stored_name,
-        mime,
-        size,
-    )
-    return dict(row) | {"created_at": str(row["created_at"])}
-
-
-async def get_user_from_token(token: str | None):
-    """Extract user from JWT token in query parameter."""
-    if not token:
-        return None
+    except FileValidationError as exc:
+        raise HTTPException(422, str(exc))
     try:
-        from core.security import decode_token
-        payload = decode_token(token)
-        if payload is None:
-            return None
-        user_id = payload.get("sub")
-        if user_id is None:
-            return None
         pool = await get_pool()
-        user = await pool.fetchrow(
-            """
-            SELECT id, email, full_name, role, is_blocked, auth_version, created_at
-            FROM users
-            WHERE id = $1 AND NOT is_blocked
-            """,
-            int(user_id),
-        )
-        if user is None or payload.get("ver") != user["auth_version"]:
-            return None
-        return dict(user)
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.fetchval('SELECT id FROM users WHERE id=$1 FOR UPDATE', user['id'])
+            quota = await conn.fetchrow('SELECT count(*) n, COALESCE(sum(size),0) bytes FROM files WHERE owner_id=$1', user['id'])
+            if quota['n'] >= MAX_USER_FILES or int(quota['bytes'])+size > MAX_USER_STORAGE_BYTES:
+                raise HTTPException(413, 'Upload storage quota exceeded')
+            row = await conn.fetchrow(
+                """INSERT INTO files(owner_id,original_name,stored_name,mime,size)
+                VALUES($1,$2,$3,$4,$5) RETURNING id,original_name,mime,size,created_at""",
+                user['id'], file.filename or 'file', stored_name, mime, size)
     except Exception:
-        return None
+        storage.delete(stored_name)
+        raise
+    return dict(row) | {'created_at': str(row['created_at'])}
 
 
 async def get_optional_user(request: Request) -> dict | None:
@@ -116,7 +93,6 @@ async def teacher_can_access_file(pool, file_id: int, teacher_id: int) -> bool:
 async def download_file(
     file_id: int,
     request: Request,
-    token: str | None = Query(None),
     user: dict | None = Depends(get_optional_user)
 ):
     pool = await get_pool()
@@ -124,10 +100,6 @@ async def download_file(
     if f is None:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # If no user from header auth, try to get from token query parameter
-    if not user and token:
-        user = await get_user_from_token(token)
-    
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -141,79 +113,26 @@ async def download_file(
         allowed = await teacher_can_access_file(pool, file_id, user_id)
 
     if not allowed and user_role == "student":
-        # Student may download files attached as lesson materials / question images
-        # in courses they are enrolled in, or files of their own submissions.
-        row = await pool.fetchrow(
-            """
-            SELECT 1 FROM lesson_materials lm
-            JOIN course_items ci ON ci.id = lm.lesson_id
-            JOIN enrollments e ON e.course_id = ci.course_id
-            WHERE lm.file_id = $1 AND e.student_id = $2 AND e.status = 'approved'
-              AND ci.is_visible
-              AND (
-                EXISTS (
-                  SELECT 1 FROM item_student_access isa
-                  WHERE isa.item_id = ci.id AND isa.student_id = $2
-                )
-                OR EXISTS (
-                  SELECT 1
-                  FROM item_group_access iga
-                  JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
-                  JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
-                  WHERE iga.item_id = ci.id
-                )
-              )
-            UNION
-            SELECT 1 FROM quiz_questions qq
-            JOIN course_items ci ON ci.id = qq.quiz_id
-            JOIN enrollments e ON e.course_id = ci.course_id
-            WHERE qq.image_file_id = $1 AND e.student_id = $2 AND e.status = 'approved'
-              AND ci.is_visible
-              AND (
-                EXISTS (
-                  SELECT 1 FROM item_student_access isa
-                  WHERE isa.item_id = ci.id AND isa.student_id = $2
-                )
-                OR EXISTS (
-                  SELECT 1
-                  FROM item_group_access iga
-                  JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
-                  JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
-                  WHERE iga.item_id = ci.id
-                )
-              )
-            UNION
-            SELECT 1 FROM question_options qo
-            JOIN quiz_questions qq ON qq.id = qo.question_id
-            JOIN course_items ci ON ci.id = qq.quiz_id
-            JOIN enrollments e ON e.course_id = ci.course_id
-            WHERE qo.image_file_id = $1 AND e.student_id = $2 AND e.status = 'approved'
-              AND ci.is_visible
-              AND (
-                EXISTS (
-                  SELECT 1 FROM item_student_access isa
-                  WHERE isa.item_id = ci.id AND isa.student_id = $2
-                )
-                OR EXISTS (
-                  SELECT 1
-                  FROM item_group_access iga
-                  JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
-                  JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
-                  WHERE iga.item_id = ci.id
-                )
-              )
-            """,
-            file_id,
-            user_id,
-        )
-        allowed = row is not None
+        rows = await pool.fetch(
+            """SELECT ci.id FROM lesson_materials lm JOIN course_items ci ON ci.id=lm.lesson_id WHERE lm.file_id=$1
+            UNION SELECT ci.id FROM quiz_questions q JOIN course_items ci ON ci.id=q.quiz_id WHERE q.image_file_id=$1
+            UNION SELECT ci.id FROM question_options o JOIN quiz_questions q ON q.id=o.question_id
+                JOIN course_items ci ON ci.id=q.quiz_id WHERE o.image_file_id=$1""", file_id)
+        for row in rows:
+            try:
+                await ensure_item_access(user, row['id'])
+                allowed = True
+                break
+            except HTTPException as exc:
+                if exc.status_code not in (403, 404):
+                    raise
         if not allowed:
             # ENT images are frozen into the student's authorized attempt snapshot.
             # This keeps an image private until that exact student receives the test.
             allowed = bool(await pool.fetchval(
                 """SELECT 1 FROM ent_trial_attempts a
                 CROSS JOIN LATERAL jsonb_array_elements(COALESCE(a.snapshot->'questions','[]'::jsonb)) q
-                WHERE a.student_id=$2 AND q->>'image_file_id'=$1::text LIMIT 1""",
+                WHERE a.student_id=$2 AND a.deadline_at IS NOT NULL AND q->>'image_file_id'=$1::bigint::text LIMIT 1""",
                 file_id, user_id,
             ))
     if not allowed:

@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
 from core.config import (
@@ -14,7 +14,8 @@ from core.config import (
 )
 from core.db import get_pool
 from core.deps import get_current_user
-from core.security import create_access_token, hash_password, verify_password
+from core.security import create_access_token, hash_password_async, verify_password_async
+from core.rate_limit import check_rate_limit, client_key
 from services.email import send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -26,7 +27,7 @@ GENERIC_RESET_MESSAGE = (
 
 class LoginIn(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(max_length=128)
 
 
 class ForgotPasswordIn(BaseModel):
@@ -50,10 +51,12 @@ def public_user(u) -> dict:
 
 
 @router.post("/login")
-async def login(data: LoginIn):
+async def login(data: LoginIn, request: Request):
+    await check_rate_limit('login-ip:'+client_key(request), 300, 300)
+    await check_rate_limit('login-account:'+data.email.lower(), 10, 300)
     pool = await get_pool()
     user = await pool.fetchrow("SELECT * FROM users WHERE email = $1", data.email.lower())
-    if user is None or not verify_password(data.password, user["password_hash"]):
+    if user is None or not await verify_password_async(data.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if user["is_blocked"]:
         raise HTTPException(status_code=403, detail="Account is blocked")
@@ -88,7 +91,8 @@ async def _deliver_reset_email(
 
 
 @router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
-async def forgot_password(data: ForgotPasswordIn, background_tasks: BackgroundTasks):
+async def forgot_password(data: ForgotPasswordIn, background_tasks: BackgroundTasks, request: Request):
+    await check_rate_limit('reset-ip:'+client_key(request), 30, 3600)
     pool = await get_pool()
     email = data.email.lower()
     user = await pool.fetchrow(
@@ -101,17 +105,12 @@ async def forgot_password(data: ForgotPasswordIn, background_tasks: BackgroundTa
     )
     if user is None:
         return {"message": GENERIC_RESET_MESSAGE}
-
-    recent_requests = await pool.fetchval(
-        """
-        SELECT count(*)
-        FROM password_reset_tokens
-        WHERE user_id = $1 AND created_at > now() - interval '1 hour'
-        """,
-        user["id"],
-    )
-    if recent_requests >= PASSWORD_RESET_MAX_PER_HOUR:
-        return {"message": GENERIC_RESET_MESSAGE}
+    try:
+        await check_rate_limit('reset-account:'+email, PASSWORD_RESET_MAX_PER_HOUR, 3600)
+    except HTTPException as exc:
+        if exc.status_code == 429:
+            return {'message': GENERIC_RESET_MESSAGE}
+        raise
 
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -119,6 +118,10 @@ async def forgot_password(data: ForgotPasswordIn, background_tasks: BackgroundTa
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await conn.fetchval('SELECT id FROM users WHERE id=$1 FOR UPDATE', user['id'])
+            recent_requests = await conn.fetchval("SELECT count(*) FROM password_reset_tokens WHERE user_id=$1 AND created_at > now()-interval '1 hour'", user['id'])
+            if recent_requests >= PASSWORD_RESET_MAX_PER_HOUR:
+                return {"message": GENERIC_RESET_MESSAGE}
             await conn.execute(
                 """
                 UPDATE password_reset_tokens
@@ -149,14 +152,19 @@ async def forgot_password(data: ForgotPasswordIn, background_tasks: BackgroundTa
 
 
 @router.post("/reset-password")
-async def reset_password(data: ResetPasswordIn):
+async def reset_password(data: ResetPasswordIn, request: Request):
+    await check_rate_limit('reset-use-ip:'+client_key(request), 30, 3600)
     if len(data.new_password.encode("utf-8")) > 72:
         raise HTTPException(status_code=422, detail="Password must be at most 72 bytes")
 
     token_hash = hashlib.sha256(data.token.encode("utf-8")).hexdigest()
+    password_hash = await hash_password_async(data.new_password)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            target = await conn.fetchval('SELECT user_id FROM password_reset_tokens WHERE token_hash=$1', token_hash)
+            if target is not None:
+                await conn.fetchval('SELECT id FROM users WHERE id=$1 FOR UPDATE', target)
             reset = await conn.fetchrow(
                 """
                 SELECT prt.id, prt.user_id, prt.expires_at, prt.used_at, u.is_blocked
@@ -184,7 +192,7 @@ async def reset_password(data: ResetPasswordIn):
                 SET password_hash = $1, auth_version = auth_version + 1
                 WHERE id = $2
                 """,
-                hash_password(data.new_password),
+                password_hash,
                 reset["user_id"],
             )
             await conn.execute(
@@ -202,3 +210,10 @@ async def reset_password(data: ResetPasswordIn):
 @router.get("/me")
 async def me(user: dict = Depends(get_current_user)):
     return public_user(user)
+
+
+@router.post('/logout')
+async def logout(user: dict = Depends(get_current_user)):
+    pool = await get_pool()
+    await pool.execute('UPDATE users SET auth_version=auth_version+1 WHERE id=$1', user['id'])
+    return {'ok': True}

@@ -1,5 +1,6 @@
 import { Fragment } from 'react'
 import katex from 'katex'
+import 'katex/contrib/mhchem'
 
 import { cx } from './ui'
 
@@ -59,7 +60,7 @@ export default function LatexText({ text, className }: { text: string; className
           html = katex.renderToString(segment.value, {
             displayMode: segment.display,
             throwOnError: false,
-            strict: 'warn',
+            strict: false,
             trust: false,
             errorColor: '#d92d20',
           })

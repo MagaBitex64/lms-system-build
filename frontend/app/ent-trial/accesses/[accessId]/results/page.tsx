@@ -60,6 +60,9 @@ type AccessResults = {
 }
 
 type ProctorData = {
+  total: number
+  absence_total: number
+
   items: Array<{ id: number; event_type: string; severity: number; created_at: string }>
   absences: Array<{ id: number; started_at: string; ended_at?: string | null; duration_seconds?: number | null }>
 }
@@ -75,13 +78,14 @@ export default function AccessResultsPage() {
   const router = useRouter()
   const { user } = useAuth()
   const accessId = Number(params.accessId)
+  const [proctorPage, setProctorPage] = useState(1)
   const [proctorAttemptId, setProctorAttemptId] = useState<number | null>(null)
   const { data, error, isLoading } = useSWR<AccessResults>(
     user?.role === 'admin' && Number.isFinite(accessId) ? `/ent-trial/admin/accesses/${accessId}/results` : null,
     fetcher,
   )
   const { data: proctorData, error: proctorError, isLoading: proctorLoading } = useSWR<ProctorData>(
-    proctorAttemptId ? `/ent-trial/admin/attempts/${proctorAttemptId}/proctor-events` : null,
+    proctorAttemptId ? `/ent-trial/admin/attempts/${proctorAttemptId}/proctor-events?page=${proctorPage}` : null,
     fetcher,
   )
 
@@ -156,7 +160,7 @@ export default function AccessResultsPage() {
                         <p className="whitespace-nowrap text-xl font-black text-primary">{submitted ? `${item.total_score} / ${item.max_score}` : '—'}</p>
                         <p className="text-xs font-semibold text-muted">{submitted ? `${Number(item.percentage).toFixed(2)}%` : 'Тест орындалуда'}</p>
                       </div>
-                      <Button type="button" size="sm" variant="secondary" aria-expanded={proctorOpen} onClick={() => setProctorAttemptId(proctorOpen ? null : item.id)}><EyeOff size={15} />Тесттен шығу журналы</Button>
+                      <Button type="button" size="sm" variant="secondary" aria-expanded={proctorOpen} onClick={() => { setProctorPage(1); setProctorAttemptId(proctorOpen ? null : item.id) }}><EyeOff size={15} />Тесттен шығу журналы</Button>
                     </div>
                   </div>
 
@@ -192,6 +196,16 @@ export default function AccessResultsPage() {
                           ))}
                         </div>
                       ) : <p className="text-sm text-muted">Тесттен шығу тіркелмеген.</p>}
+                      {proctorData && <div className="mt-4 space-y-2">
+                        <h4 className="text-sm font-bold">Браузер хабарлаған оқиғалар</h4>
+                        <p className="text-xs text-muted">Бұл хабарлар автоматты түрде тестті тоқтатпайды.</p>
+                        {proctorData.items.map(event => <p key={event.id} className="text-xs">{formatDate(event.created_at)} · {eventLabel(event.event_type)}</p>)}
+                        <div className="flex items-center justify-between gap-2">
+                          <Button variant="secondary" disabled={proctorPage<=1} onClick={() => setProctorPage(proctorPage-1)}>Алдыңғы</Button>
+                          <span>{proctorPage} / {Math.max(1,Math.ceil(Math.max(proctorData.total,proctorData.absence_total)/100))}</span>
+                          <Button variant="secondary" disabled={proctorPage*100>=Math.max(proctorData.total,proctorData.absence_total)} onClick={() => setProctorPage(proctorPage+1)}>Келесі</Button>
+                        </div>
+                      </div>}
                     </div>
                   )}
                 </Card>
@@ -202,4 +216,9 @@ export default function AccessResultsPage() {
       </section>
     </div>
   )
+}
+
+function eventLabel(value: string) {
+  const labels: Record<string,string> = { heartbeat:'Байланыс сигналы',absence_start:'Тесттен шығу',absence_end:'Тестке оралу',tab_hidden:'Басқа бетке ауысу',window_blur:'Терезеден шығу',fullscreen_exit:'Толық экраннан шығу',camera_stopped:'Камера тоқтады',screen_share_stopped:'Экран бөлісу тоқтады',copy:'Көшіру',cut:'Қиып алу',paste:'Қою',context_menu:'Контекст мәзірі',forbidden_shortcut:'Перне тіркесімі' }
+  return labels[value] ?? 'Оқиға'
 }

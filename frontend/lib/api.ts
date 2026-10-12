@@ -104,10 +104,5 @@ export async function downloadApiFile(path: string, filename: string) {
 }
 
 export function getFileUrl(fileId: number): string {
-  const token = getToken()
-  const url = `${API_BASE}/files/${fileId}/download`
-  // For images, we need to return the URL with token as a query parameter
-  // since we can't set headers on <img> tags
-  const separator = url.includes('?') ? '&' : '?'
-  return token ? `${url}${separator}token=${token}` : url
+  return `${API_BASE}/files/${fileId}/download`
 }

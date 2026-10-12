@@ -93,43 +93,19 @@ async def has_item_topic_access(student_id: int, item: dict) -> bool:
 
 
 async def is_item_unlocked(student_id: int, item: dict) -> bool:
-    """Sequential unlock: all previous visible and opened gradable items must be completed."""
     pool = await get_pool()
-    prior = await pool.fetch(
-        """
-        SELECT ci.id, ci.type, q.item_id AS quiz_id FROM course_items ci
-        LEFT JOIN quizzes q ON q.item_id = ci.id
-        WHERE ci.course_id = $1 AND ci.position < $2 AND ci.is_visible
+    return await pool.fetchval(
+        """SELECT NOT EXISTS (
+        SELECT 1 FROM course_items ci
+        LEFT JOIN quizzes q ON q.item_id=ci.id
+        LEFT JOIN quiz_attempts qa ON qa.quiz_id=ci.id AND qa.student_id=$3
+        LEFT JOIN homework_submissions hs ON hs.homework_id=ci.id AND hs.student_id=$3
+        WHERE ci.course_id=$1 AND ci.position<$2 AND ci.is_visible
           AND (ci.type IN ('quiz','homework') OR q.item_id IS NOT NULL)
-          AND (
-            EXISTS (
-              SELECT 1 FROM item_student_access isa
-              WHERE isa.item_id = ci.id AND isa.student_id = $3
-            )
-            OR EXISTS (
-              SELECT 1
-              FROM item_group_access iga
-              JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $3
-              JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
-              WHERE iga.item_id = ci.id
-            )
-          )
-        """,
-        item["course_id"],
-        item["position"],
-        student_id,
-    )
-    for p in prior:
-        if p["quiz_id"] is not None:
-            done = await pool.fetchrow(
-                "SELECT 1 FROM quiz_attempts WHERE quiz_id = $1 AND student_id = $2", p["id"], student_id
-            )
-        else:
-            done = await pool.fetchrow(
-                "SELECT 1 FROM homework_submissions WHERE homework_id = $1 AND student_id = $2",
-                p["id"],
-                student_id,
-            )
-        if done is None:
-            return False
-    return True
+          AND (EXISTS(SELECT 1 FROM item_student_access isa WHERE isa.item_id=ci.id AND isa.student_id=$3)
+            OR EXISTS(SELECT 1 FROM item_group_access iga
+                JOIN group_students gs ON gs.group_id=iga.group_id AND gs.student_id=$3
+                JOIN course_groups cg ON cg.group_id=iga.group_id AND cg.course_id=ci.course_id
+                WHERE iga.item_id=ci.id))
+          AND CASE WHEN q.item_id IS NOT NULL THEN qa.id IS NULL ELSE hs.id IS NULL END
+        )""",item['course_id'],item['position'],student_id)

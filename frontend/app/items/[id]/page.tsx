@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import useSWR from 'swr'
@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
+import AuthImage from '@/components/auth-image'
 import { api, downloadApiFile, downloadFile, getFileUrl, ApiError } from '@/lib/api'
 import LatexText from '@/components/latex-text'
 import {
@@ -85,6 +86,10 @@ type ItemDetail = {
   youtube_url?: string
   materials?: Material[]
   has_quiz?: boolean
+  attempt_deadline_at?: string | null
+  remaining_seconds?: number | null
+  revision?: number
+  saved_answers?: Record<number, { selected_option_ids: number[]; text_answer: string }>
   quiz_started?: boolean
   question_count?: number
   description?: string
@@ -1048,7 +1053,7 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
                         {o.is_correct ? <CheckCircle2 size={14} className="text-success" /> : <span className="size-3 rounded-full border border-border" />}
                         <div className="min-w-0">
                           {o.text && <QuizText text={o.text} enabled={latexEnabled} />}
-                          {o.image_file_id && <img src={getFileUrl(o.image_file_id)} alt={o.text || 'Вариант ответа'} className="mt-2 max-h-40 rounded-md border border-border" />}
+                          {o.image_file_id && <AuthImage fileId={o.image_file_id} alt={o.text || 'Вариант ответа'} className="mt-2 max-h-40 rounded-md border border-border" />}
                         </div>
                       </div>
                     ))}
@@ -1071,21 +1076,74 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
   const [answers, setAnswers] = useState<Record<number, { selected_option_ids: number[]; text_answer: string }>>({})
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
-  const [secondsLeft, setSecondsLeft] = useState((data.time_limit_minutes ?? 0) * 60)
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(data.remaining_seconds ?? null)
 
   const questions = data.questions ?? []
   const notOpen = isBefore(data.open_at)
   const closed = isAfter(data.close_at)
   const latexEnabled = quizUsesLatex(data)
 
+  const revision = useRef(data.revision ?? 0)
+  const latest = useRef(answers)
+  const initialized = useRef(false)
+  const dirty = useRef(0)
+  const saved = useRef(0)
+  const pending = useRef<Promise<void> | null>(null)
+  const submitLock = useRef(false)
+  const [saveMessage, setSaveMessage] = useState('')
+  const [conflicted, setConflicted] = useState(false)
+  const retryRequest = useRef<{ sequence: number; body: { revision: number; request_id: string; answers: { question_id: number; selected_option_ids: number[]; text_answer: string }[] } } | null>(null)
+  latest.current = answers
   useEffect(() => {
-    if (!data.time_limit_minutes || data.attempt || !data.quiz_started) return
-    setSecondsLeft(data.time_limit_minutes * 60)
-    const timer = window.setInterval(() => {
-      setSecondsLeft((current) => Math.max(0, current - 1))
-    }, 1000)
+    if (!data.quiz_started || initialized.current) return
+    initialized.current = true
+    revision.current = data.revision ?? 0
+    setAnswers(data.saved_answers ?? {})
+  }, [data.quiz_started, data.revision, data.saved_answers])
+
+  useEffect(() => {
+    if (!data.attempt_deadline_at || data.attempt || !data.quiz_started) return
+    const end = performance.now() + (data.remaining_seconds ?? 0) * 1000
+    const tick = () => setSecondsLeft(Math.max(0, Math.ceil((end - performance.now()) / 1000)))
+    tick()
+    const timer = window.setInterval(tick, 1000)
     return () => window.clearInterval(timer)
-  }, [data.time_limit_minutes, data.attempt, data.quiz_started])
+  }, [data.attempt_deadline_at, data.remaining_seconds, data.attempt, data.quiz_started])
+
+  function answerPayload() {
+    return questions.map(q => ({ question_id: q.id, selected_option_ids: latest.current[q.id]?.selected_option_ids ?? [], text_answer: latest.current[q.id]?.text_answer ?? '' }))
+  }
+  async function saveAnswers() {
+    if (conflicted || pending.current || submitLock.current || dirty.current === saved.current || !data.quiz_started || data.attempt) return
+    const request = retryRequest.current ?? { sequence: dirty.current, body: { revision: revision.current, request_id: crypto.randomUUID(), answers: answerPayload() } }
+    retryRequest.current = request
+    const job = (async () => {
+      try {
+        const result = await api<{ revision: number; submitted: boolean }>(`/quizzes/${data.item.id}/answers`, { method: 'PATCH', body: request.body })
+        revision.current = result.revision; saved.current = request.sequence; retryRequest.current = null
+        setSaveMessage('Жауаптар сақталды')
+        if (result.submitted) await reload()
+      } catch (err) { if (err instanceof ApiError && err.status === 409) setConflicted(true); setError((err as Error).message); setSaveMessage('Сақтау орындалмады') }
+    })()
+    pending.current = job
+    try { await job } finally { pending.current = null }
+  }
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void saveAnswers() }, 350)
+    const retry = window.setInterval(() => { void saveAnswers() }, 5000)
+    return () => { window.clearTimeout(timer); window.clearInterval(retry) }
+  }, [answers, data.quiz_started, data.attempt])
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => { if (dirty.current !== saved.current && !submitLock.current) { e.preventDefault(); e.returnValue = '' } }
+    window.addEventListener('beforeunload',warn)
+    return () => window.removeEventListener('beforeunload',warn)
+  }, [])
+  useEffect(() => {
+    if (secondsLeft !== 0 || !data.attempt_deadline_at || !data.quiz_started || data.attempt) return
+    void submitQuiz()
+    const retry = window.setInterval(() => { void submitQuiz(); void reload() }, 5000)
+    return () => window.clearInterval(retry)
+  }, [secondsLeft, data.attempt_deadline_at, data.quiz_started, data.attempt])
 
   const attemptAnswers = useMemo(() => {
     const map = new Map<number, AttemptAnswer>()
@@ -1094,6 +1152,9 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
   }, [data.attempt])
 
   function setChoice(question: Question, optionId: number, checked: boolean) {
+    if (conflicted || working || secondsLeft === 0) return
+    dirty.current += 1
+    setSaveMessage('Сақталуда…')
     setAnswers((prev) => {
       const current = prev[question.id] ?? { selected_option_ids: [], text_answer: '' }
       const selected =
@@ -1119,24 +1180,25 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
     }
   }
 
-  async function submitQuiz(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function submitQuiz(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
+    if (submitLock.current) return
+    submitLock.current = true
     setWorking(true)
+    if (pending.current) await pending.current
     setError(null)
     try {
-      await api(`/quizzes/${data.item.id}/attempt`, {
-        body: {
-          answers: questions.map((q) => ({
-            question_id: q.id,
-            selected_option_ids: answers[q.id]?.selected_option_ids ?? [],
-            text_answer: answers[q.id]?.text_answer ?? '',
-          })),
-        },
-      })
+      if (retryRequest.current && secondsLeft !== 0) {
+        const result = await api<{ revision: number }>(`/quizzes/${data.item.id}/answers`, { method: 'PATCH', body: retryRequest.current.body })
+        revision.current = result.revision; retryRequest.current = null
+      }
+      await api(`/quizzes/${data.item.id}/attempt`, { body: { revision: revision.current, answers: answerPayload() } })
+      saved.current = dirty.current
       await reload()
     } catch (err) {
       setError((err as Error).message || t('errorOccurred'))
     } finally {
+      submitLock.current = false
       setWorking(false)
     }
   }
@@ -1176,7 +1238,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                           {option.is_correct ? <CheckCircle2 size={14} className="text-success" /> : <span className="size-3 rounded-full border border-border" />}
                           <div className={selected ? 'font-semibold text-foreground' : 'text-muted'}>
                             {option.text && <QuizText text={option.text} enabled={latexEnabled} />}
-                            {option.image_file_id && <img src={getFileUrl(option.image_file_id)} alt={option.text || 'Вариант ответа'} className="mt-2 max-h-40 rounded-md border border-border" />}
+                            {option.image_file_id && <AuthImage fileId={option.image_file_id} alt={option.text || 'Вариант ответа'} className="mt-2 max-h-40 rounded-md border border-border" />}
                           </div>
                         </div>
                       )
@@ -1216,14 +1278,16 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
   return (
     <Card>
       <form onSubmit={submitQuiz} className="space-y-5">
+        <p role="status" className="text-sm text-muted">{saveMessage}</p>
+        {conflicted && <div role="alert"><p>Жауаптар басқа терезеде өзгерді. Сақталмаған өзгерістерді көшіріп алып, сервердегі жауаптарды қайта жүктеңіз.</p><Button type="button" onClick={() => window.location.reload()}>Сервердегі жауаптарды жүктеу</Button></div>}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold">{t('questions')}</h2>
             <p className="text-sm text-muted">{questions.length} {t('questions')} · {data.total_points ?? 0} {t('points')}</p>
           </div>
           {data.time_limit_minutes ? (
-            <Badge tone={secondsLeft <= 60 ? 'danger' : 'warning'}>
-              {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}
+            <Badge tone={(secondsLeft ?? Infinity) <= 60 ? 'danger' : 'warning'}>
+              {Math.floor((secondsLeft ?? 0) / 60)}:{String((secondsLeft ?? 0) % 60).padStart(2, '0')}
             </Badge>
           ) : null}
         </div>
@@ -1241,8 +1305,8 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                 <QuizText text={q.prompt} enabled={latexEnabled} className="mt-3 text-sm font-medium" />
                 {q.image_file_id && (
                   <div className="mt-3">
-                    <img
-                      src={getFileUrl(q.image_file_id)}
+                    <AuthImage
+                      fileId={q.image_file_id}
                       alt="Question attachment"
                       className="max-w-full rounded-lg border border-border"
                     />
@@ -1260,7 +1324,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                         />
                         <div className="min-w-0">
                           {option.text && <QuizText text={option.text} enabled={latexEnabled} />}
-                          {option.image_file_id && <img src={getFileUrl(option.image_file_id)} alt={option.text || 'Вариант ответа'} className="mt-2 max-h-56 max-w-full rounded-md border border-border" />}
+                          {option.image_file_id && <AuthImage fileId={option.image_file_id} alt={option.text || 'Вариант ответа'} className="mt-2 max-h-56 max-w-full rounded-md border border-border" />}
                         </div>
                       </label>
                     ))}
@@ -1271,7 +1335,9 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                     className="mt-3"
                     rows={q.type === 'long_text' ? 6 : 3}
                     value={answers[q.id]?.text_answer ?? ''}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      dirty.current += 1
+                      setSaveMessage('Сақталуда…')
                       setAnswers((prev) => ({
                         ...prev,
                         [q.id]: {
@@ -1279,7 +1345,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                           text_answer: e.target.value,
                         },
                       }))
-                    }
+                    }}
                     placeholder={t('yourAnswer')}
                   />
                 )}
@@ -1555,6 +1621,7 @@ function HomeworkSettings({ data, reload }: { data: ItemDetail; reload: () => Pr
 }
 
 type HomeworkSubmission = {
+  revision: number
   id: number
   student_name: string
   student_email: string
@@ -1642,7 +1709,7 @@ function GradeSubmissionForm({
     setError(null)
     try {
       await api(`/homework/submissions/${submission.id}/grade`, {
-        body: { grade: Number(grade), feedback },
+        body: { revision: submission.revision, grade: Number(grade), feedback },
       })
       await refresh()
     } catch (err) {

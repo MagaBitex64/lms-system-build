@@ -1,11 +1,13 @@
 'use client'
 
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import useSWR from 'swr'
 import { BookOpen, Check, GraduationCap, Pencil, PlusCircle, Search, Trash2, UserMinus, Users, UserPlus, X, ClipboardList } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { api, fetcher } from '@/lib/api'
 import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Field, Input, PageHeader, Select, Spinner, Modal, DeletionConfirmModal } from '../components/ui'
+
+type UserPage = { items: User[]; total: number }
 
 type User = {
   id: number
@@ -87,8 +89,10 @@ function StudentsTab() {
   const [notice, setNotice] = useState('')
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const { data, isLoading, error: loadError, mutate } = useSWR<{ items: User[] }>('/admin/users?role=student&per_page=100', fetcher)
-  const students = filterUsers(data?.items ?? [], query)
+  const [page, setPage] = useState(1)
+  useEffect(() => { setPage(1) }, [query])
+  const { data, isLoading, error: loadError, mutate } = useSWR<UserPage>(`/admin/users?role=student&per_page=50&page=${page}&q=${encodeURIComponent(query)}`, fetcher)
+  const students = data?.items ?? []
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -138,6 +142,7 @@ function StudentsTab() {
         {isLoading ? <Spinner /> : loadError ? <ErrorState message={t('errorOccurred')} /> : (
           <UserList users={students} fixedRole="student" onChanged={mutate} emptyTitle={query.trim() ? t('noResults') : t('noData')} />
         )}
+        <Pagination page={page} total={data?.total ?? 0} perPage={50} onPage={setPage} />
       </Card>
     </div>
   )
@@ -154,10 +159,12 @@ function TeachersTab() {
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const teachersReq = useSWR<{ items: User[] }>('/admin/users?role=teacher&per_page=100', fetcher)
+  const [page, setPage] = useState(1)
+  useEffect(() => { setPage(1) }, [query])
+  const teachersReq = useSWR<UserPage>(`/admin/users?role=teacher&per_page=50&page=${page}&q=${encodeURIComponent(query)}`, fetcher)
   const groupsReq = useSWR<{ items: Group[] }>('/admin/groups?per_page=100', fetcher)
   const detailReq = useSWR<TeacherDetail>(selectedId ? `/admin/teachers/${selectedId}` : null, fetcher)
-  const teachers = filterUsers(teachersReq.data?.items ?? [], query)
+  const teachers = teachersReq.data?.items ?? []
 
   async function createTeacher(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -261,6 +268,7 @@ function TeachersTab() {
               ))}
             </div>
           )}
+          <Pagination page={page} total={teachersReq.data?.total ?? 0} perPage={50} onPage={setPage} />
         </Card>
       </div>
 
@@ -737,4 +745,13 @@ function EntTrialTab() {
     <p className="text-muted">Сұрақтар мен контекстерді ҰБТ ережелеріне сай құрылымды редакторда басқарыңыз.</p>
     <a href="/ent-trial" className="inline-flex rounded-xl bg-primary px-5 py-3 font-semibold text-primary-foreground">ҰБТ редакторын ашу →</a>
   </Card>
+}
+
+function Pagination({ page, total, perPage, onPage }: { page: number; total: number; perPage: number; onPage: (page: number) => void }) {
+  const pages = Math.max(1, Math.ceil(total / perPage))
+  return <div className="flex items-center justify-between gap-3">
+    <Button variant="secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>Алдыңғы</Button>
+    <span className="text-sm">{page} / {pages} · {total}</span>
+    <Button variant="secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>Келесі</Button>
+  </div>
 }

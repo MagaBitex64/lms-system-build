@@ -4,6 +4,7 @@ import hashlib
 import io
 import os
 import re
+import json
 from urllib.parse import quote
 
 from docx import Document as DocxDocument
@@ -15,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from core.access import ensure_course_owner, ensure_item_access, get_item_or_404
 from core.db import get_pool
+from core.quiz_attempts import quiz_state, complete_quiz, normalized_answers, decoded, utcnow
 from core.deps import get_current_user, require_student, require_teacher
 from storage.local import FileValidationError, storage
 
@@ -44,17 +46,19 @@ class QuestionIn(BaseModel):
     image_file_id: int | None = None
     explanation: str = Field(default="", max_length=5000)
     points: int = Field(default=1, ge=1, le=100)
-    options: list[OptionIn] = []
+    options: list[OptionIn] = Field(default_factory=list, max_length=100)
 
 
 class AnswerIn(BaseModel):
     question_id: int
-    selected_option_ids: list[int] = []
+    selected_option_ids: list[int] = Field(default_factory=list, max_length=100)
     text_answer: str = Field(default="", max_length=20000)
 
 
 class SubmitAttemptIn(BaseModel):
-    answers: list[AnswerIn]
+    answers: list[AnswerIn] = Field(max_length=1000)
+    revision: int = Field(default=0, ge=0)
+    request_id: str | None = Field(default=None, min_length=16, max_length=100)
 
 
 class GradeAnswerIn(BaseModel):
@@ -302,6 +306,8 @@ async def import_questions_docx(
     except FileValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     questions = parse_docx_questions(content)
+    if len(questions) > 1000:
+        raise HTTPException(422, 'A quiz may contain at most 1000 questions')
     if preview:
         preview_questions = []
         for question in questions:
@@ -335,6 +341,12 @@ async def import_questions_docx(
     async with pool.acquire() as conn:
         try:
             async with conn.transaction():
+                from core.config import MAX_USER_FILES, MAX_USER_STORAGE_BYTES
+                await conn.fetchval('SELECT id FROM users WHERE id=$1 FOR UPDATE', user['id'])
+                quota = await conn.fetchrow('SELECT count(*) n,COALESCE(sum(size),0) bytes FROM files WHERE owner_id=$1', user['id'])
+                images = [q['image'] for q in questions if q.get('image')]
+                if quota['n']+len(images)>MAX_USER_FILES or int(quota['bytes'])+sum(len(i['content']) for i in images)>MAX_USER_STORAGE_BYTES:
+                    raise HTTPException(413,'Upload storage quota exceeded')
                 start_position = await conn.fetchval(
                     "SELECT COALESCE(MAX(position), -1) + 1 FROM quiz_questions WHERE quiz_id = $1", item_id
                 )
@@ -426,10 +438,6 @@ async def delete_question(question_id: int, user: dict = Depends(require_teacher
     item = await get_item_or_404(q["quiz_id"])
     await ensure_course_owner(user, item["course_id"])
     
-    file_row = None
-    if q["image_file_id"]:
-        file_row = await pool.fetchrow("SELECT id, stored_name FROM files WHERE id = $1 AND owner_id = $2", q["image_file_id"], user["id"])
-        
     if await pool.fetchval("SELECT EXISTS(SELECT 1 FROM quiz_attempts WHERE quiz_id=$1)", q["quiz_id"]):
         raise HTTPException(
             status_code=409,
@@ -437,10 +445,6 @@ async def delete_question(question_id: int, user: dict = Depends(require_teacher
         )
     await pool.execute("DELETE FROM quiz_questions WHERE id = $1", question_id)
     
-    if file_row:
-        storage.delete(file_row["stored_name"])
-        await pool.execute("DELETE FROM files WHERE id = $1", file_row["id"])
-        
     return {"ok": True, "message": "Question deleted"}
 
 
@@ -459,10 +463,15 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
     is_owner = user["role"] == "admin" or (user["role"] == "teacher" and course["teacher_id"] == user["id"])
 
     attempt = None
-    if user["role"] == "student":
-        attempt = await pool.fetchrow(
-            "SELECT * FROM quiz_attempts WHERE quiz_id = $1 AND student_id = $2", item_id, user["id"]
-        )
+    state = None
+    if user['role'] == 'student':
+        state = await quiz_state(pool, item_id, user['id'])
+        attempt = await pool.fetchrow('SELECT * FROM quiz_attempts WHERE quiz_id=$1 AND student_id=$2',item_id,user['id'])
+    started = is_owner or state is not None or attempt is not None
+    question_count = len(questions)
+    total_points = sum(q['points'] for q in questions)
+    if not started:
+        questions = []
 
     out_questions = []
     question_ids = [q["id"] for q in questions]
@@ -516,7 +525,14 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
         "time_limit_minutes": quiz["time_limit_minutes"],
         "shuffle_questions": quiz["shuffle_questions"],
         "shuffle_options": quiz["shuffle_options"],
-        "total_points": sum(q["points"] for q in questions),
+        "total_points": total_points,
+        "question_count": question_count,
+        "quiz_started": started,
+        "server_time": utcnow().isoformat(),
+        "attempt_deadline_at": str(state['deadline_at']) if state and state['deadline_at'] else None,
+        "remaining_seconds": max(0,int((state['deadline_at']-utcnow()).total_seconds())) if state and state['deadline_at'] else None,
+        "revision": state['response_revision'] if state else 0,
+        "saved_answers": decoded(state['responses']) if state else {},
         "questions": out_questions,
         "attempt": None,
     }
@@ -547,108 +563,59 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
 async def start_quiz(item_id: int, user: dict = Depends(require_student)):
     item, _course = await ensure_item_access(user, item_id)
     if not item_can_have_quiz(item):
-        raise HTTPException(status_code=404, detail="Not a quiz")
+        raise HTTPException(404, 'Not a quiz')
     pool = await get_pool()
-    quiz = await get_quiz_or_404(pool, item_id)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    if quiz["open_at"] and now < quiz["open_at"]:
-        raise HTTPException(status_code=403, detail="Quiz is not open yet")
-    if quiz["close_at"] and now > quiz["close_at"]:
-        raise HTTPException(status_code=403, detail="Quiz is closed")
-    await pool.execute(
-        """
-        INSERT INTO quiz_starts (quiz_id, student_id)
-        VALUES ($1, $2)
-        ON CONFLICT (quiz_id, student_id) DO NOTHING
-        """,
-        item_id,
-        user["id"],
-    )
-    return {"ok": True}
+    async with pool.acquire() as conn, conn.transaction():
+        quiz = await conn.fetchrow('SELECT * FROM quizzes WHERE item_id=$1 FOR UPDATE', item_id)
+        if quiz is None:
+            raise HTTPException(404,'Quiz not found')
+        current = utcnow()
+        if quiz['open_at'] and current < quiz['open_at']:
+            raise HTTPException(403,'Quiz is not open yet')
+        if quiz['close_at'] and current > quiz['close_at']:
+            raise HTTPException(403,'Quiz is closed')
+        if not await conn.fetchval('SELECT 1 FROM quiz_questions WHERE quiz_id=$1',item_id):
+            raise HTTPException(409,'Quiz has no questions')
+        deadline = current + datetime.timedelta(minutes=quiz['time_limit_minutes']) if quiz['time_limit_minutes'] else None
+        if quiz['close_at']:
+            deadline = min(deadline,quiz['close_at']) if deadline else quiz['close_at']
+        await conn.execute('INSERT INTO quiz_starts(quiz_id,student_id,deadline_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',item_id,user['id'],deadline)
+    return {'ok': True}
+
+
+async def save_quiz_answers(item_id, data, user, submit=False):
+    await ensure_item_access(user, item_id)
+    pool = await get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        start = await conn.fetchrow('SELECT * FROM quiz_starts WHERE quiz_id=$1 AND student_id=$2 FOR UPDATE',item_id,user['id'])
+        if start is None:
+            raise HTTPException(403,'Start the quiz first')
+        existing = await conn.fetchrow('SELECT * FROM quiz_attempts WHERE quiz_id=$1 AND student_id=$2',item_id,user['id'])
+        expired = bool(start['deadline_at'] and start['deadline_at']<=utcnow())
+        if existing or expired:
+            result = existing or await complete_quiz(conn,start)
+        else:
+            replay = data.request_id and data.request_id == start['last_save_request_id']
+            if not replay and data.revision != start['response_revision']:
+                raise HTTPException(409,'Answers changed in another request. Reload the server answers.')
+            if not replay:
+                responses = decoded(start['responses']) or {}
+                responses.update(await normalized_answers(conn,item_id,data.answers))
+                start = await conn.fetchrow('UPDATE quiz_starts SET responses=$3::jsonb,response_revision=response_revision+1,last_save_request_id=$4 WHERE quiz_id=$1 AND student_id=$2 RETURNING *',item_id,user['id'],json.dumps(responses),data.request_id)
+            result = await complete_quiz(conn,start) if submit else None
+        return {'ok': True,'revision':start['response_revision'],'submitted':result is not None,
+                'attempt_id':result['id'] if result else None,'auto_score':float(result['auto_score']) if result else None,
+                'status':result['status'] if result else 'in_progress','expired':expired}
+
+
+@router.patch("/{item_id}/answers")
+async def save_answers(item_id: int, data: SubmitAttemptIn, user: dict = Depends(require_student)):
+    return await save_quiz_answers(item_id,data,user)
 
 
 @router.post("/{item_id}/attempt")
 async def submit_attempt(item_id: int, data: SubmitAttemptIn, user: dict = Depends(require_student)):
-    item, _course = await ensure_item_access(user, item_id)
-    if not item_can_have_quiz(item):
-        raise HTTPException(status_code=404, detail="Not a quiz")
-    pool = await get_pool()
-    existing = await pool.fetchrow(
-        "SELECT 1 FROM quiz_attempts WHERE quiz_id = $1 AND student_id = $2", item_id, user["id"]
-    )
-    if existing:
-        raise HTTPException(status_code=409, detail="You have already completed this quiz")
-
-    quiz = await get_quiz_or_404(pool, item_id)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    if quiz["open_at"] and now < quiz["open_at"]:
-        raise HTTPException(status_code=403, detail="Quiz is not open yet")
-    if quiz["close_at"] and now > quiz["close_at"]:
-        raise HTTPException(status_code=403, detail="Quiz is closed")
-    started = await pool.fetchrow(
-        "SELECT 1 FROM quiz_starts WHERE quiz_id = $1 AND student_id = $2",
-        item_id,
-        user["id"],
-    )
-    if started is None:
-        raise HTTPException(status_code=403, detail="Start the quiz first")
-
-    questions = await pool.fetch("SELECT * FROM quiz_questions WHERE quiz_id = $1", item_id)
-    q_by_id = {q["id"]: q for q in questions}
-    answers_by_q = {a.question_id: a for a in data.answers}
-    total_points = sum(q["points"] for q in questions) or 1
-
-    auto_points = 0.0
-    has_manual = False
-    graded_answers = []
-
-    for q in questions:
-        a = answers_by_q.get(q["id"])
-        selected = a.selected_option_ids if a else []
-        text = a.text_answer if a else ""
-        awarded = None
-        if q["type"] in ("single", "multiple"):
-            correct_ids = {
-                r["id"]
-                for r in await pool.fetch(
-                    "SELECT id FROM question_options WHERE question_id = $1 AND is_correct", q["id"]
-                )
-            }
-            awarded = float(q["points"]) if set(selected) == correct_ids and selected else 0.0
-            auto_points += awarded
-        else:
-            has_manual = True
-        graded_answers.append((q["id"], selected, text, awarded))
-
-    # Convert points -> score on quiz max_score scale
-    auto_score = round(auto_points / total_points * quiz["max_score"], 2)
-    status = "pending_review" if has_manual else "graded"
-
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            attempt = await conn.fetchrow(
-                """
-                INSERT INTO quiz_attempts (quiz_id, student_id, auto_score, status)
-                VALUES ($1, $2, $3, $4) RETURNING id
-                """,
-                item_id,
-                user["id"],
-                auto_score,
-                status,
-            )
-            for qid, selected, text, awarded in graded_answers:
-                await conn.execute(
-                    """
-                    INSERT INTO attempt_answers (attempt_id, question_id, selected_option_ids, text_answer, awarded_points)
-                    VALUES ($1, $2, $3, $4, $5)
-                    """,
-                    attempt["id"],
-                    qid,
-                    selected,
-                    text,
-                    awarded,
-                )
-    return {"attempt_id": attempt["id"], "auto_score": auto_score, "status": status}
+    return await save_quiz_answers(item_id,data,user,submit=True)
 
 
 # ---------- Teacher: review manual answers ----------
@@ -752,6 +719,7 @@ async def grade_answer(answer_id: int, data: GradeAnswerIn, user: dict = Depends
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await conn.fetchval("SELECT id FROM quiz_attempts WHERE id=$1 FOR UPDATE", ans["attempt_id"])
             await conn.execute(
                 "UPDATE attempt_answers SET awarded_points = $1 WHERE id = $2", data.awarded_points, answer_id
             )

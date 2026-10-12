@@ -1,29 +1,21 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { BookOpen, Search } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { fetcher } from '@/lib/api'
-import { PageHeader, Skeleton, EmptyState, ErrorState, Input, FadeIn } from '@/components/ui'
+import { PageHeader, Skeleton, EmptyState, ErrorState, Input, FadeIn, Button } from '@/components/ui'
 import { CourseCard, type CourseSummary } from '@/components/course-card'
 
 export default function CoursesPage() {
   const { t } = useI18n()
-  const { data, error, isLoading } = useSWR<{ items: CourseSummary[] }>('/courses', fetcher)
   const [query, setQuery] = useState('')
-
-  const courses = useMemo(() => {
-    const items = data?.items ?? []
-    if (!query.trim()) return items
-    const q = query.toLowerCase()
-    return items.filter(
-      (c) =>
-        c.title.toLowerCase().includes(q) ||
-        c.description?.toLowerCase().includes(q) ||
-        c.teacher_name?.toLowerCase().includes(q),
-    )
-  }, [data, query])
+  const [page, setPage] = useState(1)
+  useEffect(() => { setPage(1) }, [query])
+  const { data, error, isLoading } = useSWR<{ items: CourseSummary[]; total: number }>(`/courses?page=${page}&q=${encodeURIComponent(query)}`, fetcher)
+  const courses = data?.items ?? []
+  const pages = Math.max(1, Math.ceil((data?.total ?? 0) / 12))
 
   return (
     <div className="space-y-8">
@@ -55,6 +47,11 @@ export default function CoursesPage() {
       ) : (
         <EmptyState icon={<BookOpen size={22} />} title={query.trim() ? t('noResults') : t('noCoursesYet')} hint={t('exploreCatalogHint')} />
       )}
+      <div className="flex justify-between gap-3">
+        <Button variant="secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>Алдыңғы</Button>
+        <span>{page} / {pages}</span>
+        <Button variant="secondary" disabled={page >= pages} onClick={() => setPage(page + 1)}>Келесі</Button>
+      </div>
     </div>
   )
 }
