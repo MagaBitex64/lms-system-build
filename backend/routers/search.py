@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, Query
 
 from core.db import get_pool
 from core.deps import get_current_user
+from core.access import ensure_item_access
+from fastapi import HTTPException
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -42,7 +44,7 @@ async def search(
             JOIN courses c ON c.id = ci.course_id
             JOIN enrollments e ON e.course_id = c.id AND e.student_id = $2 AND e.status = 'approved'
             LEFT JOIN lessons l ON l.item_id = ci.id
-            WHERE ci.is_visible AND (ci.title ILIKE $1 OR l.content ILIKE $1)
+            WHERE c.is_published AND ci.is_visible AND (ci.title ILIKE $1 OR l.content ILIKE $1)
               AND (
                 EXISTS (
                   SELECT 1 FROM item_student_access isa
@@ -71,7 +73,7 @@ async def search(
             JOIN course_items ci ON ci.id = lm.lesson_id
             JOIN courses c ON c.id = ci.course_id
             JOIN enrollments e ON e.course_id = c.id AND e.student_id = $2 AND e.status = 'approved'
-            WHERE ci.is_visible AND lm.label ILIKE $1
+            WHERE c.is_published AND ci.is_visible AND lm.label ILIKE $1
               AND (
                 EXISTS (
                   SELECT 1 FROM item_student_access isa
@@ -129,6 +131,19 @@ async def search(
         lessons = []
         materials = []
 
+    if user['role'] == 'student':
+        async def readable(rows, key):
+            result = []
+            for row in rows:
+                try:
+                    await ensure_item_access(user, row[key])
+                    result.append(row)
+                except HTTPException as exc:
+                    if exc.status_code not in (403, 404):
+                        raise
+            return result
+        lessons = await readable(lessons, 'id')
+        materials = await readable(materials, 'lesson_id')
     return {
         "courses": [dict(r) for r in courses],
         "lessons": [dict(r) for r in lessons],

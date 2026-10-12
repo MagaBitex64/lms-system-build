@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from core.access import ensure_course_owner
+from core.access import ensure_course_owner, ensure_course_access
 from core.db import get_pool
 from core.deps import get_current_user, require_teacher
 
@@ -56,7 +56,7 @@ async def compute_student_course_grades(pool, course_ids: list[int], student_ids
         WHERE homework_id = ANY($1::bigint[]) AND student_id = ANY($2::bigint[])
         """,
         homework_ids,
-        student_id,
+        student_ids,
     ) if homework_ids else []
     attempts_by_item = {(attempt["student_id"], attempt["quiz_id"]): attempt for attempt in quiz_attempts}
     submissions_by_item = {(submission["student_id"], submission["homework_id"]): submission for submission in homework_submissions}
@@ -129,7 +129,7 @@ async def my_grades(user: dict = Depends(get_current_user)):
         SELECT c.id, c.title, u.full_name AS teacher_name FROM enrollments e
         JOIN courses c ON c.id = e.course_id
         JOIN users u ON u.id = c.teacher_id
-        WHERE e.student_id = $1 AND e.status = 'approved'
+        WHERE e.student_id = $1 AND e.status = 'approved' AND c.is_published
         ORDER BY c.title
         """,
         user["id"],
@@ -154,6 +154,7 @@ async def my_grades(user: dict = Depends(get_current_user)):
 
 @router.get("/my/{course_id}")
 async def my_course_grades(course_id: int, user: dict = Depends(get_current_user)):
+    await ensure_course_access(user, course_id)
     pool = await get_pool()
     return await compute_student_course_grade(pool, course_id, user["id"])
 

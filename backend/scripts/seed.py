@@ -21,6 +21,9 @@ PASSWORD = "Phenomenon1!"
 
 
 async def seed() -> None:
+    from core.config import APP_ENV
+    if APP_ENV == 'production':
+        raise RuntimeError('Demo users and content must not be seeded in production')
     conn = await asyncpg.connect(dsn=DATABASE_URL)
     try:
         existing = await conn.fetchval("SELECT COUNT(*) FROM users")

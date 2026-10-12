@@ -3,7 +3,7 @@ import datetime as dt
 import json
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from core.access import ensure_course_owner
@@ -619,123 +619,62 @@ async def get_access_results(access_id: int, user: dict = Depends(require_admin)
 
 @router.get("/leaderboard")
 async def get_ent_leaderboard(user: dict = Depends(get_current_user)):
-    """Public authenticated rankings: every completed full-ENT and subject attempt."""
     await finalize_expired()
     pool = await get_pool()
-    rows = await pool.fetch("""SELECT t.id attempt_id,t.student_id,u.full_name,t.total_score,t.submitted_at,
-        t.scores_by_subject,t.kaz_history_score,t.reading_score,t.math_score,
-        t.subject1_score,t.subject2_score,t.combination,v.title variant_title,
-        ROW_NUMBER() OVER (PARTITION BY t.student_id ORDER BY t.started_at,t.id)::int attempt_number,
-        COALESCE(t.snapshot->>'exam_mode',v.exam_mode,'full') exam_mode,
-        COALESCE(t.snapshot->>'single_subject',v.single_subject) single_subject,
-        NULLIF(t.snapshot->>'max_score','')::int snapshot_max_score
-        FROM ent_trial_attempts t
-        JOIN users u ON u.id=t.student_id AND u.role='student'
-        LEFT JOIN ent_variants v ON v.id=t.variant_id
-        WHERE t.status='submitted' ORDER BY t.submitted_at,t.id""")
-
-    subject_max = {
-        subject: sum(slot["max_points"] for slot in subject_blueprint(subject)["slots"])
-        for subject in SUBJECT_LABELS
-    }
-    general_items_all: list[dict] = []
-    general_students: set[int] = set()
-    general_attempts: dict[int, int] = {}
-    subject_items_all: dict[str, list[dict]] = {subject: [] for subject in SUBJECT_LABELS}
-    subject_students: dict[str, set[int]] = {subject: set() for subject in SUBJECT_LABELS}
-    subject_attempts: dict[tuple[str, int], int] = {}
-    subject_totals = dict.fromkeys(SUBJECT_LABELS, 0)
-    general_total = 0
-
-    def record(row, score, max_score, scores):
-        subjects = []
-        for subject, label in SUBJECT_LABELS.items():
-            if subject not in scores or scores[subject] is None:
-                continue
-            subject_score = float(scores[subject])
-            subject_max_score = subject_max[subject]
-            subjects.append({
-                "subject": subject, "label": label, "score": subject_score,
-                "max_score": subject_max_score,
-                "percentage": round(subject_score / subject_max_score * 100, 2) if subject_max_score else 0,
-            })
-        return {
-            "attempt_id": row["attempt_id"], "student_id": row["student_id"],
-            "full_name": row["full_name"], "score": float(score), "max_score": max_score,
-            "percentage": round(float(score) / max_score * 100, 2) if max_score else 0,
-            "submitted_at": row["submitted_at"], "variant_title": row["variant_title"],
-            "attempt_number": row["attempt_number"],
-            "subjects": subjects,
-        }
-
+    rows = await pool.fetch("""WITH base AS (
+        SELECT t.id attempt_id,t.student_id,u.full_name,t.total_score,t.submitted_at,t.started_at,
+            v.title variant_title,COALESCE(t.snapshot->>'exam_mode',v.exam_mode,'full') exam_mode,
+            CASE WHEN t.scores_by_subject <> '{}'::jsonb THEN t.scores_by_subject
+            WHEN COALESCE(t.snapshot->>'exam_mode',v.exam_mode)='single' THEN
+                jsonb_build_object(COALESCE(t.snapshot->>'single_subject',v.single_subject),t.total_score)
+            ELSE jsonb_build_object('kaz_history',t.kaz_history_score,'reading',t.reading_score,'math_literacy',t.math_score)
+                 || jsonb_build_object(COALESCE($1::jsonb->t.combination->>0,'unknown1'),t.subject1_score,
+                                       COALESCE($1::jsonb->t.combination->>1,'unknown2'),t.subject2_score) END scores
+        FROM ent_trial_attempts t JOIN users u ON u.id=t.student_id AND u.role='student'
+        LEFT JOIN ent_variants v ON v.id=t.variant_id WHERE t.status='submitted'
+    ), entries AS (
+        SELECT 'general' category,b.*,total_score score FROM base b WHERE exam_mode='full'
+        UNION ALL SELECT x.key category,b.*,x.value::text::numeric score FROM base b
+            CROSS JOIN LATERAL jsonb_each(b.scores) x WHERE x.key=ANY($2::text[])
+    ), ranked AS (
+        SELECT e.*,row_number() OVER(PARTITION BY category ORDER BY score DESC,attempt_id) rank,
+            row_number() OVER(PARTITION BY category,student_id ORDER BY started_at,attempt_id) attempt_number,
+            count(*) OVER(PARTITION BY category,student_id) attempt_count FROM entries e
+    ), stats AS (
+        SELECT category,count(DISTINCT student_id) participant_count,count(*) completed_attempt_count
+        FROM entries GROUP BY category
+    ) SELECT r.*,s.participant_count,s.completed_attempt_count FROM ranked r JOIN stats s USING(category)
+      WHERE rank<=100 ORDER BY category,rank""",json.dumps(COMBINATIONS),list(SUBJECT_LABELS))
+    subject_max = {subject:sum(slot['max_points'] for slot in subject_blueprint(subject)['slots']) for subject in SUBJECT_LABELS}
+    categories = {'general': {'label':'Жалпы ҰБТ','max_score':140,'participant_count':0,'completed_attempt_count':0,'items':[]}}
+    for subject,label in SUBJECT_LABELS.items():
+        categories[subject] = {'subject':subject,'label':label,'max_score':subject_max[subject], 'participant_count':0,'completed_attempt_count':0,'items':[]}
     for row in rows:
-        exam_mode = row["exam_mode"]
-        max_score = int(row["snapshot_max_score"] or (subject_max.get(row["single_subject"], 0) if exam_mode == "single" else 140))
-        student_id = row["student_id"]
-
-        scores = decoded(row["scores_by_subject"]) or {}
-        if not scores:
-            if exam_mode == "single" and row["single_subject"] in SUBJECT_LABELS:
-                scores = {row["single_subject"]: row["total_score"]}
-            else:
-                profile1, profile2 = COMBINATIONS.get(row["combination"], (None, None))
-                scores = {
-                    "kaz_history": row["kaz_history_score"], "reading": row["reading_score"],
-                    "math_literacy": row["math_score"], profile1: row["subject1_score"],
-                    profile2: row["subject2_score"],
-                }
-
-        if exam_mode == "full" and max_score == 140:
-            general_total += 1
-            general_students.add(student_id)
-            general_attempts[student_id] = general_attempts.get(student_id, 0) + 1
-            general_items_all.append(record(row, row["total_score"], 140, scores))
-
-        for subject, score in scores.items():
-            if subject not in SUBJECT_LABELS:
-                continue
-            subject_totals[subject] += 1
-            subject_students[subject].add(student_id)
-            key = (subject, student_id)
-            subject_attempts[key] = subject_attempts.get(key, 0) + 1
-            subject_items_all[subject].append(record(row, score, subject_max[subject], scores))
-
-    def ranked(candidates, attempts):
-        items = sorted(candidates, key=lambda item: (-item["score"], item["attempt_id"]))[:100]
-        for rank, item in enumerate(items, 1):
-            item["rank"] = rank
-            item["attempt_count"] = attempts[item["student_id"]]
-        return items
-
-    general_items = ranked(general_items_all, general_attempts)
-    subjects = []
-    for subject, label in SUBJECT_LABELS.items():
-        attempts = {student_id: subject_attempts[(subject, student_id)] for student_id in subject_students[subject]}
-        subjects.append({
-            "subject": subject, "label": label, "max_score": subject_max[subject],
-            "participant_count": len(subject_students[subject]),
-            "completed_attempt_count": subject_totals[subject],
-            "items": ranked(subject_items_all[subject], attempts),
-        })
-    return {
-        "general": {"label": "Жалпы ҰБТ", "max_score": 140,
-                    "participant_count": len(general_students), "completed_attempt_count": general_total,
-                    "items": general_items},
-        "subjects": subjects, "limit": 100,
-    }
+        category = categories[row['category']]
+        category['participant_count'] = row['participant_count']
+        category['completed_attempt_count'] = row['completed_attempt_count']
+        scores = decoded(row['scores'])
+        parts = [{'subject':key,'label':SUBJECT_LABELS[key],'score':float(scores[key]),'max_score':subject_max[key],
+                  'percentage':round(float(scores[key])/subject_max[key]*100,2)} for key in SUBJECT_LABELS if key in scores and scores[key] is not None]
+        category['items'].append({'attempt_id':row['attempt_id'],'student_id':row['student_id'],'full_name':row['full_name'],
+            'score':float(row['score']),'max_score':category['max_score'],'percentage':round(float(row['score'])/category['max_score']*100,2),
+            'submitted_at':row['submitted_at'],'variant_title':row['variant_title'],'attempt_number':row['attempt_number'],
+            'attempt_count':row['attempt_count'],'rank':row['rank'],'subjects':parts})
+    return {'general':categories['general'],'subjects':[categories[key] for key in SUBJECT_LABELS],'limit':100}
 
 
 @router.get("/admin/attempts/{attempt_id}/proctor-events")
-async def get_proctor_events(attempt_id: int, user: dict = Depends(require_admin)):
+async def get_proctor_events(attempt_id: int, page: int = Query(1, ge=1), per_page: int = Query(100, ge=1, le=200), user: dict = Depends(require_admin)):
     pool = await get_pool()
     if not await pool.fetchval("SELECT 1 FROM ent_trial_attempts WHERE id=$1", attempt_id):
         raise HTTPException(404, "Әрекет табылмады")
+    total = await pool.fetchval('SELECT count(*) FROM ent_proctor_events WHERE attempt_id=$1',attempt_id)
     rows = await pool.fetch("""SELECT id,event_type,severity,details,created_at FROM ent_proctor_events
-        WHERE attempt_id=$1 ORDER BY created_at,id""", attempt_id)
+        WHERE attempt_id=$1 ORDER BY created_at,id LIMIT $2 OFFSET $3""", attempt_id,per_page,(page-1)*per_page)
     absences = await pool.fetch("""SELECT id,started_at,ended_at,
         COALESCE(duration_seconds, GREATEST(0, EXTRACT(EPOCH FROM (clock_timestamp()-started_at))::INTEGER)) duration_seconds
-        FROM ent_absence_periods WHERE attempt_id=$1 ORDER BY started_at,id""", attempt_id)
-    return {"items": [dict(r) for r in rows], "absences": [dict(r) for r in absences]}
+        FROM ent_absence_periods WHERE attempt_id=$1 ORDER BY started_at,id LIMIT $2 OFFSET $3""", attempt_id,per_page,(page-1)*per_page)
+    return {"items": [dict(r) for r in rows], "absences": [dict(r) for r in absences], "total": total, "absence_total": await pool.fetchval("SELECT count(*) FROM ent_absence_periods WHERE attempt_id=$1",attempt_id), "page": page, "per_page": per_page}
 
 
 @router.get("/my-accesses")
@@ -981,7 +920,7 @@ def public_attempt(attempt):
     submitted = attempt["status"] == "submitted"
     subjects = snapshot.get("subjects") or list(dict.fromkeys(q["subject"] for q in snapshot["questions"]))
     grouped = {} if submitted else {subject: [] for subject in subjects}
-    if not submitted:
+    if not submitted and attempt["deadline_at"] is not None:
         for source in snapshot["questions"]:
             q = copy.deepcopy(source)
             response = responses.get(str(q["question_id"]), {})

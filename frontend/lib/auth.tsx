@@ -29,10 +29,13 @@ export function useAuth() {
     return res.user
   }
 
-  function logout() {
-    setToken(null)
-    mutate(undefined, { revalidate: false })
-    window.location.href = '/login'
+  async function logout() {
+    try { await api('/auth/logout', { method: 'POST' }) }
+    finally {
+      setToken(null)
+      mutate(undefined, { revalidate: false })
+      window.location.href = '/login'
+    }
   }
 
   return { user, isLoading: hasToken && isLoading, isAuthed: !!user, login, logout }

@@ -5,6 +5,7 @@ import useSWR from 'swr'
 import { api, fetcher, getFileUrl } from '@/lib/api'
 import { SUBJECT_NAMES, TYPE_NAMES, type Slot, type SubjectRule, type ContextBlock } from '@/lib/ent'
 import { Button, Card, Spinner, ErrorState, Badge, DeletionConfirmModal, cx } from '@/components/ui'
+import AuthImage from './auth-image'
 import LatexText from '@/components/latex-text'
 
 type Option = { text: string; is_correct: boolean }
@@ -133,6 +134,7 @@ function QuestionEditor({ variantId, subject, slot, question, contextReady, onSa
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const correctCount = options.filter(o => o.is_correct).length
   const previewUrl = imageFileId ? getFileUrl(imageFileId) : legacyImageUrl
+  const supportsFormulaEditor = subject === 'mathematics' || subject === 'chemistry'
   async function uploadImage(file?: File) {
     if (!file) return
     if (!file.type.startsWith('image/')) { setMessage('Тек сурет файлын таңдаңыз'); return }
@@ -183,25 +185,35 @@ function QuestionEditor({ variantId, subject, slot, question, contextReady, onSa
       {contextMode !== 'shared' && <textarea aria-label="Сұрақтың жеке контексті" className={inputClass} rows={4} maxLength={30000} required value={contextOverride} onChange={e => setContextOverride(e.target.value)} placeholder={contextMode === 'addendum' ? 'Ортақ контексттен кейін көрсетілетін қосымша мәтін' : 'Тек осы сұрақта көрсетілетін контекст'} />}
       {question?.context_text && !question.context_override && <p className="rounded-xl bg-warning/10 p-3 text-sm">Ескі жеке контекст табылды. Қажет болса, оны осы өріске көшіріңіз: {question.context_text}</p>}
     </div></details>}
-    <label className="block space-y-2"><span>Сұрақ мәтіні</span><textarea ref={promptRef} maxLength={10000} className={inputClass} rows={5} value={prompt} onChange={e => setPrompt(e.target.value)} placeholder={subject === 'mathematics' ? 'Мысалы: $x^2 + 5x - 6 = 0$ теңдеуін шешіңіз.' : 'Сурет сұрақтың толық мәтінін қамтыса, бұл өрісті бос қалдыруға болады.'} /></label>
-    {subject === 'mathematics' && <Card className="space-y-4 border-primary/20 bg-primary-soft/30 p-4">
-      <div><h4 className="font-semibold">LaTeX формуласы</h4><p className="text-sm text-muted">Жол ішіндегі формула үшін <code>$...$</code>, жеке жолдағы формула үшін <code>$$...$$</code> қолданыңыз. Белгіленген мәтінді батырма формулаға айналдырады.</p></div>
+    <label className="block space-y-2"><span>Сұрақ мәтіні</span><textarea ref={promptRef} maxLength={10000} className={inputClass} rows={5} value={prompt} onChange={e => setPrompt(e.target.value)} placeholder={subject === 'mathematics' ? 'Мысалы: $x^2 + 5x - 6 = 0$ теңдеуін шешіңіз.' : subject === 'chemistry' ? 'Мысалы: $\\ce{CO2 + C <=> 2CO}$ реакциясын талдаңыз.' : 'Сурет сұрақтың толық мәтінін қамтыса, бұл өрісті бос қалдыруға болады.'} /></label>
+    {supportsFormulaEditor && <Card className="space-y-4 border-primary/20 bg-primary-soft/30 p-4">
+      <div><h4 className="font-semibold">{subject === 'chemistry' ? 'Химиялық формулалар мен реакциялар' : 'LaTeX формуласы'}</h4>{subject === 'chemistry'
+        ? <p className="text-sm text-muted">Химиялық жазба үшін <code>{'$\\ce{...}$'}</code> қолданыңыз. Мұнда индекстерді, зарядтарды, агрегаттық күйлерді, реакция және тепе-теңдік стрелкаларын көрсетуге болады.</p>
+        : <p className="text-sm text-muted">Жол ішіндегі формула үшін <code>$...$</code>, жеке жолдағы формула үшін <code>$$...$$</code> қолданыңыз. Белгіленген мәтінді батырма формулаға айналдырады.</p>}</div>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('x^2')}>x²</Button>
-        <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\frac{a}{b}')}>Бөлшек</Button>
-        <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\sqrt{x}')}>Түбір</Button>
-        <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('x_1, x_2')}>Индекстер</Button>
-        <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\begin{cases}x+y=5\\\\x-y=1\\end{cases}', true)}>Теңдеулер жүйесі</Button>
+        {subject === 'chemistry' ? <>
+          <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\ce{CO2}')}>Химиялық формула</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\ce{CO2(g) + C(s) <=> 2CO(g)}')}>Тепе-теңдік реакциясы</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\ce{C3H6 ->[+ Cl2] A ->[+ KOH][спирт] B ->[+ H2O, Hg^{2+}] C}', true)}>Реакциялар тізбегі</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('K = \\frac{[\\ce{CO}]^2}{[\\ce{CO2}]}', true)}>Тепе-теңдік константасы</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\ce{Fe^{3+} + 3OH^- -> Fe(OH)3 v}')}>Иондар және тұнба</Button>
+        </> : <>
+          <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('x^2')}>x²</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\frac{a}{b}')}>Бөлшек</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\sqrt{x}')}>Түбір</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('x_1, x_2')}>Индекстер</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => insertLatex('\\begin{cases}x+y=5\\\\x-y=1\\end{cases}', true)}>Теңдеулер жүйесі</Button>
+        </>}
       </div>
       <div className="rounded-xl border border-border bg-surface p-4">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Алдын ала қарау</p>
-        {prompt ? <LatexText text={prompt.replaceAll('{{image}}', '[Сурет]')} className="leading-relaxed" /> : <p className="text-sm text-muted">Формула енгізілгеннен кейін осы жерде көрсетіледі.</p>}
+        {prompt ? <LatexText text={prompt.replaceAll('{{image}}', '[Сурет]')} className="leading-relaxed" /> : <p className="text-sm text-muted">{subject === 'chemistry' ? 'Химиялық өрнек енгізілгеннен кейін осы жерде көрсетіледі.' : 'Формула енгізілгеннен кейін осы жерде көрсетіледі.'}</p>}
       </div>
     </Card>}
     <Card className="space-y-4 bg-surface-muted p-4"><div><h4 className="font-semibold">Сұрақ суреті (міндетті емес)</h4><p className="text-sm text-muted">Кез келген сұраққа JPG, PNG, GIF немесе WebP жүктеуге болады.</p></div>
       <input aria-label="Сұрақ суретін жүктеу" type="file" accept="image/png,image/jpeg,image/gif,image/webp" disabled={uploading} onChange={e => { void uploadImage(e.target.files?.[0]); e.currentTarget.value = '' }} />
       {uploading && <p className="text-sm text-muted">Сурет жүктелуде…</p>}
-      {previewUrl && <><img src={previewUrl} alt={imageAlt || 'Сұрақ суреті'} className="max-h-72 max-w-full rounded-xl object-contain" style={{ width: Math.min(imageWidth, 760) }} />
+      {previewUrl && <>{imageFileId ? <AuthImage fileId={imageFileId} alt={imageAlt || 'Сұрақ суреті'} className="max-h-72 max-w-full rounded-xl object-contain" style={{ width: Math.min(imageWidth, 760) }} /> : <img src={previewUrl} alt={imageAlt || 'Сұрақ суреті'} className="max-h-72 max-w-full rounded-xl object-contain" style={{ width: Math.min(imageWidth, 760) }} />}
         <div className="grid gap-3 sm:grid-cols-2"><label className="space-y-2"><span className="text-sm">Суреттің орны</span><select className={inputClass} value={imagePlacement} onChange={e => setImagePlacement(e.target.value as typeof imagePlacement)}><option value="before">Мәтіннің алдында</option><option value="after">Мәтіннен кейін</option><option value="marker">Мәтін ішіндегі белгі орнында</option></select></label>
           <label className="space-y-2"><span className="text-sm">Ені: {imageWidth}px</span><input className="w-full" type="range" min="120" max="1200" step="20" value={imageWidth} onChange={e => setImageWidth(Number(e.target.value))} /></label></div>
         {imagePlacement === 'marker' && <div className="space-y-2"><Button type="button" variant="secondary" onClick={insertImageMarker}>Курсор тұрған жерге сурет орнын қою</Button><p className="text-xs text-muted">Мәтінде <code>{'{{image}}'}</code> белгісі болуы керек. Оны мәтін ішінде жылжытуға болады.</p></div>}
@@ -212,7 +224,7 @@ function QuestionEditor({ variantId, subject, slot, question, contextReady, onSa
     <fieldset className="space-y-3"><legend className="mb-2 font-semibold">{slot.option_count} жауап нұсқасы{slot.question_type === 'matching' ? ' · дұрыс сәйкестіктер төменде таңдалады' : ' · дұрысын белгілеңіз'}</legend>
       {options.map((o, i) => <div key={i} className="flex items-center gap-3">
         {slot.question_type !== 'matching' && <input aria-label={`${String.fromCharCode(65 + i)} дұрыс жауап`} type={slot.question_type === 'multi_choice' ? 'checkbox' : 'radio'} name="correct-option" checked={o.is_correct} onChange={e => setOptions(prev => prev.map((v, j) => ({ ...v, is_correct: j === i ? e.target.checked : slot.question_type === 'multi_choice' ? v.is_correct : false })))} className="h-5 w-5" />}
-        <label className="flex flex-1 items-center gap-2"><span className="font-semibold">{String.fromCharCode(65 + i)}</span><div className="min-w-0 flex-1 space-y-1"><input required aria-label={`Жауап ${String.fromCharCode(65 + i)}`} maxLength={2000} className={inputClass} value={o.text} onChange={e => setOptions(prev => prev.map((v, j) => j === i ? { ...v, text: e.target.value } : v))} />{subject === 'mathematics' && o.text.includes('$') && <LatexText text={o.text} className="rounded-lg bg-surface-muted px-3 py-2 text-sm" />}</div></label>
+        <label className="flex flex-1 items-center gap-2"><span className="font-semibold">{String.fromCharCode(65 + i)}</span><div className="min-w-0 flex-1 space-y-1"><input required aria-label={`Жауап ${String.fromCharCode(65 + i)}`} maxLength={2000} className={inputClass} value={o.text} onChange={e => setOptions(prev => prev.map((v, j) => j === i ? { ...v, text: e.target.value } : v))} />{supportsFormulaEditor && o.text.includes('$') && <LatexText text={o.text} className="rounded-lg bg-surface-muted px-3 py-2 text-sm" />}</div></label>
       </div>)}
       {slot.question_type !== 'matching' && <p className="text-sm text-muted">Дұрыс жауаптар: {correctCount}. Қажет: {slot.question_type === 'multi_choice' ? '1–3' : '1'}.</p>}
     </fieldset>

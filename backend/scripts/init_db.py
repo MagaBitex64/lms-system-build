@@ -6,6 +6,7 @@ Run: python -m scripts.init_db  (from the backend/ directory)
 import asyncio
 import os
 import sys
+import hashlib
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -402,9 +403,11 @@ ENT_MIGRATIONS = [
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS camera_required BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS allow_retake BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE ent_trial_accesses ADD COLUMN IF NOT EXISTS max_attempts INTEGER NOT NULL DEFAULT 1 CHECK (max_attempts BETWEEN 1 AND 100)",
-    """UPDATE ent_trial_accesses a SET max_attempts=GREATEST(3,(
-        SELECT COUNT(*)::int FROM ent_trial_attempts t WHERE t.access_id=a.id
-    )),allow_retake=FALSE WHERE a.allow_retake=TRUE""",
+    """UPDATE ent_trial_accesses a SET max_attempts=LEAST(100,GREATEST(3,(
+        SELECT COALESCE(MAX(n),0)::int FROM (
+            SELECT COUNT(*) n FROM ent_trial_attempts t WHERE t.access_id=a.id GROUP BY student_id
+        ) counts
+    ))),allow_retake=FALSE WHERE a.allow_retake=TRUE""",
     "ALTER TABLE ent_trial_attempts DROP CONSTRAINT IF EXISTS ent_trial_attempts_access_id_student_id_key",
     "CREATE INDEX IF NOT EXISTS idx_ent_attempts_access_student ON ent_trial_attempts(access_id,student_id,id DESC)",
     "ALTER TABLE ent_questions ADD COLUMN IF NOT EXISTS difficulty TEXT",
@@ -415,7 +418,11 @@ ENT_MIGRATIONS = [
     "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS responses JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS response_revision INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ",
-    "UPDATE ent_trial_attempts SET deadline_at = started_at + interval '240 minutes' WHERE deadline_at IS NULL",
+    """UPDATE ent_trial_attempts t SET deadline_at = started_at + make_interval(secs=>
+        COALESCE(NULLIF(snapshot->>'duration_seconds','')::int,
+                 NULLIF(jsonb_array_length(COALESCE(snapshot->'questions','[]'::jsonb)),0)*120,14400)
+        + COALESCE((SELECT extra_time_minutes*60 FROM ent_trial_accesses WHERE id=t.access_id),0))
+        WHERE deadline_at IS NULL AND (snapshot IS NULL OR snapshot->>'version'='legacy')""",
     "CREATE INDEX IF NOT EXISTS idx_ent_attempts_deadline ON ent_trial_attempts(deadline_at) WHERE status = 'in_progress'",
     "ALTER TABLE ent_variants ADD COLUMN IF NOT EXISTS exam_mode TEXT NOT NULL DEFAULT 'full' CHECK (exam_mode IN ('full','single'))",
     "ALTER TABLE ent_variants ADD COLUMN IF NOT EXISTS single_subject TEXT",
@@ -440,7 +447,7 @@ ENT_MIGRATIONS = [
     "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS proctor_violations INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS proctor_last_seen_at TIMESTAMPTZ",
     "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS scores_by_subject JSONB NOT NULL DEFAULT '{}'::jsonb",
-    "UPDATE ent_trial_attempts SET proctor_status='legacy',activated_at=started_at WHERE deadline_at IS NOT NULL AND proctor_status='pending'",
+    "UPDATE ent_trial_attempts SET proctor_status='legacy',activated_at=started_at WHERE deadline_at IS NOT NULL AND proctor_status='pending' AND (snapshot IS NULL OR snapshot->>'version'='legacy')",
     """CREATE TABLE IF NOT EXISTS ent_proctor_events (
         id BIGSERIAL PRIMARY KEY,
         attempt_id BIGINT NOT NULL REFERENCES ent_trial_attempts(id) ON DELETE CASCADE,
@@ -460,24 +467,90 @@ ENT_MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_ent_absence_periods_attempt ON ent_absence_periods(attempt_id,started_at DESC)",
 ]
 
+RELEASE_MIGRATIONS = [
+    "ALTER TABLE homework_submissions ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 0",
+    "CREATE TABLE IF NOT EXISTS request_limits(key TEXT PRIMARY KEY,window_start TIMESTAMPTZ NOT NULL,hits INTEGER NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_request_limits_window ON request_limits(window_start)",
+    "ALTER TABLE quiz_starts ADD COLUMN IF NOT EXISTS responses JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE quiz_starts ADD COLUMN IF NOT EXISTS response_revision INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE quiz_starts ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ",
+    "ALTER TABLE quiz_starts ADD COLUMN IF NOT EXISTS last_save_request_id TEXT",
+    """UPDATE quiz_starts s SET deadline_at=s.started_at+make_interval(mins=>q.time_limit_minutes)
+        FROM quizzes q WHERE q.item_id=s.quiz_id AND q.time_limit_minutes IS NOT NULL AND s.deadline_at IS NULL""",
+    "CREATE INDEX IF NOT EXISTS idx_quiz_starts_deadline ON quiz_starts(deadline_at) WHERE deadline_at IS NOT NULL",
+    """CREATE OR REPLACE FUNCTION protect_started_quiz() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE quiz_id_value BIGINT;
+        BEGIN
+            IF TG_TABLE_NAME='quizzes' THEN
+                quiz_id_value=NEW.item_id;
+                IF ROW(NEW.max_score,NEW.weight_pct,NEW.open_at,NEW.deadline_at,NEW.close_at,NEW.time_limit_minutes,NEW.shuffle_questions,NEW.shuffle_options)
+                    IS NOT DISTINCT FROM ROW(OLD.max_score,OLD.weight_pct,OLD.open_at,OLD.deadline_at,OLD.close_at,OLD.time_limit_minutes,OLD.shuffle_questions,OLD.shuffle_options) THEN RETURN NEW; END IF;
+            ELSIF TG_TABLE_NAME='quiz_questions' THEN
+                IF TG_OP='DELETE' THEN quiz_id_value=OLD.quiz_id; ELSE quiz_id_value=NEW.quiz_id; END IF;
+            ELSE
+                SELECT quiz_id INTO quiz_id_value FROM quiz_questions WHERE id=CASE WHEN TG_OP='DELETE' THEN OLD.question_id ELSE NEW.question_id END;
+            END IF;
+            PERFORM 1 FROM quizzes WHERE item_id=quiz_id_value FOR UPDATE;
+            IF EXISTS(SELECT 1 FROM quiz_starts WHERE quiz_id=quiz_id_value)
+               OR EXISTS(SELECT 1 FROM quiz_attempts WHERE quiz_id=quiz_id_value) THEN
+                RAISE EXCEPTION 'Quiz has started attempts' USING ERRCODE='55000';
+            END IF;
+            IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+        END $$""",
+    "DROP TRIGGER IF EXISTS protect_quiz_questions ON quiz_questions",
+    "CREATE TRIGGER protect_quiz_questions BEFORE INSERT OR UPDATE OR DELETE ON quiz_questions FOR EACH ROW EXECUTE FUNCTION protect_started_quiz()",
+    "DROP TRIGGER IF EXISTS protect_question_options ON question_options",
+    "CREATE TRIGGER protect_question_options BEFORE INSERT OR UPDATE OR DELETE ON question_options FOR EACH ROW EXECUTE FUNCTION protect_started_quiz()",
+    "DROP TRIGGER IF EXISTS protect_quiz_settings ON quizzes",
+    "CREATE TRIGGER protect_quiz_settings BEFORE UPDATE ON quizzes FOR EACH ROW EXECUTE FUNCTION protect_started_quiz()",
+    """CREATE OR REPLACE FUNCTION protect_group_capacity() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF NEW.capacity < (SELECT count(*) FROM group_students WHERE group_id=NEW.id) THEN
+                RAISE EXCEPTION 'Capacity is below current membership' USING ERRCODE='23514';
+            END IF;
+            RETURN NEW;
+        END $$""",
+    "DROP TRIGGER IF EXISTS protect_group_capacity ON groups",
+    "CREATE TRIGGER protect_group_capacity BEFORE UPDATE OF capacity ON groups FOR EACH ROW EXECUTE FUNCTION protect_group_capacity()",
+]
+# The database protects history even when insertion races a parent deletion.
+for table, column, parent, parent_column in [
+    ('quiz_attempts','quiz_id','quizzes','item_id'), ('quiz_attempts','student_id','users','id'),
+    ('quiz_starts','quiz_id','quizzes','item_id'), ('quiz_starts','student_id','users','id'),
+    ('attempt_answers','question_id','quiz_questions','id'),
+    ('homework_submissions','homework_id','homework','item_id'), ('homework_submissions','student_id','users','id'),
+    ('ent_trial_attempts','access_id','ent_trial_accesses','id'), ('ent_trial_attempts','variant_id','ent_variants','id'),
+    ('ent_trial_attempts','student_id','users','id'), ('ent_trial_accesses','group_id','groups','id'),
+    ('ent_trial_accesses','granted_by_id','users','id'), ('ent_trial_accesses','student_id','users','id'),
+    ('files','owner_id','users','id'),
+]:
+    RELEASE_MIGRATIONS.append(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {table}_{column}_fkey")
+    RELEASE_MIGRATIONS.append(f"ALTER TABLE {table} ADD CONSTRAINT {table}_{column}_fkey FOREIGN KEY({column}) REFERENCES {parent}({parent_column}) ON DELETE RESTRICT")
+
 
 async def main() -> None:
+    from core.config import validate_production_config
+    validate_production_config()
     conn = await asyncpg.connect(dsn=DATABASE_URL)
     try:
-        for migration in MIGRATIONS:
-            try:
-                await conn.execute(migration)
-            except Exception as e:
-                pass
-        await conn.execute(SCHEMA)
-        for migration in MIGRATIONS:
-            try:
-                await conn.execute(migration)
-            except Exception as e:
-                pass
         async with conn.transaction():
-            for migration in ENT_MIGRATIONS:
+            await conn.execute('SELECT pg_advisory_xact_lock(72419012)')
+            # Legacy tables need columns before SCHEMA can create dependent indexes.
+            for migration in MIGRATIONS:
+                try:
+                    async with conn.transaction():
+                        await conn.execute(migration)
+                except asyncpg.UndefinedTableError:
+                    continue  # Only absent bootstrap tables may be deferred.
+            await conn.execute(SCHEMA)
+            for migration in MIGRATIONS:
                 await conn.execute(migration)
+            await conn.execute('CREATE TABLE IF NOT EXISTS schema_migrations(id TEXT PRIMARY KEY,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())')
+            for migration in ENT_MIGRATIONS + RELEASE_MIGRATIONS:
+                key = hashlib.sha256(migration.encode()).hexdigest()
+                if not await conn.fetchval('SELECT 1 FROM schema_migrations WHERE id=$1', key):
+                    await conn.execute(migration)
+                    await conn.execute('INSERT INTO schema_migrations(id) VALUES($1)', key)
         print("Schema initialized successfully.")
     finally:
         await conn.close()

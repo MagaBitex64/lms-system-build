@@ -1,0 +1,109 @@
+name: fenomen-production
+services:
+  db:
+    image: postgres:15-alpine@sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [database]
+    logging: &logs
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    init: true
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET:?required}
+      PRODUCTION_ADMIN_EMAIL: ${PRODUCTION_ADMIN_EMAIL:-nurdildanurasyl7@gmail.com}
+      FRONTEND_BASE_URL: https://${DOMAIN:?required}
+      CORS_ORIGINS: https://${DOMAIN}
+      UPLOAD_DIR: /app/uploads
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      BREVO_SENDER_ID: ${BREVO_SENDER_ID:-}
+      FORWARDED_ALLOW_IPS: "*"
+      MAX_USER_FILES: ${MAX_USER_FILES:-200}
+      MAX_USER_STORAGE_BYTES: ${MAX_USER_STORAGE_BYTES:-524288000}
+    volumes:
+      - uploads:/app/uploads
+    secrets: [production_admin_password]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health',timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks: [database, application]
+    logging: *logs
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: https://${DOMAIN}/api
+    restart: unless-stopped
+    init: true
+    # No backend/database/mail secrets are given to the frontend.
+    environment: {NODE_ENV: production}
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    networks: [application]
+    logging: *logs
+
+  gateway:
+    image: nginx:stable-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+    restart: unless-stopped
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      backend: {condition: service_healthy}
+      frontend: {condition: service_healthy}
+    networks: [application, edge]
+    logging: *logs
+
+  tls:
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?required}
+      ACME_EMAIL: ${ACME_EMAIL:?required}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [gateway]
+    networks: [edge]
+    logging: *logs
+
+networks:
+  database: {internal: true}
+  application: {}
+  edge: {}
+secrets:
+  production_admin_password:
+    file: ./.secrets/production_admin_password
+volumes:
+  db_data:
+  uploads:
+  caddy_data:
+  caddy_config:

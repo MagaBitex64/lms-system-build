@@ -88,8 +88,8 @@ async def list_catalog(
                (SELECT e.status FROM enrollments e WHERE e.course_id = c.id AND e.student_id = $5) AS enrollment_status,
                COUNT(*) OVER() AS total
         FROM courses c JOIN users u ON u.id = c.teacher_id
-        WHERE c.is_published AND ($1 = '' OR c.title ILIKE $2 OR c.description ILIKE $2)
-        ORDER BY c.created_at DESC
+        WHERE c.is_published AND ($1 = '' OR c.title ILIKE $2 OR c.description ILIKE $2 OR u.full_name ILIKE $2)
+        ORDER BY c.created_at DESC, c.id DESC
         LIMIT $3 OFFSET $4
         """,
         q,
@@ -98,7 +98,9 @@ async def list_catalog(
         offset,
         user["id"],
     )
-    total = rows[0]["total"] if rows else 0
+    total = rows[0]["total"] if rows else await pool.fetchval(
+        """SELECT count(*) FROM courses c JOIN users u ON u.id=c.teacher_id
+        WHERE c.is_published AND ($1='' OR c.title ILIKE $2 OR c.description ILIKE $2 OR u.full_name ILIKE $2)""",q,like)
     items = []
     for r in rows:
         d = dict(r)
@@ -220,39 +222,8 @@ async def delete_course(course_id: int, user: dict = Depends(get_current_user)):
         if course is None:
             raise HTTPException(status_code=404, detail="Course not found")
     
-    # Find all files associated with this course before deleting
-    file_rows = await pool.fetch(
-        """
-        SELECT DISTINCT f.id, f.stored_name
-        FROM files f
-        WHERE f.owner_id = $1
-        AND (
-            EXISTS (
-                SELECT 1 FROM lesson_materials lm
-                JOIN lessons l ON l.item_id = lm.lesson_id
-                JOIN course_items ci ON ci.id = l.item_id
-                WHERE lm.file_id = f.id AND ci.course_id = $2
-            )
-            OR EXISTS (
-                SELECT 1 FROM quiz_questions qq
-                JOIN quizzes q ON q.item_id = qq.quiz_id
-                JOIN course_items ci ON ci.id = q.item_id
-                WHERE qq.image_file_id = f.id AND ci.course_id = $2
-            )
-        )
-        """,
-        user["id"],
-        course_id,
-    )
-    
-    # Delete the course (cascades will handle related data)
     await pool.execute("DELETE FROM courses WHERE id = $1", course_id)
-    
-    # Clean up orphaned files from storage
-    for file_row in file_rows:
-        storage.delete(file_row["stored_name"])
-        await pool.execute("DELETE FROM files WHERE id = $1", file_row["id"])
-    
+
     return {"ok": True, "message": "Course deleted successfully"}
 
 
@@ -272,6 +243,8 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Course not found")
 
     is_owner = user["role"] == "admin" or (user["role"] == "teacher" and course["teacher_id"] == user["id"])
+    if not is_owner and not course["is_published"]:
+        raise HTTPException(status_code=403, detail="This course is not published")
     enrolled = user["role"] == "student" and await is_enrolled(user["id"], course_id)
 
     # Guests / non-enrolled students see only the public summary
@@ -325,6 +298,25 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         for row in access_student_rows:
             access_student_map.setdefault(row["item_id"], []).append(row["student_id"])
 
+    student_states = {}
+    first_incomplete_position = None
+    if user['role'] == 'student' and item_ids:
+        rows = await pool.fetch(
+            """SELECT ci.id,ci.position,ci.is_visible,ci.type,q.item_id quiz_id,
+            qa.id attempt_id,qa.auto_score,qa.manual_score,hs.id submission_id,hs.grade,
+            (EXISTS(SELECT 1 FROM item_student_access isa WHERE isa.item_id=ci.id AND isa.student_id=$2)
+             OR EXISTS(SELECT 1 FROM item_group_access iga JOIN group_students gs ON gs.group_id=iga.group_id AND gs.student_id=$2
+                JOIN course_groups cg ON cg.group_id=iga.group_id AND cg.course_id=ci.course_id WHERE iga.item_id=ci.id)) topic_open
+            FROM course_items ci LEFT JOIN quizzes q ON q.item_id=ci.id
+            LEFT JOIN quiz_attempts qa ON qa.quiz_id=ci.id AND qa.student_id=$2
+            LEFT JOIN homework_submissions hs ON hs.homework_id=ci.id AND hs.student_id=$2
+            WHERE ci.course_id=$1""",course_id,user['id'])
+        student_states = {row['id']:row for row in rows}
+        incomplete = [row['position'] for row in rows if row['is_visible'] and row['topic_open']
+            and (row['quiz_id'] is not None or row['type']=='homework')
+            and (row['attempt_id'] is None if row['quiz_id'] is not None else row['submission_id'] is None)]
+        first_incomplete_position = min(incomplete) if incomplete else None
+
     items = []
     for r in items_rows:
         if user["role"] == "student" and not r["is_visible"]:
@@ -332,8 +324,9 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         topic_open = True
         sequential_locked = False
         if user["role"] == "student":
-            topic_open = await has_item_topic_access(user["id"], dict(r))
-            sequential_locked = r["sequential_unlock"] and not await is_item_unlocked(user["id"], dict(r))
+            state = student_states[r['id']]
+            topic_open = state['topic_open']
+            sequential_locked = bool(r['sequential_unlock'] and first_incomplete_position is not None and first_incomplete_position < r['position'])
         d = {
             "id": r["id"],
             "type": r["type"],
@@ -352,22 +345,13 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         if user["role"] == "student":
             d["topic_open"] = topic_open
             d["locked"] = (not topic_open) or sequential_locked
-            if r["quiz_max_score"] is not None:
-                a = await pool.fetchrow(
-                    "SELECT auto_score, manual_score, status FROM quiz_attempts WHERE quiz_id = $1 AND student_id = $2",
-                    r["id"],
-                    user["id"],
-                )
-                d["completed"] = a is not None
-                d["score"] = float(a["auto_score"] + (a["manual_score"] or 0)) if a else None
-            elif r["type"] == "homework":
-                s = await pool.fetchrow(
-                    "SELECT grade, status FROM homework_submissions WHERE homework_id = $1 AND student_id = $2",
-                    r["id"],
-                    user["id"],
-                )
-                d["completed"] = s is not None
-                d["score"] = float(s["grade"]) if s and s["grade"] is not None else None
+            state = student_states[r['id']]
+            if r['quiz_max_score'] is not None:
+                d['completed'] = state['attempt_id'] is not None
+                d['score'] = float(state['auto_score']+(state['manual_score'] or 0)) if state['attempt_id'] else None
+            elif r['type']=='homework':
+                d['completed'] = state['submission_id'] is not None
+                d['score'] = float(state['grade']) if state['grade'] is not None else None
         if is_owner:
             d["access_group_ids"] = access_group_map.get(r["id"], [])
             d["access_student_ids"] = access_student_map.get(r["id"], [])
@@ -546,35 +530,7 @@ async def delete_item(item_id: int, user: dict = Depends(require_teacher)):
     item = await get_item_or_404(item_id)
     await ensure_course_owner(user, item["course_id"])
     pool = await get_pool()
-    
-    file_rows = await pool.fetch(
-        """
-        SELECT DISTINCT f.id, f.stored_name
-        FROM files f
-        WHERE f.owner_id = $1
-        AND (
-            EXISTS (
-                SELECT 1 FROM lesson_materials lm
-                JOIN lessons l ON l.item_id = lm.lesson_id
-                WHERE lm.file_id = f.id AND l.item_id = $2
-            )
-            OR EXISTS (
-                SELECT 1 FROM quiz_questions qq
-                JOIN quizzes q ON q.item_id = qq.quiz_id
-                WHERE qq.image_file_id = f.id AND q.item_id = $2
-            )
-        )
-        """,
-        user["id"],
-        item_id,
-    )
-
     await pool.execute("DELETE FROM course_items WHERE id = $1", item_id)
-    
-    for file_row in file_rows:
-        storage.delete(file_row["stored_name"])
-        await pool.execute("DELETE FROM files WHERE id = $1", file_row["id"])
-
     return {"ok": True}
 
 
@@ -613,76 +569,18 @@ async def get_lesson(item_id: int, user: dict = Depends(get_current_user)):
     )
     is_owner = user["role"] == "admin" or (user["role"] == "teacher" and _course["teacher_id"] == user["id"])
     quiz = await pool.fetchrow("SELECT * FROM quizzes WHERE item_id = $1", item_id)
-    attempt = None
-    quiz_started = False
-    questions = []
-    total_points = None
-    question_count = 0
+    quiz_data = {}
     if quiz:
-        raw_questions = await pool.fetch("SELECT * FROM quiz_questions WHERE quiz_id = $1 ORDER BY position", item_id)
-        question_count = len(raw_questions)
-        total_points = sum(q["points"] for q in raw_questions)
-        if user["role"] == "student":
-            attempt = await pool.fetchrow(
-                "SELECT * FROM quiz_attempts WHERE quiz_id = $1 AND student_id = $2", item_id, user["id"]
-            )
-            started = await pool.fetchrow(
-                "SELECT 1 FROM quiz_starts WHERE quiz_id = $1 AND student_id = $2", item_id, user["id"]
-            )
-            quiz_started = started is not None or attempt is not None
-        if is_owner:
-            quiz_started = True
-        if is_owner or quiz_started:
-            question_ids = [q["id"] for q in raw_questions]
-            option_rows = await pool.fetch(
-                """
-                SELECT id, question_id, text, image_file_id, is_correct, position
-                FROM question_options
-                WHERE question_id = ANY($1::bigint[])
-                ORDER BY question_id, position
-                """,
-                question_ids,
-            ) if question_ids else []
-            options_by_question: dict[int, list] = {}
-            for option in option_rows:
-                options_by_question.setdefault(option["question_id"], []).append(option)
-            for q in raw_questions:
-                opts = options_by_question.get(q["id"], [])
-                qd = {
-                    "id": q["id"],
-                    "type": q["type"],
-                    "prompt": q["prompt"],
-                    "image_file_id": q["image_file_id"],
-                    "points": q["points"],
-                    "options": [
-                        {"id": o["id"], "text": o["text"], "image_file_id": o["image_file_id"]}
-                        | ({"is_correct": o["is_correct"]} if is_owner or attempt else {})
-                        for o in opts
-                    ],
-                }
-                if is_owner or attempt:
-                    qd["explanation"] = q["explanation"]
-                questions.append(qd)
-    attempt_out = None
-    if attempt:
-        answers = await pool.fetch("SELECT * FROM attempt_answers WHERE attempt_id = $1", attempt["id"])
-        attempt_out = {
-            "id": attempt["id"],
-            "submitted_at": str(attempt["submitted_at"]),
-            "auto_score": float(attempt["auto_score"]),
-            "manual_score": float(attempt["manual_score"]) if attempt["manual_score"] is not None else None,
-            "status": attempt["status"],
-            "answers": [
-                {
-                    "question_id": a["question_id"],
-                    "selected_option_ids": list(a["selected_option_ids"]),
-                    "text_answer": a["text_answer"],
-                    "awarded_points": float(a["awarded_points"]) if a["awarded_points"] is not None else None,
-                }
-                for a in answers
-            ],
-        }
+        from routers.quizzes import get_quiz
+        quiz_data = await get_quiz(item_id, user)
+    attempt = quiz_data.get('attempt')
+    quiz_started = quiz_data.get('quiz_started', False)
+    questions = quiz_data.get('questions', [])
+    total_points = quiz_data.get('total_points')
+    question_count = quiz_data.get('question_count', 0)
+    attempt_out = attempt
     return {
+        **{key: quiz_data.get(key) for key in ('server_time','attempt_deadline_at','remaining_seconds','revision','saved_answers')},
         "type": "lesson",
         "is_owner": is_owner,
         "item": {"id": item["id"], "title": item["title"], "note": item["note"], "course_id": item["course_id"]},
@@ -756,14 +654,5 @@ async def delete_material(material_id: int, user: dict = Depends(require_teacher
     item = await get_item_or_404(mat["lesson_id"])
     await ensure_course_owner(user, item["course_id"])
     
-    file_row = None
-    if mat["file_id"]:
-        file_row = await pool.fetchrow("SELECT id, stored_name FROM files WHERE id = $1 AND owner_id = $2", mat["file_id"], user["id"])
-        
     await pool.execute("DELETE FROM lesson_materials WHERE id = $1", material_id)
-    
-    if file_row:
-        storage.delete(file_row["stored_name"])
-        await pool.execute("DELETE FROM files WHERE id = $1", file_row["id"])
-
     return {"ok": True}

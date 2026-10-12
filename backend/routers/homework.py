@@ -21,12 +21,13 @@ class HomeworkIn(BaseModel):
 
 class SubmitIn(BaseModel):
     comment: str = Field(default="", max_length=5000)
-    file_ids: list[int] = []
+    file_ids: list[int] = Field(default_factory=list, max_length=20)
 
 
 class GradeIn(BaseModel):
     grade: float = Field(ge=0)
     feedback: str = Field(default="", max_length=5000)
+    revision: int = Field(default=0, ge=0)
 
 
 def _now() -> datetime.datetime:
@@ -66,6 +67,7 @@ async def get_homework(item_id: int, user: dict = Depends(get_current_user)):
             )
             result["submission"] = {
                 "id": sub["id"],
+                "revision": sub["revision"],
                 "comment": sub["comment"],
                 "submitted_at": str(sub["submitted_at"]),
                 "grade": float(sub["grade"]) if sub["grade"] is not None else None,
@@ -119,6 +121,7 @@ async def submit_homework(item_id: int, data: SubmitIn, user: dict = Depends(req
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await conn.fetchval('SELECT id FROM users WHERE id=$1 FOR UPDATE', user['id'])
             existing = await conn.fetchrow(
                 "SELECT id FROM homework_submissions WHERE homework_id = $1 AND student_id = $2",
                 item_id,
@@ -128,7 +131,7 @@ async def submit_homework(item_id: int, data: SubmitIn, user: dict = Depends(req
                 sub_id = existing["id"]
                 await conn.execute(
                     """
-                    UPDATE homework_submissions SET comment = $1, submitted_at = now(), status = 'submitted'
+                    UPDATE homework_submissions SET comment = $1, submitted_at = now(), status = 'submitted',grade=NULL,feedback='',revision=revision+1
                     WHERE id = $2
                     """,
                     data.comment,
@@ -146,7 +149,7 @@ async def submit_homework(item_id: int, data: SubmitIn, user: dict = Depends(req
                     data.comment,
                 )
                 sub_id = row["id"]
-            for fid in data.file_ids:
+            for fid in dict.fromkeys(data.file_ids):
                 await conn.execute(
                     "INSERT INTO submission_files (submission_id, file_id) VALUES ($1, $2)", sub_id, fid
                 )
@@ -189,6 +192,7 @@ async def list_submissions(item_id: int, user: dict = Depends(require_teacher)):
         out.append(
             {
                 "id": r["id"],
+                "revision": r["revision"],
                 "student_id": r["student_id"],
                 "student_name": r["student_name"],
                 "student_email": r["student_email"],
@@ -215,10 +219,13 @@ async def grade_submission(submission_id: int, data: GradeIn, user: dict = Depen
     hw = await pool.fetchrow("SELECT max_score FROM homework WHERE item_id = $1", sub["homework_id"])
     if data.grade > hw["max_score"]:
         raise HTTPException(status_code=422, detail="Grade exceeds the homework maximum score")
-    await pool.execute(
-        "UPDATE homework_submissions SET grade = $1, feedback = $2, status = 'graded' WHERE id = $3",
+    changed = await pool.fetchval(
+        "UPDATE homework_submissions SET grade = $1, feedback = $2, status = 'graded',revision=revision+1 WHERE id = $3 AND revision=$4 RETURNING id",
         data.grade,
         data.feedback,
         submission_id,
+        data.revision,
     )
+    if changed is None:
+        raise HTTPException(409, 'The submission changed. Reload and review the latest work before grading.')
     return {"ok": True}

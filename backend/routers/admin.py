@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
 
 from core.db import get_pool
+from core.config import APP_ENV, PRODUCTION_ADMIN_EMAIL
 from core.deps import require_admin, require_teacher
-from core.security import hash_password
+from core.security import hash_password_async
+import asyncpg
 from routers.grades import compute_student_course_grade
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -131,7 +133,7 @@ async def list_users(
         FROM users
         WHERE ($1 = '' OR full_name ILIKE $2 OR email ILIKE $2)
           AND ($3 = '' OR role = $3)
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT $4 OFFSET $5
         """,
         q,
@@ -140,12 +142,15 @@ async def list_users(
         per_page,
         offset,
     )
-    total = rows[0]["total"] if rows else 0
+    total = rows[0]["total"] if rows else await pool.fetchval(
+        "SELECT count(*) FROM users WHERE ($1='' OR full_name ILIKE $2 OR email ILIKE $2) AND ($3='' OR role=$3)",q,like,role)
     return {"items": [public_user(r) for r in rows], "total": total, "page": page, "per_page": per_page}
 
 
 @router.post("/users")
 async def create_user(data: UserCreateIn, user: dict = Depends(require_admin)):
+    if APP_ENV == 'production' and data.role == 'admin':
+        raise HTTPException(422, 'Production has a single administrator')
     pool = await get_pool()
     existing = await pool.fetchrow("SELECT 1 FROM users WHERE email = $1", data.email.lower())
     if existing:
@@ -157,7 +162,7 @@ async def create_user(data: UserCreateIn, user: dict = Depends(require_admin)):
         RETURNING id, email, full_name, role, is_blocked, created_at
         """,
         data.email.lower(),
-        hash_password(data.password),
+        await hash_password_async(data.password),
         data.full_name.strip(),
         data.role,
     )
@@ -172,7 +177,12 @@ async def update_user(user_id: int, data: UserUpdateIn, user: dict = Depends(req
     existing = await pool.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="User not found")
-    password_hash = hash_password(data.password) if data.password else existing["password_hash"]
+    if APP_ENV == 'production':
+        if data.role == 'admin' and existing['role'] != 'admin':
+            raise HTTPException(422, 'Production has a single administrator')
+        if existing['role'] == 'admin' and data.email and data.email.lower() != PRODUCTION_ADMIN_EMAIL:
+            raise HTTPException(422, 'The production administrator email is fixed')
+    password_hash = await hash_password_async(data.password) if data.password else existing["password_hash"]
     try:
         row = await pool.fetchrow(
             """
@@ -191,10 +201,10 @@ async def update_user(user_id: int, data: UserUpdateIn, user: dict = Depends(req
             data.full_name.strip() if data.full_name else existing["full_name"],
             data.role or existing["role"],
             existing["is_blocked"] if data.is_blocked is None else data.is_blocked,
-            1 if data.password else 0,
+            1 if data.password or data.role is not None or data.is_blocked is not None else 0,
             user_id,
         )
-    except Exception as exc:
+    except asyncpg.UniqueViolationError as exc:
         raise HTTPException(status_code=409, detail="Email is already registered") from exc
     return public_user(row)
 
@@ -212,10 +222,12 @@ async def delete_user(user_id: int, user: dict = Depends(require_admin)):
 
 @router.post("/users/{user_id}/role")
 async def set_role(user_id: int, data: RoleIn, user: dict = Depends(require_admin)):
+    if APP_ENV == 'production' and data.role == 'admin':
+        raise HTTPException(422, 'Production has a single administrator')
     if user_id == user["id"]:
         raise HTTPException(status_code=422, detail="You cannot change your own role")
     pool = await get_pool()
-    row = await pool.fetchrow("UPDATE users SET role = $1 WHERE id = $2 RETURNING id", data.role, user_id)
+    row = await pool.fetchrow("UPDATE users SET role = $1, auth_version=auth_version+1 WHERE id = $2 RETURNING id", data.role, user_id)
     if row is None:
         raise HTTPException(status_code=404, detail="User not found")
     return {"ok": True}
@@ -227,7 +239,7 @@ async def set_blocked(user_id: int, data: BlockIn, user: dict = Depends(require_
         raise HTTPException(status_code=422, detail="You cannot block yourself")
     pool = await get_pool()
     row = await pool.fetchrow(
-        "UPDATE users SET is_blocked = $1 WHERE id = $2 RETURNING id", data.is_blocked, user_id
+        "UPDATE users SET is_blocked = $1, auth_version=auth_version+1 WHERE id = $2 RETURNING id", data.is_blocked, user_id
     )
     if row is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -302,7 +314,7 @@ async def create_group(data: GroupIn, user: dict = Depends(require_admin)):
             data.stream.strip(),
             data.capacity,
         )
-    except Exception as exc:
+    except asyncpg.UniqueViolationError as exc:
         raise HTTPException(status_code=409, detail="Group code already exists") from exc
     return dict(row) | {"created_at": str(row["created_at"])}
 
@@ -332,7 +344,7 @@ async def update_group(group_id: int, data: GroupUpdateIn, user: dict = Depends(
             data.capacity if data.capacity is not None else existing["capacity"],
             group_id,
         )
-    except Exception as exc:
+    except asyncpg.UniqueViolationError as exc:
         raise HTTPException(status_code=409, detail="Group code already exists") from exc
     return dict(row) | {"created_at": str(row["created_at"])}
 
@@ -416,12 +428,14 @@ async def add_student_to_group(group_id: int, data: GroupStudentIn, user: dict =
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            group = await conn.fetchrow("SELECT id, capacity FROM groups WHERE id = $1", group_id)
+            group = await conn.fetchrow("SELECT id, capacity FROM groups WHERE id = $1 FOR UPDATE", group_id)
             if group is None:
                 raise HTTPException(status_code=404, detail="Group not found")
             student = await conn.fetchrow("SELECT id FROM users WHERE id = $1 AND role = 'student'", data.student_id)
             if student is None:
                 raise HTTPException(status_code=404, detail="Student not found")
+            if await conn.fetchval('SELECT 1 FROM group_students WHERE group_id=$1 AND student_id=$2', group_id, data.student_id):
+                return {'ok': True}
             count = await conn.fetchval("SELECT COUNT(*) FROM group_students WHERE group_id = $1", group_id)
             if count >= group["capacity"]:
                 raise HTTPException(status_code=422, detail="Group is full")
