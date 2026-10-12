@@ -185,7 +185,7 @@ function LandingHeader() {
 
 function HeroSection() {
   return <section id="top" className={styles.heroWrap}><div className={styles.hero}>
-    <div className={styles.heroPhoto}><Image src="/landing/hero/approved-students-composite.jpg" alt="Fenomen мектебінің үш түлегі" fill priority quality={90} sizes="100vw" /></div>
+    <div className={styles.heroPhoto}><Image src="/landing/hero/approved-students-composite-4k.jpg" alt="Fenomen мектебінің үш түлегі" fill priority quality={90} sizes="100vw" /></div>
     <div className={styles.heroPhotoShade} aria-hidden="true" />
     <div className={styles.heroCopy}>
       <span className={styles.badge}><span className={styles.badgeDot} /> Бірінші апта тегін</span>
