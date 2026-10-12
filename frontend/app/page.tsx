@@ -17,6 +17,12 @@ import { PlatformDashboardPreview, PlatformFeatureArt } from './components/landi
 
 const whatsappUrl = 'https://api.whatsapp.com/send?phone=7474794383'
 const mapUrl = 'https://2gis.kz/shymkent/geo/70000001026160761/69.614394,42.304299'
+const branchMapTiles = Array.from({ length: 12 }, (_, index) => {
+  const column = index % 4
+  const row = Math.floor(index / 4)
+  const subdomains = ['a', 'b', 'c']
+  return `https://${subdomains[(column + row) % subdomains.length]}.tile.openstreetmap.org/${17}/${90880 + column}/${48505 + row}.png`
+})
 
 const landingImages = {
   results: [
@@ -117,26 +123,64 @@ function SectionHead({ eyebrow, title, text, light = false }: { eyebrow: string;
 }
 
 function LandingHeader() {
+  const headerRef = useRef<HTMLElement>(null)
   const [open, setOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
+  const [hidden, setHidden] = useState(false)
+  const [activeSection, setActiveSection] = useState('top')
 
   useEffect(() => {
-    const update = () => setScrolled(window.scrollY > 12)
-    update()
-    window.addEventListener('scroll', update, { passive: true })
-    return () => window.removeEventListener('scroll', update)
-  }, [])
+    let lastY = Math.max(0, window.scrollY)
+    let distance = 0
+    let frame = 0
+    setScrolled(lastY > 12)
+    if (open || lastY <= 100) setHidden(false)
+
+    const update = () => {
+      frame = 0
+      const y = Math.max(0, window.scrollY)
+      const delta = y - lastY
+      lastY = y
+      setScrolled(y > 12)
+      const active = document.activeElement
+      const keyboardFocused = active && headerRef.current?.contains(active) && active.matches(':focus-visible')
+      if (y <= 100 || open || keyboardFocused) {
+        distance = 0
+        setHidden(false)
+        return
+      }
+      if (!delta) return
+      distance = Math.sign(delta) === Math.sign(distance) ? distance + delta : delta
+      if (Math.abs(distance) >= 8) {
+        setHidden(distance > 0)
+        distance = 0
+      }
+    }
+    const onScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(update)
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.cancelAnimationFrame(frame)
+    }
+  }, [open])
 
   function navigateTo(event: MouseEvent<HTMLAnchorElement>, id: string) {
+    setActiveSection(id)
     setOpen(false)
     const target = document.getElementById(id)
-    if (!target || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    if (!target) return
     event.preventDefault()
     window.history.pushState(null, '', `${window.location.pathname}${window.location.search}#${id}`)
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const offset = (headerRef.current?.offsetHeight ?? 100) + 16
+    window.scrollTo({
+      top: id === 'top' ? 0 : target.getBoundingClientRect().top + window.scrollY - offset,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    })
   }
 
-  return <header className={`${styles.header} ${scrolled ? styles.headerScrolled : ''}`}><div className={styles.headerInner}><a href="#top" aria-label="Басты бет" onClick={(event) => navigateTo(event, 'top')}><Brand /></a><nav id="landing-navigation" className={`${styles.nav} ${open ? styles.navOpen : ''}`}>{navItems.map(([label, id]) => <a key={id} href={`#${id}`} onClick={(event) => navigateTo(event, id)}>{label}</a>)}<div className={styles.headerActions}><Link className={styles.loginCta} href="/login" onClick={() => setOpen(false)}>Кіру</Link></div></nav><button className={styles.menu} type="button" onClick={() => setOpen(!open)} aria-label={open ? 'Мәзірді жабу' : 'Мәзірді ашу'} aria-expanded={open} aria-controls="landing-navigation">{open ? <X /> : <Menu />}</button></div></header>
+  return <header ref={headerRef} onFocusCapture={() => setHidden(false)} className={`${styles.header} ${scrolled ? styles.headerScrolled : ''} ${hidden && !open ? styles.headerHidden : ''}`}><div className={styles.headerInner}><a href="#top" aria-label="Басты бет" onClick={(event) => navigateTo(event, 'top')}><Brand /></a><nav id="landing-navigation" className={`${styles.nav} ${open ? styles.navOpen : ''}`}>{navItems.map(([label, id]) => <a key={id} aria-current={activeSection === id ? 'location' : undefined} href={`#${id}`} onClick={(event) => navigateTo(event, id)}>{label}</a>)}<div className={styles.headerActions}><Link className={styles.loginCta} href="/login" onClick={() => setOpen(false)}>Кіру</Link></div></nav><button className={styles.menu} type="button" onClick={() => setOpen(!open)} aria-label={open ? 'Мәзірді жабу' : 'Мәзірді ашу'} aria-expanded={open} aria-controls="landing-navigation">{open ? <X /> : <Menu />}</button></div></header>
 }
 
 function HeroSection() {
@@ -149,8 +193,13 @@ function HeroSection() {
       <p>Курс, бейнесабақ, тапсырма, сынақ тесттері және нәтижені бақылау — бәрі бір платформада.</p>
       <div className={styles.heroActions}><a className={styles.primaryButton} href="#contact">Алғашқы апта тегін <ArrowRight size={20} /></a><a className={styles.ghostButton} href="#courses">Курстарды көру</a></div>
       <div className={styles.subjectTags} aria-label="ҰБТ пәндері"><span><Calculator size={16} />Математика</span><span><Atom size={16} />Физика</span><span><Leaf size={16} />Биология</span><span><FlaskConical size={16} />Химия</span><span><BookOpen size={16} />Қазақстан тарихы</span></div>
+      <div className={styles.heroSummary} aria-label="Fenomen нәтижелері">
+        <div className={styles.heroSummaryItem}><span className={styles.heroSummaryIcon}><UsersRound size={26} /></span><span><strong>1000+</strong><small>оқушы</small></span></div>
+        <div className={styles.heroSummaryItem}><span className={styles.heroSummaryIcon}><BarChart3 size={26} /></span><span><strong>130–140</strong><small>балл нәтижелері</small></span></div>
+        <div className={styles.heroSummaryItem}><span className={styles.heroSummaryIcon}><Trophy size={26} /></span><span><strong>90%</strong><small>грант иегерлері</small></span></div>
+      </div>
     </div>
-    <div className={styles.heroFloating}><BarChart3 size={30} /><span><b>Апталық тест</b><small>Нәтижеңді бақыла</small></span></div>
+    <div className={styles.heroFloating}><BarChart3 size={30} /><span><b>Апталық тест</b><small>Нәтижеңді бақыла</small></span><ArrowRight size={19} /></div>
   </div></section>
 }
 
@@ -435,13 +484,65 @@ function TeachersSection() {
 }
 
 function BranchSection() {
-  return <section id="branch" className={styles.section}><div className={styles.branch}><div className={styles.branchMap}><iframe src="/2gis-map.html" width="100%" height="100%" style={{ border: 0, minHeight: '440px' }} allowFullScreen loading="lazy" referrerPolicy="no-referrer-when-downgrade" /></div><div className={styles.branchCopy}><span className={styles.kicker}>ШЫМКЕНТТЕГІ FENOMEN</span><h2>Филиалға келіп оқыңыз</h2><p>Бетпе-бет сабақты қаласаңыз, Шымкенттегі филиалымызға келіңіз. Мұнда тыныш оқу ортасы, мұғаліммен тікелей жұмыс және тұрақты бақылау бар.</p><a className={styles.address} href={mapUrl} target="_blank" rel="noreferrer"><MapPin /><span><small>Мекенжайымыз</small><b>Шымкент қаласы, Төле би, 32А</b></span><ExternalLink size={16} /></a><div className={styles.branchActions}><a className={styles.whatsappButton} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp арқылы жазылу</a><a className={styles.outlineButton} href={mapUrl} target="_blank" rel="noreferrer"><MapPin size={18} /> Картадан көру</a></div></div></div></section>
+  return <section id="branch" className={styles.branchSection} aria-labelledby="branch-title">
+    <div className={styles.branchShowcase}>
+      <div className={styles.branchVisual}>
+        <Image src="/landing/branch/fenomen-building.png" alt="Шымкенттегі Fenomen мектебінің нақты ғимараты" fill sizes="(max-width: 780px) 100vw, 55vw" />
+        <div className={styles.branchHours}>
+          <span><Clock3 size={24} /></span>
+          <p><small>Жұмыс уақыты</small><strong>09:00 – 18:00</strong><small>Демалыссыз</small></p>
+        </div>
+        <a className={styles.branchMapCard} href={mapUrl} target="_blank" rel="noreferrer" aria-label="2GIS картасында Шымкент қаласы, Төле би, 32А мекенжайын ашу">
+          <span className={styles.branchMapTiles} aria-hidden="true">
+            {branchMapTiles.map((tile) => <img key={tile} src={tile} alt="" loading="lazy" />)}
+          </span>
+          <span className={styles.branchMapPin} aria-hidden="true"><MapPin size={34} fill="currentColor" /></span>
+          <span className={styles.branchMapLabel}><strong>Шымкент қаласы,<br />Төле би, 32А</strong></span>
+          <span className={styles.branchMapAttribution}>© OpenStreetMap contributors</span>
+        </a>
+      </div>
+      <div className={styles.branchDetails}>
+        <span className={styles.branchEyebrow}><MapPin size={18} /> ШЫМКЕНТТЕГІ FENOMEN</span>
+        <h2 id="branch-title">Филиалға келіп<br /><em>оқыңыз</em></h2>
+        <p className={styles.branchDescription}>Бетпе-бет сабақ оқығыңыз келсе, Шымкенттегі филиалымызға келіңіз. Мұнда тыныш оқу ортасы, мұғаліммен тікелей жұмыс және тұрақты бақылау бар.</p>
+        <a className={styles.branchAddress} href={mapUrl} target="_blank" rel="noreferrer">
+          <span className={styles.branchAddressIcon}><MapPin size={24} /></span>
+          <span><small>Мекенжайымыз</small><strong>Шымкент қаласы, Төле би, 32А</strong></span>
+          <ExternalLink size={20} />
+        </a>
+        <div className={styles.branchBenefits}>
+          <div><span><GraduationCap size={23} /></span><p>Жайлы және тыныш оқу ортасы</p></div>
+          <div><span><UsersRound size={23} /></span><p>Мұғаліммен тікелей жұмыс</p></div>
+          <div><span><BarChart3 size={23} /></span><p>Тұрақты бақылау және қолдау</p></div>
+        </div>
+        <div className={styles.branchCtas}>
+          <a className={styles.branchWhatsapp} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp арқылы жазылу <ArrowRight size={19} /></a>
+          <a className={styles.branchMapLink} href={mapUrl} target="_blank" rel="noreferrer"><MapPin size={20} /> Картадан көру</a>
+        </div>
+      </div>
+    </div>
+  </section>
 }
 
 function LeadFormSection() {
+  const sectionRef = useRef<HTMLElement>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    const section = sectionRef.current
+    if (!section || window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return
+      section.classList.add(styles.consultationRevealed)
+      observer.disconnect()
+    }, { threshold: 0.08 })
+    section.classList.add(styles.consultationPending)
+    observer.observe(section)
+    return () => observer.disconnect()
+  }, [])
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (busy) return
@@ -475,7 +576,49 @@ function LeadFormSection() {
       }
     }
   }
-  return <section id="contact" className={`${styles.section} ${styles.contact}`}><div className={styles.contactCopy}><span className={styles.badgeDark}>БІРІНШІ ҚАДАМ</span><h2>Кеңес алуға өтінім қалдырыңыз</h2><p>Менеджеріміз сізбен хабарласып, оқу тәсілі, курс мазмұны мен филиал туралы сұрақтарыңызға жауап береді.</p><ul><li><Check /> Деңгейіңізге сай дайындық бағыты</li><li><Check /> Өзіңізге ыңғайлы оқу тәсілі</li><li><Check /> Алғашқы апта тегін</li></ul><a className={styles.whatsappButton} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp арқылы жазылу</a></div><form className={styles.form} onSubmit={submit} noValidate><label>Аты-жөніңіз<input name="name" placeholder="Аты-жөніңізді жазыңыз" />{errors.name && <small>{errors.name}</small>}</label><label>Телефон нөміріңіз<input name="phone" type="tel" placeholder="+7 (___) ___-__-__" />{errors.phone && <small>{errors.phone}</small>}</label><label>Қызықтырған курс<select name="course" defaultValue=""><option value="" disabled>Курсты таңдаңыз</option>{courses.map(course => <option key={course.title}>{course.title}</option>)}</select>{errors.course && <small>{errors.course}</small>}</label><label>Филиал<input value="Шымкент, Төле би, 32А" readOnly /></label><button className={styles.primaryButton}>Өтінім қалдыру <ArrowRight size={18} /></button>{sent && <p className={styles.success}><Check /> Өтініміңіз қабылданды! Менеджеріміз жақын арада хабарласады.</p>}</form></section>
+  return <section id="contact" ref={sectionRef} className={styles.consultationSection} aria-labelledby="consultation-title">
+    <div className={styles.consultationPanel}>
+      <div className={styles.consultationCopy}>
+        <span className={styles.consultationEyebrow}>БІРІНШІ ҚАДАМ</span>
+        <h2 id="consultation-title">Кеңес алуға өтінім<br />қалдырыңыз</h2>
+        <p>Менеджеріміз сізбен хабарласып, оқу тәсілі, курс мазмұны мен филиал туралы сұрақтарыңызға жауап береді.</p>
+        <ul>
+          <li><Check aria-hidden="true" /> Деңгейіңізге сай дайындық бағыты</li>
+          <li><Check aria-hidden="true" /> Өзіңізге ыңғайлы оқу тәсілі</li>
+          <li><Check aria-hidden="true" /> Алғашқы апта тегін</li>
+        </ul>
+        <a className={styles.consultationWhatsapp} href={whatsappUrl} target="_blank" rel="noreferrer"><WhatsAppIcon /> WhatsApp арқылы жазылу</a>
+      </div>
+      <form className={styles.consultationForm} onSubmit={submit} noValidate aria-busy={busy}>
+        <label htmlFor="lead-name">Аты-жөніңіз
+          <input id="lead-name" name="name" placeholder="Аты-жөніңізді жазыңыз" aria-invalid={!!errors.name} aria-describedby={errors.name ? 'lead-name-error' : undefined} />
+          {errors.name && <small id="lead-name-error">{errors.name}</small>}
+        </label>
+        <label htmlFor="lead-phone">Телефон нөміріңіз
+          <input id="lead-phone" name="phone" type="tel" placeholder="+7 (___) ___-__-__" aria-invalid={!!errors.phone} aria-describedby={errors.phone ? 'lead-phone-error' : undefined} />
+          {errors.phone && <small id="lead-phone-error">{errors.phone}</small>}
+        </label>
+        <label htmlFor="lead-course">Қызықтырған курс
+          <span className={styles.consultationSelect}>
+            <select id="lead-course" name="course" defaultValue="" aria-invalid={!!errors.course} aria-describedby={errors.course ? 'lead-course-error' : undefined}>
+              <option value="" disabled>Курсты таңдаңыз</option>
+              {courses.map(course => <option key={course.title}>{course.title}</option>)}
+            </select>
+            <ChevronDown size={18} aria-hidden="true" />
+          </span>
+          {errors.course && <small id="lead-course-error">{errors.course}</small>}
+        </label>
+        <label htmlFor="lead-branch">Филиал
+          <input id="lead-branch" value="Шымкент, Төле би, 32А" readOnly />
+        </label>
+        <button className={styles.consultationSubmit} type="submit" disabled={busy}>
+          {busy ? 'Жіберілуде…' : 'Өтінім қалдыру'} <ArrowRight size={22} aria-hidden="true" />
+        </button>
+        {errors.form && <p className={styles.consultationError} role="alert">{errors.form}</p>}
+        {sent && <p className={styles.consultationSuccess} role="status"><Check aria-hidden="true" /> Өтініміңіз қабылданды! Менеджеріміз жақын арада хабарласады.</p>}
+      </form>
+    </div>
+  </section>
 }
 
 function FAQSection() {
