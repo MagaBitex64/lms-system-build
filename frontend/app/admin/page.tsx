@@ -5,6 +5,7 @@ import useSWR from 'swr'
 import { BookOpen, Check, GraduationCap, Pencil, PlusCircle, Search, Trash2, UserMinus, Users, UserPlus, X, ClipboardList } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { api, fetcher } from '@/lib/api'
+import { useAllGroups } from '@/lib/groups'
 import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Field, Input, PageHeader, Select, Spinner, Modal, DeletionConfirmModal } from '../components/ui'
 
 type UserPage = { items: User[]; total: number }
@@ -162,7 +163,7 @@ function TeachersTab() {
   const [page, setPage] = useState(1)
   useEffect(() => { setPage(1) }, [query])
   const teachersReq = useSWR<UserPage>(`/admin/users?role=teacher&per_page=50&page=${page}&q=${encodeURIComponent(query)}`, fetcher)
-  const groupsReq = useSWR<{ items: Group[] }>('/admin/groups?per_page=100', fetcher)
+  const groupsReq = useAllGroups<Group>()
   const detailReq = useSWR<TeacherDetail>(selectedId ? `/admin/teachers/${selectedId}` : null, fetcher)
   const teachers = teachersReq.data?.items ?? []
 
@@ -347,7 +348,7 @@ function GroupsTab() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
-  const groupsReq = useSWR<{ items: Group[] }>('/admin/groups?per_page=100', fetcher)
+  const groupsReq = useAllGroups<Group>()
   const detailReq = useSWR<GroupDetail>(selectedId ? `/admin/groups/${selectedId}` : null, fetcher)
   const searchReq = useSWR<{ items: User[] }>(
     selectedId ? `/admin/groups/${selectedId}/student-search?q=${encodeURIComponent(studentQuery)}` : null,
@@ -362,7 +363,8 @@ function GroupsTab() {
 
   async function createGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
     setError(null)
     try {
       await api('/admin/groups', {
@@ -374,7 +376,7 @@ function GroupsTab() {
           capacity: Number(form.get('capacity') || 20),
         },
       })
-      event.currentTarget.reset()
+      formElement.reset()
       await groupsReq.mutate()
     } catch (err) {
       setError((err as Error).message || t('errorOccurred'))

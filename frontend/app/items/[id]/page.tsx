@@ -20,6 +20,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
+import { createAnswerBatch, persistAnswerBatch, type AnswerBatch } from '@/lib/quiz-answer-save'
 import { useI18n, type TKey } from '@/lib/i18n'
 import AuthImage from '@/components/auth-image'
 import { api, downloadApiFile, downloadFile, getFileUrl, ApiError } from '@/lib/api'
@@ -1092,7 +1093,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
   const submitLock = useRef(false)
   const [saveMessage, setSaveMessage] = useState('')
   const [conflicted, setConflicted] = useState(false)
-  const retryRequest = useRef<{ sequence: number; body: { revision: number; request_id: string; answers: { question_id: number; selected_option_ids: number[]; text_answer: string }[] } } | null>(null)
+  const retryRequest = useRef<AnswerBatch | null>(null)
   latest.current = answers
   useEffect(() => {
     if (!data.quiz_started || initialized.current) return
@@ -1113,14 +1114,23 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
   function answerPayload() {
     return questions.map(q => ({ question_id: q.id, selected_option_ids: latest.current[q.id]?.selected_option_ids ?? [], text_answer: latest.current[q.id]?.text_answer ?? '' }))
   }
+  async function flushAnswers() {
+    const batch = retryRequest.current ?? createAnswerBatch(answerPayload(), revision.current, dirty.current)
+    retryRequest.current = batch
+    try {
+      const result = await persistAnswerBatch(batch, body => api(`/quizzes/${data.item.id}/answers`, { method: 'PATCH', body }))
+      saved.current = batch.sequence
+      retryRequest.current = null
+      return result
+    } finally {
+      revision.current = batch.revision
+    }
+  }
   async function saveAnswers() {
     if (conflicted || pending.current || submitLock.current || dirty.current === saved.current || !data.quiz_started || data.attempt) return
-    const request = retryRequest.current ?? { sequence: dirty.current, body: { revision: revision.current, request_id: crypto.randomUUID(), answers: answerPayload() } }
-    retryRequest.current = request
     const job = (async () => {
       try {
-        const result = await api<{ revision: number; submitted: boolean }>(`/quizzes/${data.item.id}/answers`, { method: 'PATCH', body: request.body })
-        revision.current = result.revision; saved.current = request.sequence; retryRequest.current = null
+        const result = await flushAnswers()
         setSaveMessage('Жауаптар сақталды')
         if (result.submitted) await reload()
       } catch (err) { if (err instanceof ApiError && err.status === 409) setConflicted(true); setError((err as Error).message); setSaveMessage('Сақтау орындалмады') }
@@ -1188,11 +1198,11 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
     if (pending.current) await pending.current
     setError(null)
     try {
-      if (retryRequest.current && secondsLeft !== 0) {
-        const result = await api<{ revision: number }>(`/quizzes/${data.item.id}/answers`, { method: 'PATCH', body: retryRequest.current.body })
-        revision.current = result.revision; retryRequest.current = null
+      if (secondsLeft !== 0) {
+        if (retryRequest.current) await flushAnswers()
+        if (dirty.current !== saved.current) await flushAnswers()
       }
-      await api(`/quizzes/${data.item.id}/attempt`, { body: { revision: revision.current, answers: answerPayload() } })
+      await api(`/quizzes/${data.item.id}/attempt`, { body: { revision: revision.current, answers: [] } })
       saved.current = dirty.current
       await reload()
     } catch (err) {
@@ -1334,6 +1344,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
                   <Textarea
                     className="mt-3"
                     rows={q.type === 'long_text' ? 6 : 3}
+                    disabled={working || conflicted || secondsLeft === 0}
                     value={answers[q.id]?.text_answer ?? ''}
                     onChange={(e) => {
                       dirty.current += 1

@@ -28,6 +28,46 @@ from routers.ent_trial import make_snapshot
 
 @unittest.skipUnless(os.environ.get('RUN_RELEASE_TESTS')=='1', 'Explicit disposable database required')
 class ReleaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_large_word_quiz_saves_in_batches_and_submits(self):
+        import io
+        from docx import Document
+        item_id = await self.item()
+        document = Document()
+        for index in range(1001):
+            for line in (f'<question>Question {index}', '<variant_correct>Yes', '<variant>No'):
+                document.add_paragraph(line)
+        output = io.BytesIO()
+        document.save(output)
+        response = await self.request(
+            'POST', f'/quizzes/{item_id}/import-docx?preview=false', 'teacher',
+            files={'file': ('large.docx', output.getvalue(),
+                            'application/vnd.openxmlformats-officedocument.wordprocessingml.document')},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((await self.request('POST', f'/quizzes/{item_id}/start')).status_code, 200)
+        quiz = (await self.request('GET', f'/quizzes/{item_id}')).json()
+        self.assertEqual(len(quiz['questions']), 1001)
+        answers = [
+            {'question_id': question['id'],
+             'selected_option_ids': [next(option['id'] for option in question['options'] if option['text'] == 'Yes')]}
+            for question in quiz['questions']
+        ]
+        revision = 0
+        for index in range(0, len(answers), 1000):
+            body = {'revision': revision, 'request_id': f'large-quiz-batch-{index:04}',
+                    'answers': answers[index:index + 1000]}
+            saved = await self.request('PATCH', f'/quizzes/{item_id}/answers', json=body)
+            self.assertEqual(saved.status_code, 200, saved.text)
+            revision = saved.json()['revision']
+            replay = await self.request('PATCH', f'/quizzes/{item_id}/answers', json=body)
+            self.assertEqual(replay.json()['revision'], revision)
+        submitted = await self.request('POST', f'/quizzes/{item_id}/attempt',
+                                       json={'revision': revision, 'answers': []})
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        self.assertEqual(submitted.json()['auto_score'], 100)
+        self.assertEqual(await self.pool.fetchval(
+            'SELECT count(*) FROM attempt_answers WHERE attempt_id=$1', submitted.json()['attempt_id']), 1001)
+
     async def asyncSetUp(self):
         self.assertEqual(urlparse(DATABASE_URL).hostname,'auditdb')
         self.schema = 'release_'+uuid.uuid4().hex

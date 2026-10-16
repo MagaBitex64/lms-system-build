@@ -306,8 +306,6 @@ async def import_questions_docx(
     except FileValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     questions = parse_docx_questions(content)
-    if len(questions) > 1000:
-        raise HTTPException(422, 'A quiz may contain at most 1000 questions')
     if preview:
         preview_questions = []
         for question in questions:

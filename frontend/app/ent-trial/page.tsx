@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react'
 import { useI18n } from '@/lib/i18n'
 import { useAuth } from '@/lib/auth'
 import { api, fetcher } from '@/lib/api'
+import { useAllGroups } from '@/lib/groups'
 import useSWR from 'swr'
 import { Card, Button, Spinner, ErrorState, EmptyState, Badge, PageHeader, Modal, DropdownMenu, DeletionConfirmModal, Field, Select } from '@/components/ui'
 import { ClipboardList, ArrowRight, Plus, Trash2, CheckCircle, Users, Layers, Award, Edit, ChevronDown, FileText, Shuffle, ListChecks, MoreHorizontal, ArrowLeft } from 'lucide-react'
@@ -25,7 +26,7 @@ export default function EntTrialListPage() {
   const { data: accessesData, error: accessesError, isLoading: accessesLoading, mutate: mutateAccesses } = useSWR<{ items: any[] }>(isStudent ? '/ent-trial/my-accesses' : null, fetcher)
   const { data: variantsData, isLoading: variantsLoading, mutate: mutateVariants } = useSWR<{ items: any[] }>(isAdmin ? '/ent-trial/variants' : null, fetcher)
   const { data: allAccessesData, mutate: mutateAdminAccesses } = useSWR<{ items: any[] }>(isAdmin ? '/ent-trial/admin/accesses' : null, fetcher)
-  const { data: groupsData } = useSWR<{ items: any[] }>(isAdmin ? '/admin/groups?per_page=100' : null, fetcher)
+  const { data: groupsData } = useAllGroups<{ id: number; code: string; title: string }>(isAdmin)
   const [adminTab, setAdminTab] = useState<'variants' | 'grant_access' | 'edit_variant'>('variants')
   const [editingVariantId, setEditingVariantId] = useState<number | null>(null)
 
