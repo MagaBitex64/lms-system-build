@@ -23,6 +23,7 @@ import {
 import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
 import { Spinner, Avatar, cx } from './ui'
+import adminHomeStyles from '../dashboard/admin-home.module.css'
 
 const PUBLIC_ROUTES = ['/', '/login', '/forgot-password', '/reset-password']
 
@@ -92,13 +93,15 @@ function AuthedShell({ children }: { children: ReactNode }) {
   const roleLabel: TKey =
     user.role === 'admin' ? 'admin' : user.role === 'teacher' ? 'teacher' : 'student'
 
+  const isAdminHome = user.role === 'admin' && pathname === '/dashboard'
+
   // Sidebar component
   const sidebar = (
-    <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
+    <div className={cx('flex h-full flex-col bg-sidebar text-sidebar-foreground', isAdminHome && adminHomeStyles.sidebar)}>
       {/* Logo section */}
       <Link
         href="/dashboard"
-        className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border"
+        className={cx('flex items-center gap-3 px-6 py-6 border-b border-sidebar-border', isAdminHome && adminHomeStyles.brand)}
         onClick={() => setMenuOpen(false)}
       >
         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-soft flex-shrink-0 overflow-hidden">
@@ -118,7 +121,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
       </Link>
 
       {/* Navigation */}
-      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-4 py-4" aria-label="Негізгі навигация">
+      <nav className={cx('flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-4 py-4', isAdminHome && adminHomeStyles.navigation)} aria-label="Негізгі навигация">
         <p className="px-4 pb-2 text-xs font-semibold tracking-wider text-sidebar-muted">ОҚУ</p>
         {nav.map((n) => {
           const active = pathname === n.href || (n.href !== '/admin' && pathname.startsWith(n.href + '/'))
@@ -131,6 +134,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
               aria-current={active ? 'page' : undefined}
               className={cx(
                 'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary',
+                isAdminHome && adminHomeStyles.navLink,
                 active
                   ? 'bg-primary-soft text-primary-hover'
                   : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-foreground',
@@ -145,7 +149,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
       </nav>
 
       {/* Profile & Logout */}
-      <div className="border-t border-sidebar-border p-4">
+      <div className={cx('border-t border-sidebar-border p-4', isAdminHome && adminHomeStyles.logout)}>
         <button
           onClick={() => {
             setMenuOpen(false)
@@ -161,7 +165,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
   )
 
   return (
-    <div className={cx('platform-ui min-h-screen bg-background', user.role === 'admin' && 'admin-ui')}>
+    <div className={cx('platform-ui min-h-screen bg-background', user.role === 'admin' && 'admin-ui', isAdminHome && adminHomeStyles.shell)}>
       {/* Desktop Sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-sidebar-border lg:block bg-sidebar">
         {sidebar}
@@ -190,8 +194,8 @@ function AuthedShell({ children }: { children: ReactNode }) {
       {/* Main content wrapper */}
       <div className="lg:ml-64">
         {/* Top Bar */}
-        <header className="sticky top-0 z-20 border-b border-border bg-surface">
-          <div className="flex items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 py-4">
+        <header className={cx('sticky top-0 z-20 border-b border-border bg-surface', isAdminHome && adminHomeStyles.topbar)}>
+          <div className={cx('flex items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 py-4', isAdminHome && adminHomeStyles.toolbar)}>
             {/* Left: Menu button + Search */}
             <div className="flex items-center gap-3 flex-1 min-w-0">
               <button
@@ -204,7 +208,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
 
               {/* Search */}
               <form
-                className="hidden sm:flex flex-1 max-w-md items-center"
+                className={cx('hidden sm:flex flex-1 max-w-md items-center', isAdminHome && adminHomeStyles.search)}
                 onSubmit={onSearchSubmit}
                 role="search"
               >
@@ -223,14 +227,14 @@ function AuthedShell({ children }: { children: ReactNode }) {
                     onChange={(e) => setQ(e.target.value)}
                     placeholder={t('searchPlaceholder')}
                     aria-label={t('searchPlaceholder')}
-                    className="w-full h-10 pl-10 pr-4 rounded-lg border border-border bg-surface-muted text-foreground placeholder:text-muted/60 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                    className={cx('w-full h-10 pl-10 pr-4 rounded-lg border border-border bg-surface-muted text-foreground placeholder:text-muted/60 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary', isAdminHome && adminHomeStyles.searchInput)}
                   />
                 </div>
               </form>
             </div>
 
             {/* Right: Profile */}
-            <div className="flex items-center justify-end">
+            <div className={cx('flex items-center justify-end', isAdminHome && adminHomeStyles.profile)}>
               <div className="flex items-center gap-2.5 px-2.5 py-1.5">
                 {/* Avatar */}
                 <Avatar name={user.full_name} className="bg-primary-soft text-primary flex-shrink-0" size="sm" />
@@ -249,7 +253,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <main className="p-4 sm:p-6 lg:p-8">{children}</main>
+        <main className={cx('p-4 sm:p-6 lg:p-8', isAdminHome && adminHomeStyles.pageContent)}>{children}</main>
       </div>
     </div>
   )

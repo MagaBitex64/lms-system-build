@@ -203,77 +203,6 @@ function HeroSection() {
   </div></section>
 }
 
-function AnimatedStat({ value, rangeStart, suffix = '' }: { value: number; rangeStart?: number; suffix?: string }) {
-  const ref = useRef<HTMLSpanElement>(null)
-  const [current, setCurrent] = useState(value)
-
-  useEffect(() => {
-    const node = ref.current
-    if (!node || window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return
-    let frame = 0
-    const observer = new IntersectionObserver(([entry]) => {
-      if (!entry.isIntersecting) return
-      observer.disconnect()
-      const start = performance.now()
-      const tick = (now: number) => {
-        const progress = Math.min((now - start) / 1250, 1)
-        const eased = 1 - Math.pow(1 - progress, 3)
-        setCurrent(Math.round(value * eased))
-        if (progress < 1) frame = requestAnimationFrame(tick)
-      }
-      frame = requestAnimationFrame(tick)
-    }, { threshold: 0.35 })
-    observer.observe(node)
-    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
-  }, [value])
-
-  const startValue = rangeStart === undefined ? '' : `${Math.round(rangeStart * current / value)}–`
-  const finalLabel = rangeStart === undefined ? `${value}${suffix}` : `${rangeStart}–${value}${suffix}`
-  return <span ref={ref} aria-label={finalLabel}>{startValue}{current}{suffix}</span>
-}
-
-function ResultsStatsSection() {
-  const sectionRef = useRef<HTMLElement>(null)
-
-  useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return
-    const cards = sectionRef.current?.querySelectorAll<HTMLElement>('[data-stats-reveal]')
-    if (!cards) return
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return
-        entry.target.classList.add(styles.resultsStatsRevealed)
-        observer.unobserve(entry.target)
-      })
-    }, { threshold: 0.15 })
-    cards.forEach((card) => { card.classList.add(styles.resultsStatsPending); observer.observe(card) })
-    return () => observer.disconnect()
-  }, [])
-
-  return <section ref={sectionRef} className={styles.resultsStats} aria-labelledby="results-stats-title">
-    <div className={styles.resultsStatsInner}>
-      <div className={styles.resultsStatsIntro}>
-        <span className={styles.resultsStatsEyebrow}><i /> FENOMEN ЖЕТІСТІКТЕРІ</span>
-        <h2 id="results-stats-title">10 жылдық еңбектің <em>нәтижесі</em></h2>
-        <p>Әр оқушының жетістігі — біздің мақтанышымыз.</p>
-      </div>
-      <div className={styles.resultsStatsGrid}>
-        <article className={styles.resultsStatsCard} data-stats-reveal>
-          <div className={styles.resultsStatsImage}><Image src="/landing/stats/academic-books.jpg" alt="Оқулықтар, қаламдар және глобус" fill sizes="(max-width: 780px) 100vw, 370px" /></div>
-          <div className={styles.resultsStatsCardContent}><span className={styles.resultsStatsIcon}><UsersRound size={27} /></span><strong><AnimatedStat value={1000} suffix="+" /></strong><p>10 жылдан бері оқушы<br />бізді таңдайды</p></div>
-        </article>
-        <article className={styles.resultsStatsCard} data-stats-reveal>
-          <div className={styles.resultsStatsImage}><Image src="/landing/stats/exam-sheet.jpg" alt="ҰБТ жауап парағы мен қалам" fill sizes="(max-width: 780px) 100vw, 370px" /></div>
-          <div className={styles.resultsStatsCardContent}><span className={styles.resultsStatsIcon}><Trophy size={27} /></span><strong><AnimatedStat value={140} rangeStart={130} /></strong><p>балл иегерлерін<br />дайындаймыз</p></div>
-        </article>
-        <article className={styles.resultsStatsCard} data-stats-reveal>
-          <div className={styles.resultsStatsImage}><Image src="/landing/stats/graduation-campus.jpg" alt="Университет ғимараты мен академиялық қалпақ" fill sizes="(max-width: 780px) 100vw, 370px" /></div>
-          <div className={styles.resultsStatsCardContent}><span className={styles.resultsStatsIcon}><GraduationCap size={28} /></span><strong><AnimatedStat value={90} suffix="%" /></strong><p>түлектеріміз мемлекеттік<br />грант иегері атанды</p></div>
-        </article>
-      </div>
-    </div>
-  </section>
-}
 
 function CoursesSection() {
   const gridRef = useRef<HTMLDivElement>(null)
@@ -397,7 +326,9 @@ function ResultsSection() {
       <div className={styles.studentResultsGrid}>
         {results.map((student) => <article className={styles.studentResultCard} key={student.name}>
           <div className={styles.studentResultPhoto}>
-            <Image src={student.image} alt={student.name} fill sizes="(max-width: 640px) 100vw, (max-width: 1100px) 50vw, 25vw" />
+            <div className={styles.studentResultPortrait}>
+              <Image src={student.image} alt={student.name} fill sizes="(max-width: 640px) 100vw, (max-width: 1100px) 50vw, 25vw" />
+            </div>
             <strong className={styles.studentResultScore}>{student.score}</strong>
           </div>
           <div className={styles.studentResultContent}>
@@ -630,5 +561,5 @@ function LandingFooter() {
 }
 
 export default function HomePage() {
-  return <main className={styles.landing}><LandingHeader /><HeroSection /><ResultsStatsSection /><CoursesSection /><HowItWorksSection /><PlatformSection /><ResultsSection /><TeachersSection /><BranchSection /><LeadFormSection /><FAQSection /><LandingFooter /></main>
+  return <main className={styles.landing}><LandingHeader /><HeroSection /><CoursesSection /><HowItWorksSection /><PlatformSection /><ResultsSection /><TeachersSection /><BranchSection /><LeadFormSection /><FAQSection /><LandingFooter /></main>
 }

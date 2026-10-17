@@ -25,6 +25,7 @@ import {
   FadeIn,
 } from '@/components/ui'
 import { CourseCard, type CourseSummary } from '@/components/course-card'
+import { AdminDashboardHome } from './admin-home'
 
 type Stat = {
   total_users: number
@@ -51,6 +52,16 @@ export default function DashboardPage() {
   const firstName = user?.full_name?.split(' ')[0] ?? ''
 
   if (!user) return <Spinner className="mt-20" />
+
+  if (isAdmin) return <AdminDashboardHome
+    firstName={firstName}
+    stats={stats.data}
+    statsLoading={stats.isLoading}
+    statsError={Boolean(stats.error)}
+    courses={mine.data ?? []}
+    coursesLoading={mine.isLoading}
+    coursesError={Boolean(mine.error)}
+  />
 
   /* -------------------------------------------------------------- Student */
   if (isStudent) {
