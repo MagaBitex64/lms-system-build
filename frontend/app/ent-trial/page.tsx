@@ -6,13 +6,16 @@ import { useAuth } from '@/lib/auth'
 import { api, fetcher } from '@/lib/api'
 import { useAllGroups } from '@/lib/groups'
 import useSWR from 'swr'
-import { Card, Button, Spinner, ErrorState, EmptyState, Badge, PageHeader, Modal, DropdownMenu, DeletionConfirmModal, Field, Select } from '@/components/ui'
+import { Card, Button, Spinner, ErrorState, EmptyState, Badge, Modal, DropdownMenu, DeletionConfirmModal, Field, Select } from '@/components/ui'
 import { ClipboardList, ArrowRight, Plus, Trash2, CheckCircle, Users, Layers, Award, Edit, ChevronDown, FileText, Shuffle, ListChecks, MoreHorizontal, ArrowLeft } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
 import VariantEditor from '@/components/ent-variant-editor'
 import { formatDate } from '@/lib/date'
 import { type Rules } from '@/lib/ent'
+import { ExamArt, VariantCover } from './variant-art'
+import styles from './management.module.css'
+import StudentTests from './student-tests'
 
 export default function EntTrialListPage() {
   const { t } = useI18n()
@@ -204,13 +207,20 @@ export default function EntTrialListPage() {
   // ADMIN VIEW
   if (isAdmin) {
     return (
-      <div className="max-w-6xl mx-auto space-y-6">
-        <PageHeader
-          eyebrow="Басқару"
-          title="Сынақ ҰБТ"
-          description="Нұсқаларды құру, сұрақтарды қосу, оқушыларға рұқсат беру"
-          actions={<Button onClick={() => { setCreateOpen(true); setCreateError('') }}><Plus size={16} />Нұсқа құру</Button>}
-        />
+      <div className={styles.adminPage}>
+        <header className={styles.banner}>
+          <div className={styles.bannerContent}>
+            <div><p className={styles.eyebrow}>БАСҚАРУ</p><h1>Сынақ ҰБТ</h1><p className={styles.description}>Нұсқаларды құру, сұрақтарды қосу, оқушыларға рұқсат беру.</p></div>
+            <ExamArt className={styles.bannerArt} />
+            <Button className={styles.createButton} onClick={() => { setCreateOpen(true); setCreateError('') }}><Plus size={17} />Нұсқа құру</Button>
+          </div>
+          <div className={styles.tabs} aria-label="Сынақ ҰБТ бөлімдері">
+            {([
+              ['variants', 'Нұсқалар', <Layers key="v" size={17} />],
+              ['grant_access', 'Рұқсаттар', <Users key="a" size={17} />],
+            ] as const).map(([key, label, icon]) => <button key={key} type="button" onClick={() => setAdminTab(key)} aria-pressed={adminTab === key}>{icon}{label}</button>)}
+          </div>
+        </header>
 
         {notice && <p role="status" className="text-sm font-medium text-success-foreground">{notice}</p>}
         {deleteError && <ErrorState message={deleteError} />}
@@ -224,26 +234,6 @@ export default function EntTrialListPage() {
           warning={deleteError || undefined}
           isLoading={deleting}
         />
-
-        {/* Tab Buttons */}
-        <div className="flex flex-wrap gap-2 border-b border-border pb-1">
-          {([
-            ['variants', 'Нұсқалар', <Layers key="v" size={16} />],
-            ['grant_access', 'Рұқсаттар', <Users key="a" size={16} />],
-          ] as const).map(([key, label, icon]) => (
-            <button
-              key={key}
-              onClick={() => setAdminTab(key)}
-              aria-pressed={adminTab === key}
-              className={`inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition-colors ${
-                adminTab === key ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-foreground'
-              }`}
-            >
-              {icon}
-              {label}
-            </button>
-          ))}
-        </div>
 
             <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Нұсқа құру" closeDisabled={creating}>
               <form onSubmit={handleCreateVariant} className="space-y-4">
@@ -291,8 +281,8 @@ export default function EntTrialListPage() {
         {adminTab === 'variants' && (
           <div className="space-y-4">
             <div className="space-y-4">
-              <Card className="p-4 sm:p-5">
-                <div className="grid gap-3 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] md:items-end">
+              <Card className={styles.filters}>
+                <div className={styles.filterGrid}>
                   <Field label="Тест форматы">
                     <Select
                       value={variantModeFilter}
@@ -325,7 +315,7 @@ export default function EntTrialListPage() {
                 </div>
               </Card>
 
-              <h2 className="text-lg font-bold">Нұсқалар ({filteredVariants.length})</h2>
+              <h2 className={styles.listTitle}>Нұсқалар ({filteredVariants.length})</h2>
               {variants.length === 0 ? (
                 <EmptyState icon={<Layers size={36} />} title="Нұсқалар жоқ" hint="Жаңа нұсқа құрыңыз." />
               ) : filteredVariants.length === 0 ? (
@@ -336,37 +326,38 @@ export default function EntTrialListPage() {
                   action={<Button type="button" variant="secondary" onClick={resetVariantFilters}>Сүзгілерді тазалау</Button>}
                 />
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className={styles.variantGrid}>
                   {filteredVariants.map((v) => (
-                    <Card key={v.id} className="flex flex-col gap-3 p-5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <h3 className="break-words text-base font-bold">{v.title}</h3>
-                          <p className="text-xs text-muted mt-0.5">{v.description || 'Сипаттамасыз'}</p>
-                        </div>
-                        <div className="relative shrink-0">
-                          <Button variant="ghost" size="sm" aria-label={`«${v.title}» нұсқасының әрекеттері`} aria-haspopup="menu" aria-expanded={menuVariantId === v.id} onClick={() => setMenuVariantId(menuVariantId === v.id ? null : v.id)}><MoreHorizontal size={18} /></Button>
+                    <article key={v.id} className={styles.variantCard}>
+                      <div className={styles.coverVisual}><VariantCover subject={v.exam_mode === 'single' ? v.single_subject : null} combinationSubjects={rulesData?.combinations[v.combination] ?? []} /></div>
+                      <div className={styles.status}><Badge className={v.ready ? styles.readyStatus : styles.incompleteStatus} tone={v.ready ? 'success' : 'warning'}>{v.ready ? 'Дайын' : 'Толықтыру қажет'}</Badge></div>
+                        <div className={styles.menu}>
+                          <Button className={styles.menuButton} variant="ghost" size="sm" aria-label={`«${v.title}» нұсқасының әрекеттері`} aria-haspopup="menu" aria-expanded={menuVariantId === v.id} onClick={() => setMenuVariantId(menuVariantId === v.id ? null : v.id)}><MoreHorizontal size={18} /></Button>
                           <DropdownMenu open={menuVariantId === v.id} onClose={() => setMenuVariantId(null)} items={[
                             { label: 'Өңдеу', icon: <Edit size={14} />, onClick: () => { setEditingVariantId(v.id); setAdminTab('edit_variant') } },
                             { label: 'Өшіру', icon: <Trash2 size={14} />, destructive: true, onClick: () => { setDeleteError(''); setPendingDelete({ id: v.id, title: v.title, kind: 'variant' }) } },
                           ]} />
                         </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className={styles.cardBody}>
+                        <div className={styles.cardText}>
+                          <h3 className="break-words text-base font-bold">{v.title}</h3>
+                          <p className="text-xs text-muted mt-0.5">{v.description || 'Сипаттамасыз'}</p>
+                        </div>
+                      <div className={styles.metadata}>
                         <Badge tone="primary">{v.exam_mode === 'single' ? rulesData?.subject_labels[v.single_subject] : COMBO_LABELS[v.combination] || v.combination}</Badge>
-                        <span className="text-sm text-muted">Формат: {v.question_count} сұрақ · {v.max_score} балл · {Math.round(v.duration_seconds / 60)} мин</span>
+                        <span>Формат: {v.question_count} сұрақ · {v.max_score} балл · {Math.round(v.duration_seconds / 60)} мин</span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge tone={v.ready ? 'success' : 'warning'}>{v.ready ? 'Дайын' : 'Толықтыру қажет'}</Badge>
-                        {!v.ready && typeof v.issue_count === 'number' && <span className="text-xs text-muted">{v.issue_count} ескерту</span>}
+                      <div className={styles.warning}>
+                        {!v.ready && typeof v.issue_count === 'number' && <span><ClipboardList size={14} />{v.issue_count} ескерту</span>}
                       </div>
-                      <Button variant="primary" size="sm" className="mt-auto w-full" onClick={() => {
+                      <Button variant="primary" size="sm" className={styles.manageButton} onClick={() => {
                         setEditingVariantId(v.id)
                         setAdminTab('edit_variant')
                       }}>
                         <Edit size={14} /> Сұрақтарды басқару
                       </Button>
-                    </Card>
+                      </div>
+                    </article>
                   ))}
                 </div>
               )}
@@ -549,65 +540,7 @@ export default function EntTrialListPage() {
   }
 
   // STUDENT VIEW
-  return (
-    <div className="max-w-5xl mx-auto space-y-8">
-      <PageHeader eyebrow="ҰБТ" title="Сынақ ҰБТ" description="Тағайындалған сынақ нұсқалары" />
-
-      {accesses.length === 0 ? (
-        <EmptyState icon={<ClipboardList size={40} />} title="Сынақ тестер жоқ" hint="Әзірге тағайындалған тестер жоқ." />
-      ) : (
-        <div className="grid gap-6 sm:grid-cols-2">
-          {accesses.map((a) => {
-            const isCompleted = a.attempt_status === 'submitted'
-            const expired = Boolean(a.revoked_at) || (a.expires_at && new Date(a.expires_at) <= new Date())
-            const cannotStart = !a.attempt_id && (expired || !a.variant_ready)
-            const canRetake = isCompleted && (a.completed_attempt_count ?? 0) < (a.max_attempts ?? 1) && !expired && a.variant_ready
-            return (
-              <Card key={a.id} className="p-6 flex flex-col justify-between hover:shadow-lg transition-all">
-                <div>
-                  <div className="flex justify-between items-start mb-3">
-                    <Badge tone={isCompleted ? 'success' : 'primary'}>
-                      {canRetake ? 'Қайта тапсыруға болады' : isCompleted ? 'Аяқталған' : a.attempt_id ? 'Басталған' : expired ? 'Мерзімі аяқталған' : !a.variant_ready ? 'Әкімші толықтыруда' : 'Жаңа'}
-                    </Badge>
-                  </div>
-                  <h3 className="text-xl font-bold mb-1">{a.variant_title || 'Сынақ ҰБТ'}</h3>
-                  {a.variant_description && <p className="text-sm text-muted mb-3">{a.variant_description}</p>}
-                  <div className="space-y-1 text-sm text-muted">
-                    <p><span className="font-semibold text-foreground">{a.exam_mode === 'single' ? 'Пән:' : 'Бейін:'}</span> {a.exam_mode === 'single' ? rulesData?.subject_labels[a.single_subject] || a.single_subject : COMBO_LABELS[a.combination] || a.combination}</p>
-                    <p><span className="font-semibold text-foreground">Формат:</span> {a.question_count ?? '—'} сұрақ, {a.max_score ?? '—'} балл, {a.duration_seconds ? Math.round(a.duration_seconds / 60) + (a.extra_time_minutes ?? 0) : '—'} мин</p>
-                    <p><span className="font-semibold text-foreground">Бақылау:</span> камера және толық экран міндетті</p>
-                    {a.expires_at && <p><span className="font-semibold text-foreground">Мерзімі:</span> {formatDate(a.expires_at)}</p>}
-                    <p><span className="font-semibold text-foreground">Әрекеттер:</span> {a.completed_attempt_count ?? 0} / {a.max_attempts ?? 1} аяқталды</p>
-                  </div>
-                  {isCompleted && a.attempt_score !== null && (
-                    <div className="mt-4 p-3 bg-success/10 rounded-xl border border-success/20 flex items-center justify-between">
-                      <span className="text-sm font-semibold text-success">Нәтиже:</span>
-                      <span className="text-lg font-bold text-success">{a.attempt_score} / {a.max_score ?? 140} балл</span>
-                    </div>
-                  )}
-                  {(a.max_attempts ?? 1) > 1 && a.best_score !== null && a.completed_attempt_count > 0 && <p className="mt-2 text-right text-xs font-medium text-muted">Ең жақсы нәтиже: {a.best_score} / {a.max_score ?? 140}</p>}
-                </div>
-                <div className="mt-6 pt-4 border-t border-border flex justify-end">
-                  {isCompleted ? (
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <Button onClick={() => router.push(`/ent-trial/${a.attempt_id}/result`)} variant="secondary">
-                        Нәтижені көру
-                      </Button>
-                      {canRetake && <Button onClick={() => handleStart(a.id)} variant="primary">Қайта тапсыру <ArrowRight size={16} /></Button>}
-                    </div>
-                  ) : (
-                    <Button disabled={cannotStart} onClick={() => handleStart(a.id)} variant="primary">
-                      {a.attempt_id ? 'Жалғастыру' : 'Бастау'} <ArrowRight size={16} />
-                    </Button>
-                  )}
-                </div>
-              </Card>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
+  return <StudentTests accesses={accesses} rules={rulesData} error={Boolean(accessesError)} onStart={handleStart} />
 }
 
 

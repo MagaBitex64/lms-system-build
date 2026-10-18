@@ -81,7 +81,7 @@ async def list_catalog(
     like = f"%{q}%"
     rows = await pool.fetch(
         """
-        SELECT c.id, c.title, c.description, c.is_published, c.created_at,
+        SELECT c.id, c.title, c.description, c.is_published, c.created_at, c.ent_subject,
                u.full_name AS teacher_name,
                (SELECT COUNT(*) FROM course_items ci WHERE ci.course_id = c.id AND ci.is_visible) AS item_count,
                (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id AND e.status = 'approved') AS student_count,

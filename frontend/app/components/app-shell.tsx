@@ -22,7 +22,8 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useI18n, type TKey } from '@/lib/i18n'
-import { Spinner, Avatar, cx } from './ui'
+import { Spinner, cx } from './ui'
+import ProfileMenu from './profile-menu'
 import adminHomeStyles from '../dashboard/admin-home.module.css'
 
 const PUBLIC_ROUTES = ['/', '/login', '/forgot-password', '/reset-password']
@@ -69,6 +70,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
   const nav: NavItem[] = [{ href: '/dashboard', label: 'overview', icon: <Home size={20} /> }]
   
   if (user.role === 'student') {
+    nav.push({ href: '/my-courses', label: 'myCourses', icon: <GraduationCap size={20} /> })
     nav.push({ href: '/courses', label: 'catalog', icon: <BookOpen size={20} /> })
     nav.push({ href: '/top', label: 'top', icon: <Trophy size={20} /> })
     nav.push({ href: '/ent-trial', label: 'entTrial', icon: <ClipboardList size={20} /> })
@@ -89,9 +91,6 @@ function AuthedShell({ children }: { children: ReactNode }) {
     nav.push({ href: '/admin/leads', label: 'leadRequests', icon: <ClipboardList size={20} /> })
     nav.push({ href: '/admin/audit-logs', label: 'auditLog', icon: <History size={20} /> })
   }
-
-  const roleLabel: TKey =
-    user.role === 'admin' ? 'admin' : user.role === 'teacher' ? 'teacher' : 'student'
 
   const isAdminHome = user.role === 'admin' && pathname === '/dashboard'
 
@@ -235,19 +234,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
 
             {/* Right: Profile */}
             <div className={cx('flex items-center justify-end', isAdminHome && adminHomeStyles.profile)}>
-              <div className="flex items-center gap-2.5 px-2.5 py-1.5">
-                {/* Avatar */}
-                <Avatar name={user.full_name} className="bg-primary-soft text-primary flex-shrink-0" size="sm" />
-                
-                {/* Name & Role - Hidden on mobile */}
-                <div className="hidden sm:flex flex-col gap-0 min-w-0">
-                  <p className="truncate text-sm font-semibold text-foreground leading-tight">{user.full_name}</p>
-                  <p className="truncate text-xs text-muted leading-tight">{t(roleLabel)}</p>
-                </div>
-                
-                {/* Avatar only - Visible on mobile */}
-                <div className="sm:hidden flex-shrink-0" />
-              </div>
+              <ProfileMenu user={user} onLogout={logout} />
             </div>
           </div>
         </header>

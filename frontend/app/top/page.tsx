@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import useSWR from 'swr'
 import { Award, ChevronDown, ClipboardCheck, Trophy, Users } from 'lucide-react'
 
 import { formatDate } from '@/lib/date'
 import { fetcher } from '@/lib/api'
-import { Button, Card, EmptyState, ErrorState, Field, PageHeader, ProgressBar, Select, Spinner, StatCard, cx } from '@/components/ui'
+import { Button, EmptyState, ErrorState, Field, ProgressBar, Select, Spinner, cx } from '@/components/ui'
+import styles from './top.module.css'
 
 type SubjectScore = {
   subject: string
@@ -61,41 +62,42 @@ export default function TopPage() {
   const isGeneral = selected === 'general'
 
   return (
-    <div className="mx-auto max-w-6xl space-y-7">
-      <PageHeader
-        eyebrow="Рейтинг"
-        title="Топ-100"
-        description="Әр аяқталған әрекет рейтингте жеке көрсетіледі. Бір оқушы бірнеше рет тапсырса, оның әр нәтижесі бөлек жолмен шығады. Жалпы рейтингке 140 балдық толық ҰБТ, пәндік рейтингке толық ҰБТ мен бір пәндік сынақтар кіреді."
-      />
+    <div className={styles.page}>
+      <header className={styles.banner}>
+        <div><p className={styles.eyebrow}>РЕЙТИНГ</p><h1>Топ-100</h1><p className={styles.explanation}>Әр аяқталған әрекет рейтингте жеке көрсетіледі. Бір оқушы бірнеше рет тапсырса, оның әр нәтижесі бөлек жолмен шығады. Жалпы рейтингке 140 балдық толық ҰБТ, пәндік рейтингке толық ҰБТ мен бір пәндік сынақтар кіреді.</p></div>
+        <TrophyArt />
+      </header>
 
-      <Card className="space-y-3 p-4 sm:p-5">
+      <div className={styles.filterPanel}>
         <div>
-          <h2 className="font-bold">Рейтингті таңдаңыз</h2>
-          <p className="text-xs text-muted">Жақша ішінде осы рейтингке қатысқан оқушылар саны көрсетілген.</p>
+          <h2>Рейтингті таңдаңыз</h2>
+          <p>Жақша ішінде осы рейтингке қатысқан оқушылар саны көрсетілген.</p>
         </div>
-        <div className="flex flex-wrap items-end gap-3" aria-label="Рейтинг санаты">
-          <Button type="button" aria-pressed={isGeneral} variant={isGeneral ? 'primary' : 'secondary'} onClick={() => { setSelected('general'); setExpandedAttemptId(null) }}>
+        <div className={styles.filterControls} aria-label="Рейтинг санаты">
+          <Button type="button" aria-pressed={isGeneral} className={styles.general} variant={isGeneral ? 'primary' : 'secondary'} onClick={() => { setSelected('general'); setExpandedAttemptId(null) }}>
             Жалпы ҰБТ · 140 балл ({data.general.participant_count})
           </Button>
           <Field label="Пән">
-            <Select value={isGeneral ? '' : selected} onChange={event => { setSelected(event.target.value || 'general'); setExpandedAttemptId(null) }} className="sm:w-72">
+            <Select value={isGeneral ? '' : selected} onChange={event => { setSelected(event.target.value || 'general'); setExpandedAttemptId(null) }}>
               <option value="">Пәнді таңдаңыз</option>
               {data.subjects.map(group => <option key={group.subject} value={group.subject}>{group.label} ({group.participant_count})</option>)}
             </Select>
           </Field>
         </div>
-      </Card>
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Қатысушылар" value={current.participant_count} hint="Бірегей оқушылар" icon={<Users size={20} />} />
-        <StatCard label="Тапсырылған тесттер" value={current.completed_attempt_count} hint="Барлық аяқталған әрекет" icon={<ClipboardCheck size={20} />} tone="success" />
-        <StatCard label="Максималды ұпай" value={current.max_score} hint={isGeneral ? 'Толық ҰБТ форматы' : current.label} icon={<Award size={20} />} tone="warning" />
       </div>
 
-      <section className="space-y-4" aria-labelledby="ranking-title">
-        <div>
-          <h2 id="ranking-title" className="text-xl font-bold">{current.label}</h2>
-          <p className="text-sm text-muted">Ең жоғары ұпай бойынша сұрыпталған алғашқы {data.limit} аяқталған әрекет.</p>
+      <div className={styles.kpis}>
+        {[
+          { label: 'Қатысушылар', value: current.participant_count, hint: 'Бірегей оқушылар', Icon: Users },
+          { label: 'Тапсырылған тесттер', value: current.completed_attempt_count, hint: 'Барлық аяқталған әрекет', Icon: ClipboardCheck },
+          { label: 'Максималды ұпай', value: current.max_score, hint: isGeneral ? 'Толық ҰБТ форматы' : current.label, Icon: Award },
+        ].map(({ label, value, hint, Icon }, index) => <div className={styles.kpi} key={label}><span className={cx(styles.kpiIcon, styles[`tone${index}`])}><Icon size={24} /></span><div><p>{label}</p><strong>{value}</strong><small>{hint}</small></div></div>)}
+      </div>
+
+      <section className={styles.leaderboard} aria-labelledby="ranking-title">
+        <div className={styles.listHeading}>
+          <h2 id="ranking-title">{current.label}</h2>
+          <p>Ең жоғары ұпай бойынша сұрыпталған алғашқы {data.limit} аяқталған әрекет.</p>
         </div>
 
         {current.items.length === 0 ? (
@@ -105,49 +107,30 @@ export default function TopPage() {
             hint={isGeneral ? '140 балдық толық ҰБТ тапсырылғаннан кейін нәтиже осында шығады.' : 'Осы пән бойынша аяқталған нәтиже әлі жоқ.'}
           />
         ) : (
-          <div className="space-y-2">
+          <div>
+            <p className={styles.scrollHint}>Кестені көлденең жылжытып, барлық бағанды көре аласыз.</p>
+            <div className={styles.tableWrap} role="region" aria-label="Рейтинг кестесі" tabIndex={0}>
+            <table className={styles.table}>
+            <caption className="sr-only">{current.label} — аяқталған әрекеттер рейтингі</caption>
+            <thead><tr><th scope="col">#</th><th scope="col">Оқушы</th><th scope="col">Сынақ атауы</th><th scope="col">Әрекеттер</th><th scope="col">Күні және уақыты</th><th scope="col">Нәтиже</th><th scope="col"><span className="sr-only">Мәліметтер</span></th></tr></thead>
+            <tbody>
             {current.items.map(item => {
               const expanded = expandedAttemptId === item.attempt_id
               const detailsId = `ranking-details-${item.attempt_id}`
               return (
-                <Card
-                  key={item.attempt_id}
-                  className={cx('overflow-hidden p-0', item.rank <= 3 && 'border-primary/30 bg-primary-soft/20')}
-                >
-                  <button
-                    type="button"
-                    className="grid w-full grid-cols-[44px_minmax(0,1fr)_auto_24px] items-center gap-3 p-4 text-left transition-colors hover:bg-primary-soft/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 sm:grid-cols-[56px_minmax(0,1fr)_auto_28px] sm:gap-4"
-                    aria-expanded={expanded}
-                    aria-controls={detailsId}
-                    onClick={() => setExpandedAttemptId(expanded ? null : item.attempt_id)}
-                  >
-                    <span className={cx(
-                      'flex size-11 items-center justify-center rounded-xl text-lg font-black',
-                      item.rank === 1 ? 'bg-warning text-white' : item.rank <= 3 ? 'bg-primary text-primary-foreground' : 'bg-surface-muted text-muted',
-                    )}>
-                      {item.rank}
-                    </span>
-
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-2">
-                        <span className="truncate font-bold">{item.full_name}</span>
-                        {item.rank <= 3 && <Trophy size={15} className={item.rank === 1 ? 'shrink-0 text-warning' : 'shrink-0 text-primary'} />}
-                      </span>
-                      <span className="block truncate text-xs text-muted">{item.variant_title || (isGeneral ? 'Толық ҰБТ' : current.label)}</span>
-                      <span className="mt-1 block text-xs text-muted">
-                        {item.attempt_number}-әрекет · барлығы {item.attempt_count} рет тапсырды · {formatDate(item.submitted_at)}
-                      </span>
-                    </span>
-
-                    <span className="text-right">
-                      <span className="block whitespace-nowrap text-lg font-black text-primary sm:text-xl">{item.score} / {item.max_score}</span>
-                      <span className="block text-xs font-semibold text-muted">{Number(item.percentage).toFixed(2)}%</span>
-                    </span>
-                    <ChevronDown size={20} className={cx('text-muted transition-transform', expanded && 'rotate-180 text-primary')} />
-                  </button>
+                <Fragment key={item.attempt_id}>
+                  <tr className={cx(styles.row, expanded && styles.expandedRow)} onClick={() => setExpandedAttemptId(expanded ? null : item.attempt_id)}>
+                    <td><span className={cx(styles.rank, item.rank === 1 && styles.gold, item.rank > 1 && item.rank <= 3 && styles.topRank)}>{item.rank}</span></td>
+                    <td><span className={styles.student}>{item.full_name}{item.rank <= 3 && <Trophy size={15} aria-hidden="true" className={item.rank === 1 ? styles.goldIcon : styles.tealIcon} />}</span></td>
+                    <td className={styles.exam}>{item.variant_title || (isGeneral ? 'Толық ҰБТ' : current.label)}</td>
+                    <td className={styles.attempts}>{item.attempt_number}-әрекет · барлығы {item.attempt_count} рет тапсырды</td>
+                    <td className={styles.date}>{formatDate(item.submitted_at)}</td>
+                    <td className={styles.score}><strong>{item.score} / {item.max_score}</strong><small>{Number(item.percentage).toFixed(2)}%</small></td>
+                    <td><button type="button" className={styles.expandButton} aria-label={`${item.full_name}, ${item.attempt_number}-әрекет: мәліметтер`} aria-expanded={expanded} aria-controls={detailsId} onClick={event => { event.stopPropagation(); setExpandedAttemptId(expanded ? null : item.attempt_id) }}><ChevronDown size={19} className={expanded ? styles.chevronOpen : undefined} /></button></td>
+                  </tr>
 
                   {expanded && (
-                    <div id={detailsId} className="border-t border-border bg-surface-muted/40 px-4 py-4 sm:px-5">
+                    <tr className={styles.details}><td colSpan={7}><div id={detailsId} className={styles.detailsContent}>
                       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <div>
                           <h3 className="text-sm font-bold">Пәндер бойынша нәтиже</h3>
@@ -173,14 +156,32 @@ export default function TopPage() {
                           Бұл әрекет үшін пәндер бойынша мәлімет сақталмаған.
                         </p>
                       )}
-                    </div>
+                    </div></td></tr>
                   )}
-                </Card>
+                </Fragment>
               )
             })}
+            </tbody></table></div>
           </div>
         )}
       </section>
     </div>
   )
+}
+
+function TrophyArt() {
+  return <svg className={styles.trophy} viewBox="0 0 280 220" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="rating-gold" x1="0" x2="1"><stop stopColor="#e7a126" /><stop offset=".3" stopColor="#ffe99b" /><stop offset=".58" stopColor="#ffc949" /><stop offset="1" stopColor="#df8c12" /></linearGradient>
+      <linearGradient id="rating-podium" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#fff" /><stop offset="1" stopColor="#b9e4f6" /></linearGradient>
+    </defs>
+    <ellipse cx="153" cy="203" rx="94" ry="9" fill="#73bcd4" opacity=".14" />
+    <path d="M25 161C-1 113 44 57 112 51s119 24 141 72" fill="none" stroke="#b1e9f9" strokeWidth="12" opacity=".65" />
+    <path d="M76 40h-25v26c0 32 25 45 46 43M189 40h25v26c0 32-25 45-46 43" fill="none" stroke="url(#rating-gold)" strokeWidth="10" />
+    <path d="M75 30h115l-7 50c-4 28-23 43-49 43S89 108 84 80Z" fill="url(#rating-gold)" />
+    <ellipse cx="133" cy="30" rx="57" ry="6" fill="#ffedb1" />
+    <path d="M125 120h19v28l17 12h-53l17-12Z" fill="url(#rating-gold)" /><rect x="105" y="157" width="59" height="11" rx="4" fill="url(#rating-gold)" />
+    <path d="M92 174h84v19H92Z" fill="url(#rating-podium)" /><path d="M80 193h108v12H80Z" fill="url(#rating-podium)" />
+    <path d="m230 38 4 11 12 4-12 4-4 11-4-11-12-4 12-4ZM39 95l3 8 8 3-8 3-3 8-3-8-8-3 8-3Z" fill="#fff" />
+  </svg>
 }

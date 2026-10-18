@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import useSWR from 'swr'
-import { BookOpen, Check, GraduationCap, Pencil, PlusCircle, Search, Trash2, UserMinus, Users, UserPlus, X, ClipboardList } from 'lucide-react'
+import { BookOpen, Check, ChevronDown, GraduationCap, Pencil, PlusCircle, Search, Trash2, UserMinus, Users, UserPlus, X, ClipboardList } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { api, fetcher } from '@/lib/api'
-import { useAllGroups } from '@/lib/groups'
-import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Field, Input, PageHeader, Select, Spinner, Modal, DeletionConfirmModal } from '../components/ui'
+import { fetchAllGroups, useAllGroups } from '@/lib/groups'
+import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Field, Input, Select, Spinner, Modal, DeletionConfirmModal } from '../components/ui'
+import { buildStudentGroups, studentGroupLabel } from './student-groups'
+import styles from './users.module.css'
 
 type UserPage = { items: User[]; total: number }
 
@@ -54,10 +56,10 @@ export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>('students')
 
   return (
-    <div className="space-y-6">
-      <PageHeader eyebrow={t('admin')} title={t('adminPanel')} description={t('adminPanelHint')} />
+    <div className={styles.page}>
+      <header className={styles.heading}><p>ӘКІМШІ</p><h1>Пайдаланушылар</h1><span>Оқушыларды, мұғалімдерді және оқу топтарын басқарыңыз.</span></header>
 
-      <div className="flex flex-wrap gap-2 border-b border-border">
+      <div className={styles.tabs} aria-label="Пайдаланушы санаттары">
         {([
           ['students', t('students'), <Users key="students" size={16} />],
           ['teachers', t('teachers'), <GraduationCap key="teachers" size={16} />],
@@ -65,10 +67,9 @@ export default function AdminDashboard() {
         ] as const).map(([key, label, icon]) => (
           <button
             key={key}
+            type="button"
             onClick={() => setTab(key)}
-            className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
-              tab === key ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-foreground'
-            }`}
+            aria-pressed={tab === key}
           >
             {icon}
             {label}
@@ -83,6 +84,21 @@ export default function AdminDashboard() {
   )
 }
 
+async function loadStudentDirectory() {
+  const students: User[] = []
+  for (let page = 1; ; page++) {
+    const result = await fetcher<UserPage>(`/admin/users?role=student&per_page=100&page=${page}`)
+    students.push(...result.items)
+    if (!result.items.length || students.length >= result.total) break
+  }
+  const groups = await fetchAllGroups<Group>()
+  const details: GroupDetail[] = []
+  for (let start = 0; start < groups.items.length; start += 4) {
+    details.push(...await Promise.all(groups.items.slice(start, start + 4).map(group => fetcher<GroupDetail>(`/admin/groups/${group.id}`))))
+  }
+  return { students, groups: details }
+}
+
 function StudentsTab() {
   const { t } = useI18n()
   const [createOpen, setCreateOpen] = useState(false)
@@ -90,10 +106,12 @@ function StudentsTab() {
   const [notice, setNotice] = useState('')
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [page, setPage] = useState(1)
-  useEffect(() => { setPage(1) }, [query])
-  const { data, isLoading, error: loadError, mutate } = useSWR<UserPage>(`/admin/users?role=student&per_page=50&page=${page}&q=${encodeURIComponent(query)}`, fetcher)
-  const students = data?.items ?? []
+  const [groupFilter, setGroupFilter] = useState('')
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+  const { data, isLoading, error: loadError, mutate } = useSWR('admin-student-directory', loadStudentDirectory)
+  const sections = useMemo(() => buildStudentGroups(data?.students ?? [], data?.groups ?? []), [data])
+  const visibleGroups = sections.filter(group => !groupFilter || group.id === groupFilter).map(group => ({ ...group, matches: filterUsers(group.students, query) }))
+    .filter(group => query.trim() ? group.matches.length > 0 : group.id !== 'unassigned' || group.students.length > 0 || groupFilter === 'unassigned')
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -124,8 +142,10 @@ function StudentsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p role="status" className="text-sm text-success-foreground">{notice}</p>
+      {notice && <p role="status" className="text-sm text-success-foreground">{notice}</p>}
+      <div className={styles.studentToolbar}>
+        <div className={styles.search}><Search size={17} /><Input aria-label="Оқушыны іздеу" placeholder="Оқушыны іздеу..." value={query} onChange={event => { setQuery(event.target.value); setOpenGroups({}) }} /></div>
+        <Select aria-label="Топ бойынша" value={groupFilter} onChange={event => setGroupFilter(event.target.value)}><option value="">Топ бойынша</option>{(data?.groups ?? []).map(group => <option key={group.id} value={group.id}>{studentGroupLabel(group)}</option>)}<option value="unassigned">Топқа тіркелмеген оқушылар</option></Select>
         <Button onClick={() => { setCreateOpen(true); setError(null) }}><UserPlus size={16} />{t('createStudent')}</Button>
       </div>
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={t('createStudent')} closeDisabled={creating}>
@@ -138,13 +158,23 @@ function StudentsTab() {
         </form>
       </Modal>
 
-      <Card className="space-y-4">
-        <ListHeader title={t('students')} query={query} setQuery={setQuery} placeholder={t('searchStudent')} />
-        {isLoading ? <Spinner /> : loadError ? <ErrorState message={t('errorOccurred')} /> : (
-          <UserList users={students} fixedRole="student" onChanged={mutate} emptyTitle={query.trim() ? t('noResults') : t('noData')} />
-        )}
-        <Pagination page={page} total={data?.total ?? 0} perPage={50} onPage={setPage} />
-      </Card>
+      {isLoading ? <Spinner /> : loadError ? <ErrorState message={t('errorOccurred')} /> : !visibleGroups.length ? <EmptyState icon={<Users size={22} />} title={query.trim() || groupFilter ? t('noResults') : t('noData')} /> : <div className={styles.groupedStudents}>
+        {visibleGroups.map((group, index) => {
+          const expanded = openGroups[group.id] ?? (query.trim() !== '' || index === 0)
+          const panelId = `student-group-${group.id}`
+          return <section key={group.id} className={styles.studentGroup}>
+            <button type="button" className={styles.groupToggle} aria-expanded={expanded} aria-controls={panelId} onClick={() => setOpenGroups(current => ({ ...current, [group.id]: !expanded }))}>
+              <span className={styles.groupIcon}><Users size={20} /></span><strong>{studentGroupLabel(group)}</strong><span className={styles.groupCount}>{query.trim() ? `${group.matches.length} / ` : ''}{group.students.length} оқушы</span><ChevronDown size={18} className={expanded ? styles.chevronOpen : ''} />
+            </button>
+            {expanded && <div id={panelId} className={styles.groupContent}>
+              {!group.matches.length ? <div className={styles.emptyGroup}>{t('noData')}</div> : <div role="table" aria-label={`${studentGroupLabel(group)} оқушылары`} className={styles.studentTable}>
+                <div role="row" className={styles.tableHeader}><span role="columnheader">#</span><span role="columnheader">Аты-жөні</span><span role="columnheader">Электрондық пошта</span><span role="columnheader">Күйі</span><span role="columnheader">Әрекеттер</span></div>
+                <div role="rowgroup">{group.matches.map((student, row) => <UserRow key={student.id} user={student} fixedRole="student" onChanged={mutate} tableLayout rowNumber={row + 1} />)}</div>
+              </div>}
+            </div>}
+          </section>
+        })}
+      </div>}
     </div>
   )
 }
@@ -228,10 +258,10 @@ function TeachersTab() {
           finally { setRemovingGroup(false) }
         }}
       />
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className={styles.teacherLayout}>
       <div className="min-w-0 space-y-6">
 
-        <Card className="space-y-4">
+        <Card className={`${styles.panel} space-y-4`}>
           <ListHeader title={t('teachers')} query={query} setQuery={setQuery} placeholder="Мұғалімді іздеу" />
           {teachersReq.isLoading ? <Spinner /> : teachersReq.error ? <ErrorState message={t('errorOccurred')} /> : (
             <div className="space-y-2">
@@ -249,9 +279,8 @@ function TeachersTab() {
                       setSelectedId(teacher.id)
                     }
                   }}
-                  className={`w-full rounded-lg border text-left transition-colors ${
-                    selectedId === teacher.id ? 'border-primary bg-primary-soft' : 'border-border hover:bg-surface-muted'
-                  } cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}
+                  className={styles.teacherItem}
+                  data-selected={selectedId === teacher.id}
                 >
                   <UserRow
                     user={teacher}
@@ -273,7 +302,7 @@ function TeachersTab() {
         </Card>
       </div>
 
-      <Card className="space-y-4">
+      <Card className={`${styles.panel} space-y-4`}>
         {!selectedId ? (
           <EmptyState icon={<GraduationCap size={22} />} title={t('selectTeacher')} />
         ) : detailReq.isLoading ? (
@@ -282,7 +311,7 @@ function TeachersTab() {
           <ErrorState message={t('errorOccurred')} />
         ) : (
           <>
-            <div>
+            <div className={styles.detailHeading}>
               <h2 className="text-lg font-semibold">{detailReq.data.full_name}</h2>
               <p className="text-sm text-muted">{detailReq.data.email}</p>
             </div>
@@ -298,7 +327,7 @@ function TeachersTab() {
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <p className="font-semibold">{course.title}</p>
-                        <p className="mt-1 line-clamp-2 text-sm text-muted">{course.description}</p>
+                        <p className="mt-1 text-sm text-muted">{course.description}</p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           <Badge tone={course.is_published ? 'success' : 'neutral'}>{course.is_published ? t('published') : t('draft')}</Badge>
                           <Badge>{course.students} {t('studentsCount')}</Badge>
@@ -313,9 +342,11 @@ function TeachersTab() {
                       </Select>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {course.groups.length ? course.groups.map((group) => (
+                      {course.groups.length ? course.groups.map((group) => {
+                        const capacity = group.capacity ?? groupsReq.data?.items.find(item => item.id === group.id)?.capacity
+                        return (
                         <span key={group.id} className="inline-flex items-center gap-1 rounded-full bg-primary-soft px-2.5 py-0.5 text-xs font-semibold text-primary">
-                          {group.code} - {group.student_count}/{group.capacity}
+                          {group.code} - {group.student_count}{capacity != null && `/${capacity}`}
                           <button
                             onClick={() => { setRemoveError(''); setGroupToRemove({ courseId: course.id, group }) }}
                             className="rounded-full p-0.5 hover:bg-primary/10"
@@ -324,7 +355,8 @@ function TeachersTab() {
                             <X size={12} />
                           </button>
                         </span>
-                      )) : <span className="text-sm text-muted">{t('noGroups')}</span>}
+                        )
+                      }) : <span className="text-sm text-muted">{t('noGroups')}</span>}
                     </div>
                   </div>
                 )
@@ -423,14 +455,14 @@ function GroupsTab() {
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
+    <div className={styles.groupsLayout}>
       <DeletionConfirmModal open={confirmDelete} onClose={() => setConfirmDelete(false)}
         onConfirm={() => { if (selectedId) void deleteGroup(selectedId) }}
         title="Топты өшіру" description={`«${detailReq.data?.title ?? ''}» тобын өшіргіңіз келе ме?`}
         courseName={detailReq.data?.title ?? ''} warning={deleteError || undefined} isLoading={deleting}
       />
       <div className="space-y-6">
-        <Card>
+        <Card className={styles.panel}>
           <h2 className="text-base font-semibold">{t('createGroup')}</h2>
           <form onSubmit={createGroup} className="mt-4 space-y-4">
             <Field label={t('groupCode')}><Input name="code" placeholder="ИМ1" required /></Field>
@@ -445,7 +477,7 @@ function GroupsTab() {
           </form>
         </Card>
 
-        <Card className="space-y-4">
+        <Card className={`${styles.panel} space-y-4`}>
           <ListHeader title={t('groups')} query={query} setQuery={setQuery} />
           {groupsReq.isLoading ? <Spinner /> : groupsReq.error ? <ErrorState message={t('errorOccurred')} /> : (
             <div className="space-y-2">
@@ -453,9 +485,8 @@ function GroupsTab() {
                 <button
                   key={group.id}
                   onClick={() => setSelectedId(group.id)}
-                  className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
-                    selectedId === group.id ? 'border-primary bg-primary-soft' : 'border-border hover:bg-surface-muted'
-                  }`}
+                  className={styles.groupChoice}
+                  data-selected={selectedId === group.id}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <p className="font-semibold">{group.code}</p>
@@ -469,7 +500,7 @@ function GroupsTab() {
         </Card>
       </div>
 
-      <Card className="space-y-5">
+      <Card className={`${styles.panel} space-y-5`}>
         {!selectedId ? (
           <EmptyState icon={<Users size={22} />} title={t('selectGroup')} />
         ) : detailReq.isLoading ? (
@@ -577,9 +608,9 @@ function filterUsers(users: User[], query: string) {
 function ListHeader({ title, query, setQuery, placeholder }: { title: string; query: string; setQuery: (value: string) => void; placeholder?: string }) {
   const { t } = useI18n()
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className={styles.listHeader}>
       <h2 className="text-base font-semibold">{title}</h2>
-      <div className="relative">
+      <div className={styles.compactSearch}>
         <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
         <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={placeholder ?? t('search')} aria-label={placeholder ?? t('search')} className="pl-9 sm:w-56" />
       </div>
@@ -603,7 +634,7 @@ function UserList({
   const { t } = useI18n()
   if (!users.length) return <EmptyState icon={<Users size={22} />} title={emptyTitle ?? t('noData')} />
   return (
-    <div className="divide-y divide-border rounded-lg border border-border">
+    <div className={styles.userList}>
       {users.map((user) => (
         <UserRow key={user.id} user={user} fixedRole={fixedRole} onChanged={onChanged} onRemove={onRemove} />
       ))}
@@ -618,6 +649,8 @@ function UserRow({
   onDeleted,
   onRemove,
   onSelect,
+  tableLayout = false,
+  rowNumber,
 }: {
   user: User
   fixedRole?: 'student' | 'teacher' | 'admin'
@@ -625,6 +658,8 @@ function UserRow({
   onSelect?: () => void
   onDeleted?: () => void
   onRemove?: (user: User) => Promise<void>
+  tableLayout?: boolean
+  rowNumber?: number
 }) {
   const { t } = useI18n()
   const [editing, setEditing] = useState(false)
@@ -679,6 +714,7 @@ function UserRow({
 
   if (editing) {
     return (
+      <div role={tableLayout ? 'row' : undefined} className={styles.editRow}><div role={tableLayout ? 'cell' : undefined} aria-colspan={tableLayout ? 5 : undefined}>
       <form onSubmit={update} className="w-full space-y-3 px-3 py-3" onClick={(e) => e.stopPropagation()}>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t('fullName')}><Input name="full_name" defaultValue={user.full_name} required /></Field>
@@ -696,9 +732,18 @@ function UserRow({
           <Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)} disabled={working}><X size={14} />{t('cancel')}</Button>
           <Button type="submit" size="sm" disabled={working}><Check size={14} />{t('save')}</Button>
         </div>
-      </form>
+      </form></div></div>
     )
   }
+
+  const statusBadge = <Badge tone={user.is_blocked ? 'danger' : 'success'}><span className={styles.statusDot} />{user.is_blocked ? t('blocked') : t('active')}</Badge>
+  const actions = <div className={styles.rowActions}>
+    {onRemove ? <Button size="sm" variant="outline" aria-label="Топтан шығару" onClick={(event) => { event.stopPropagation(); setError(null); setConfirmOpen(true) }} disabled={working}><UserMinus size={14} /></Button> : <>
+      <Button size="sm" variant="ghost" aria-label="Өңдеу" onClick={(event) => { event.stopPropagation(); setEditing(true) }} disabled={working}><Pencil size={14} /></Button>
+      <Button size="sm" variant="danger-ghost" aria-label="Өшіру" onClick={(event) => { event.stopPropagation(); setError(null); setConfirmOpen(true) }} disabled={working}><Trash2 size={14} /></Button>
+    </>}
+  </div>
+  const name = onSelect ? <button type="button" className={styles.userName} onClick={onSelect}>{user.full_name}</button> : <p className={styles.userName}>{user.full_name}</p>
 
   return (
     <>
@@ -708,33 +753,21 @@ function UserRow({
       description={onRemove ? `«${user.full_name}» оқушысын топтан шығарғыңыз келе ме?` : `«${user.full_name}» пайдаланушысын өшіргіңіз келе ме?`}
       courseName={user.full_name} warning={error || undefined} isLoading={working}
     />
-    <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
-      <Avatar name={user.full_name} className="row-span-2 sm:row-span-1" />
-      <div className="min-w-0 flex-1">
-        {onSelect ? <button type="button" className="max-w-full truncate text-left text-sm font-medium hover:text-primary" onClick={onSelect}>{user.full_name}</button> : <p className="truncate text-sm font-medium">{user.full_name}</p>}
-        <p className="truncate text-xs text-muted">{user.email}</p>
-      </div>
-      <div className="col-start-2 row-start-2 sm:col-start-3 sm:row-start-1">
-        <Badge tone={user.is_blocked ? 'danger' : 'success'}>{user.is_blocked ? t('blocked') : t('active')}</Badge>
-      </div>
-      <div className="col-start-3 row-span-2 row-start-1 flex shrink-0 gap-1 sm:col-start-4 sm:row-span-1">
-        {onRemove ? (
-          <Button size="sm" variant="outline" aria-label="Топтан шығару" onClick={(event) => { event.stopPropagation(); setError(null); setConfirmOpen(true) }} disabled={working}><UserMinus size={14} /></Button>
-        ) : (
-          <>
-            <Button size="sm" variant="ghost" aria-label="Өңдеу" onClick={(event) => { event.stopPropagation(); setEditing(true) }} disabled={working}><Pencil size={14} /></Button>
-            <Button size="sm" variant="danger-ghost" aria-label="Өшіру" onClick={(event) => { event.stopPropagation(); setError(null); setConfirmOpen(true) }} disabled={working}><Trash2 size={14} /></Button>
-          </>
-        )}
-      </div>
-    </div>
+    {tableLayout ? <div role="row" className={styles.tableRow} data-user-id={user.id}>
+      <span role="cell" className={styles.rowNumber}>{rowNumber}</span>
+      <div role="cell" className={styles.tableIdentity}><Avatar name={user.full_name} />{name}</div>
+      <p role="cell" className={styles.tableEmail}>{user.email}</p>
+      <div role="cell" className={styles.tableStatus}>{statusBadge}</div><div role="cell" className={styles.tableActions}>{actions}</div>
+    </div> : <div className={styles.userRow}>
+      <Avatar name={user.full_name} /><div className={styles.userIdentity}>{name}<p className={styles.userEmail}>{user.email}</p></div><div className={styles.userStatus}>{statusBadge}</div>{actions}
+    </div>}
     </>
   )
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg border border-border bg-surface-muted px-4 py-3">
+    <div className={styles.metric}>
       <p className="text-xs font-medium text-muted">{label}</p>
       <p className="mt-1 text-2xl font-bold">{value}</p>
     </div>
@@ -751,7 +784,7 @@ function EntTrialTab() {
 
 function Pagination({ page, total, perPage, onPage }: { page: number; total: number; perPage: number; onPage: (page: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / perPage))
-  return <div className="flex items-center justify-between gap-3">
+  return <div className={styles.pagination}>
     <Button variant="secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>Алдыңғы</Button>
     <span className="text-sm">{page} / {pages} · {total}</span>
     <Button variant="secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>Келесі</Button>
