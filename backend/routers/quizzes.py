@@ -10,13 +10,16 @@ from urllib.parse import quote
 from docx import Document as DocxDocument
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from docx.text.paragraph import Paragraph
+from docx.table import Table
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.access import ensure_course_owner, ensure_item_access, get_item_or_404
 from core.db import get_pool
 from core.quiz_attempts import quiz_state, complete_quiz, normalized_answers, decoded, utcnow
+from core.topical_quiz import access_rules, readiness
 from core.deps import get_current_user, require_student, require_teacher
 from storage.local import FileValidationError, storage
 
@@ -24,8 +27,8 @@ router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 
 
 class QuizSettingsIn(BaseModel):
-    max_score: int = Field(ge=1, le=1000)
-    weight_pct: float = Field(ge=0, le=100)
+    max_score: int | None = Field(default=None, ge=1, le=1000)
+    weight_pct: float | None = Field(default=None, ge=0, le=100)
     open_at: datetime.datetime | None = None
     deadline_at: datetime.datetime | None = None
     close_at: datetime.datetime | None = None
@@ -59,6 +62,12 @@ class SubmitAttemptIn(BaseModel):
     answers: list[AnswerIn] = Field(max_length=1000)
     revision: int = Field(default=0, ge=0)
     request_id: str | None = Field(default=None, min_length=16, max_length=100)
+    attempt_number: int = Field(default=1, ge=1)
+
+
+class CorrectAnswersIn(BaseModel):
+    option_ids: list[int] = Field(max_length=100)
+    type: str = Field(pattern='^(single|multiple)$')
 
 
 class GradeAnswerIn(BaseModel):
@@ -88,7 +97,7 @@ def item_can_have_quiz(item: dict) -> bool:
     return item["type"] in ("lesson", "quiz")
 
 
-def parse_docx_questions(content: bytes) -> list[dict]:
+def parse_docx_questions(content: bytes, strict: bool = True) -> list[dict]:
     try:
         document = DocxDocument(io.BytesIO(content))
     except Exception as exc:
@@ -98,6 +107,7 @@ def parse_docx_questions(content: bytes) -> list[dict]:
     questions: list[dict] = []
     current: dict | None = None
     last_target: tuple[str, int | None] | None = None
+    parsing_errors: list[str] = []
 
     def consume_line(raw_line: str) -> None:
         nonlocal current, last_target
@@ -114,11 +124,15 @@ def parse_docx_questions(content: bytes) -> list[dict]:
                 last_target = ("prompt", None)
                 return
             if current is None:
+                parsing_errors.append('Жауап нұсқасы <question> белгісінен бұрын берілген')
                 return
             current["options"].append({"text": text, "is_correct": tag == "variant_correct"})
             last_target = ("option", len(current["options"]) - 1)
             return
 
+        if re.match(r'^\\?<[^>]+>', line) or re.match(r'^\\?<(question|variant)', line, re.IGNORECASE):
+            parsing_errors.append(f'Қолдау көрсетілмейтін белгі: {line[:70]}')
+            return
         if current is not None and last_target is not None:
             target, index = last_target
             if target == "prompt":
@@ -149,29 +163,42 @@ def parse_docx_questions(content: bytes) -> list[dict]:
                 "content": image_part.blob,
             }
 
-    for paragraph in document.paragraphs:
-        consume_paragraph(paragraph)
-    for table in document.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for paragraph in cell.paragraphs:
-                    consume_paragraph(paragraph)
+    # Preserve actual document order when paragraphs and tables are interleaved.
+    for block in document.element.body.iterchildren():
+        if block.tag == qn('w:p'):
+            consume_paragraph(Paragraph(block, document))
+        elif block.tag == qn('w:tbl'):
+            table = Table(block, document)
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        consume_paragraph(paragraph)
 
     if not questions:
         raise HTTPException(status_code=422, detail="Файлда <question> белгісі бар сұрақтар табылмады")
-    errors = []
+    errors = list(parsing_errors)
     for index, question in enumerate(questions, start=1):
+        question_errors = []
         if not question["prompt"].strip():
-            errors.append(f"№{index}: сұрақ мәтіні бос")
-        if len(question["options"]) < 2:
-            errors.append(f"№{index}: кемінде 2 жауап нұсқасы болуы керек")
+            question_errors.append(f"№{index}: сұрақ мәтіні бос")
+        if len(question['prompt']) > 10000:
+            question_errors.append(f'№{index}: сұрақ мәтіні тым ұзын')
+        if not 2 <= len(question["options"]) <= 100:
+            question_errors.append(f"№{index}: 2–100 жауап нұсқасы болуы керек")
         correct_count = sum(1 for option in question["options"] if option["is_correct"])
-        if correct_count != 1:
-            errors.append(f"№{index}: бір <variant_correct> болуы керек")
+        question['type'] = 'multiple' if correct_count > 1 else 'single'
+        question['is_complete'] = correct_count > 0
+        question['warnings'] = [] if correct_count else [f'№{index}: Дұрыс жауап таңдалмаған']
         if any(not option["text"].strip() for option in question["options"]):
-            errors.append(f"№{index}: бос жауап нұсқасы бар")
-    if errors:
+            question_errors.append(f"№{index}: бос жауап нұсқасы бар")
+        if any(len(option['text']) > 1000 for option in question['options']):
+            question_errors.append(f'№{index}: жауап мәтіні тым ұзын')
+        question['errors'] = question_errors
+        errors.extend(question_errors)
+    if errors and strict:
         raise HTTPException(status_code=422, detail="; ".join(errors[:10]))
+    if questions and parsing_errors:
+        questions[0]['errors'] = list(dict.fromkeys(questions[0]['errors'] + parsing_errors))
     return questions
 
 
@@ -189,6 +216,15 @@ async def update_quiz_settings(item_id: int, data: QuizSettingsIn, user: dict = 
         raise HTTPException(status_code=404, detail="This item cannot have a quiz")
     pool = await get_pool()
     await ensure_quiz_row(pool, item_id)
+    if item['type'] == 'quiz':
+        # No score/weight/schedule inputs for topical tests. Retain legacy stored
+        # values so old grades, active attempts and schedules are not rewritten.
+        await pool.execute('''UPDATE quizzes SET time_limit_minutes=$2,
+            shuffle_questions=$3,shuffle_options=$4 WHERE item_id=$1''',
+            item_id, data.time_limit_minutes, data.shuffle_questions, data.shuffle_options)
+        return {'ok': True, 'message': 'Quiz settings updated'}
+    if data.max_score is None or data.weight_pct is None:
+        raise HTTPException(422, 'Maximum score and weight are required for lesson quizzes')
     await pool.execute(
         """
         UPDATE quizzes
@@ -220,10 +256,8 @@ async def add_question(item_id: int, data: QuestionIn, user: dict = Depends(requ
         if len(data.options) < 2:
             raise HTTPException(status_code=422, detail="Choice questions need at least 2 options")
         correct = sum(1 for o in data.options if o.is_correct)
-        if data.type == "single" and correct != 1:
-            raise HTTPException(status_code=422, detail="Single-choice questions need exactly 1 correct option")
-        if data.type == "multiple" and correct < 1:
-            raise HTTPException(status_code=422, detail="Multiple-choice questions need at least 1 correct option")
+        if data.type == "single" and correct > 1:
+            raise HTTPException(status_code=422, detail="Single-choice questions accept at most 1 correct option")
         if any(not o.text.strip() and o.image_file_id is None for o in data.options):
             raise HTTPException(status_code=422, detail="Each option needs text or an image")
     pool = await get_pool()
@@ -305,20 +339,26 @@ async def import_questions_docx(
         storage.validate_content(file.filename or "questions.docx", content)
     except FileValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    questions = parse_docx_questions(content)
+    questions = parse_docx_questions(content, strict=not preview)
     if preview:
         preview_questions = []
         for question in questions:
             image = question.get("image")
             preview_questions.append({
                 "prompt": question["prompt"],
+                "type": question['type'],
+                "is_complete": question['is_complete'],
+                "warnings": question['warnings'],
                 "options": question["options"],
                 "image_data_url": (
                     f'data:{image["content_type"]};base64,{base64.b64encode(image["content"]).decode()}'
                     if image else None
                 ),
             })
-        return {"questions": preview_questions, "count": len(questions)}
+        return {"questions": preview_questions, "count": len(questions),
+                'with_answers': sum(q['is_complete'] for q in questions),
+                'missing_answers': sum(not q['is_complete'] for q in questions),
+                'errors': list(dict.fromkeys(e for q in questions for e in q['errors']))}
 
     pool = await get_pool()
     await ensure_quiz_row(pool, item_id)
@@ -339,6 +379,10 @@ async def import_questions_docx(
     async with pool.acquire() as conn:
         try:
             async with conn.transaction():
+                await conn.fetchrow('SELECT item_id FROM quizzes WHERE item_id=$1 FOR UPDATE', item_id)
+                content_hash = hashlib.sha256(content).hexdigest()
+                if await conn.fetchval('SELECT 1 FROM quiz_import_batches WHERE quiz_id=$1 AND content_hash=$2', item_id, content_hash):
+                    return {'ok': True, 'imported': 0, 'duplicate': True}
                 from core.config import MAX_USER_FILES, MAX_USER_STORAGE_BYTES
                 await conn.fetchval('SELECT id FROM users WHERE id=$1 FOR UPDATE', user['id'])
                 quota = await conn.fetchrow('SELECT count(*) n,COALESCE(sum(size),0) bytes FROM files WHERE owner_id=$1', user['id'])
@@ -361,11 +405,12 @@ async def import_questions_docx(
                         )
                     question_id = await conn.fetchval(
                         """INSERT INTO quiz_questions (quiz_id,type,prompt,image_file_id,explanation,points,position)
-                           VALUES ($1,'single',$2,$3,'',1,$4) RETURNING id""",
+                           VALUES ($1,$5,$2,$3,'',1,$4) RETURNING id""",
                         item_id,
                         question["prompt"],
                         image_file_id,
                         start_position + offset,
+                        question['type'],
                     )
                     for position, option in enumerate(question["options"]):
                         await conn.execute(
@@ -376,6 +421,7 @@ async def import_questions_docx(
                             option["is_correct"],
                             position,
                         )
+                await conn.execute('INSERT INTO quiz_import_batches(quiz_id,content_hash,imported_count) VALUES($1,$2,$3)',item_id,content_hash,len(questions))
         except Exception:
             for stored_name in saved_files:
                 storage.delete(stored_name)
@@ -427,6 +473,31 @@ async def export_questions_docx(item_id: int, user: dict = Depends(require_teach
     )
 
 
+@router.patch('/questions/{question_id}/correct-answers')
+async def set_correct_answers(question_id: int, data: CorrectAnswersIn, user: dict = Depends(require_teacher)):
+    pool = await get_pool()
+    question = await pool.fetchrow('SELECT * FROM quiz_questions WHERE id=$1', question_id)
+    if question is None:
+        raise HTTPException(404, 'Question not found')
+    item = await get_item_or_404(question['quiz_id'])
+    await ensure_course_owner(user, item['course_id'])
+    if question['type'] not in ('single', 'multiple'):
+        raise HTTPException(422, 'This question uses manual grading')
+    selected = set(data.option_ids)
+    if len(selected) != len(data.option_ids) or (data.type == 'single' and len(selected) > 1):
+        raise HTTPException(422, 'Invalid correct-answer selection')
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.fetchrow('SELECT item_id FROM quizzes WHERE item_id=$1 FOR UPDATE', question['quiz_id'])
+        if await conn.fetchval('SELECT EXISTS(SELECT 1 FROM quiz_starts WHERE quiz_id=$1) OR EXISTS(SELECT 1 FROM quiz_attempts WHERE quiz_id=$1)', question['quiz_id']):
+            raise HTTPException(409, 'Students have started this quiz. Create a new quiz to change answers.')
+        valid = await conn.fetch('SELECT id FROM question_options WHERE question_id=$1', question_id)
+        if not selected <= {r['id'] for r in valid}:
+            raise HTTPException(422, 'Options do not belong to this question')
+        await conn.execute('UPDATE quiz_questions SET type=$2 WHERE id=$1', question_id, data.type)
+        await conn.execute('UPDATE question_options SET is_correct=(id=ANY($2::bigint[])) WHERE question_id=$1', question_id, sorted(selected))
+    return {'ok': True, 'is_complete': bool(selected)}
+
+
 @router.delete("/questions/{question_id}")
 async def delete_question(question_id: int, user: dict = Depends(require_teacher)):
     pool = await get_pool()
@@ -449,7 +520,7 @@ async def delete_question(question_id: int, user: dict = Depends(require_teacher
 # ---------- Quiz detail ----------
 
 @router.get("/{item_id}")
-async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
+async def get_quiz(item_id: int, attempt_number: int | None = Query(default=None, ge=1), user: dict = Depends(get_current_user)):
     item, course = await ensure_item_access(user, item_id)
     if not item_can_have_quiz(item):
         raise HTTPException(status_code=404, detail="Not a quiz")
@@ -462,9 +533,19 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
 
     attempt = None
     state = None
+    rules = None
+    history = []
     if user['role'] == 'student':
         state = await quiz_state(pool, item_id, user['id'])
-        attempt = await pool.fetchrow('SELECT * FROM quiz_attempts WHERE quiz_id=$1 AND student_id=$2',item_id,user['id'])
+        if item['type'] == 'quiz':
+            rules = await access_rules(pool, item_id, user['id'])
+        history = await pool.fetch('SELECT id,attempt_number,auto_score,manual_score,status,submitted_at,max_score_snapshot FROM quiz_attempts WHERE quiz_id=$1 AND student_id=$2 ORDER BY attempt_number DESC',item_id,user['id'])
+        number = attempt_number or (state['attempt_number'] if state else 1)
+        attempt = await pool.fetchrow('SELECT * FROM quiz_attempts WHERE quiz_id=$1 AND student_id=$2 AND attempt_number=$3',item_id,user['id'],number)
+        if attempt_number is not None and attempt is None:
+            raise HTTPException(404, 'Completed attempt not found')
+    ready = await readiness(pool, item_id)
+    has_history = await pool.fetchval('SELECT EXISTS(SELECT 1 FROM quiz_starts WHERE quiz_id=$1) OR EXISTS(SELECT 1 FROM quiz_attempts WHERE quiz_id=$1)', item_id)
     started = is_owner or state is not None or attempt is not None
     question_count = len(questions)
     total_points = sum(q['points'] for q in questions)
@@ -505,6 +586,8 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
         # Explanation only visible to owner or after submitting
         if is_owner or attempt:
             qd["explanation"] = q["explanation"]
+        if is_owner:
+            qd['is_complete'] = q['id'] not in ready['incomplete_question_ids']
         out_questions.append(qd)
 
     if user["role"] == "student" and quiz["shuffle_questions"]:
@@ -515,7 +598,19 @@ async def get_quiz(item_id: int, user: dict = Depends(get_current_user)):
         "is_owner": is_owner,
         "course_subject": course["ent_subject"],
         "item": {"id": item["id"], "title": item["title"], "note": item["note"], "course_id": item["course_id"]},
-        "max_score": quiz["max_score"],
+        "max_score": (attempt['max_score_snapshot'] if attempt else state['max_score_snapshot'] if state else None)
+            or (ready['calculated_max_score'] if quiz['scoring_mode']=='points' else quiz['max_score']),
+        'is_topical': item['type']=='quiz',
+        'scoring_mode': quiz['scoring_mode'],
+        'has_history': has_history,
+        'ready': ready['ready'],
+        'incomplete_question_ids': ready['incomplete_question_ids'] if is_owner else [],
+        'attempt_number': state['attempt_number'] if state else 1,
+        'attempt_history': [dict(h) | {'auto_score':float(h['auto_score']), 'manual_score':float(h['manual_score']) if h['manual_score'] is not None else None, 'submitted_at':str(h['submitted_at'])} for h in history],
+        'access_deadline_at': str(rules['deadline_at']) if rules and rules['deadline_at'] else None,
+        'max_attempts': rules['max_attempts'] if rules else None,
+        'remaining_attempts': max(0,rules['max_attempts']-max(len(history),state['attempt_number'] if state else 0)) if rules else None,
+        'can_start': bool(rules and ready['ready'] and (not rules['deadline_at'] or rules['deadline_at']>utcnow()) and max(len(history),state['attempt_number'] if state else 0)<rules['max_attempts']),
         "weight_pct": float(quiz["weight_pct"]),
         "open_at": str(quiz["open_at"]) if quiz["open_at"] else None,
         "deadline_at": str(quiz["deadline_at"]) if quiz["deadline_at"] else None,
@@ -564,31 +659,51 @@ async def start_quiz(item_id: int, user: dict = Depends(require_student)):
         raise HTTPException(404, 'Not a quiz')
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
-        quiz = await conn.fetchrow('SELECT * FROM quizzes WHERE item_id=$1 FOR UPDATE', item_id)
+        quiz = await conn.fetchrow('SELECT * FROM quizzes WHERE item_id=$1 FOR NO KEY UPDATE', item_id)
         if quiz is None:
             raise HTTPException(404,'Quiz not found')
+        previous = await conn.fetchrow('SELECT * FROM quiz_starts WHERE quiz_id=$1 AND student_id=$2 ORDER BY attempt_number DESC LIMIT 1 FOR UPDATE', item_id,user['id'])
+        if previous:
+            completed = await conn.fetchval('SELECT id FROM quiz_attempts WHERE quiz_id=$1 AND student_id=$2 AND attempt_number=$3',item_id,user['id'],previous['attempt_number'])
+            if not completed:
+                # Resume is idempotent; assignment edits cannot change this frozen timer.
+                if previous['deadline_at'] and previous['deadline_at']<=utcnow():
+                    await complete_quiz(conn, previous)
+                return {'ok': True, 'attempt_number': previous['attempt_number']}
+        rules = await access_rules(conn,item_id,user['id']) if item['type'] == 'quiz' else None
+        last_number = await conn.fetchval('SELECT GREATEST(COALESCE((SELECT max(attempt_number) FROM quiz_starts WHERE quiz_id=$1 AND student_id=$2),0),COALESCE((SELECT max(attempt_number) FROM quiz_attempts WHERE quiz_id=$1 AND student_id=$2),0))',item_id,user['id'])
+        if last_number >= (rules['max_attempts'] if item['type']=='quiz' else 1):
+            raise HTTPException(403, 'Мүмкіндік аяқталды')
         current = utcnow()
+        if item['type']=='quiz' and rules['deadline_at'] and current>=rules['deadline_at']:
+            raise HTTPException(403, 'Тапсыру мерзімі аяқталды')
         if quiz['open_at'] and current < quiz['open_at']:
             raise HTTPException(403,'Quiz is not open yet')
         if quiz['close_at'] and current > quiz['close_at']:
             raise HTTPException(403,'Quiz is closed')
-        if not await conn.fetchval('SELECT 1 FROM quiz_questions WHERE quiz_id=$1',item_id):
-            raise HTTPException(409,'Quiz has no questions')
+        ready = await readiness(conn,item_id)
+        if not ready['ready']:
+            raise HTTPException(409,'Тест дайын емес: Дұрыс жауап таңдалмаған немесе сұрақ толық емес')
         deadline = current + datetime.timedelta(minutes=quiz['time_limit_minutes']) if quiz['time_limit_minutes'] else None
         if quiz['close_at']:
             deadline = min(deadline,quiz['close_at']) if deadline else quiz['close_at']
-        await conn.execute('INSERT INTO quiz_starts(quiz_id,student_id,deadline_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',item_id,user['id'],deadline)
-    return {'ok': True}
+        if item['type']=='quiz' and rules['deadline_at']:
+            deadline = min(deadline,rules['deadline_at']) if deadline else rules['deadline_at']
+        maximum = ready['calculated_max_score'] if quiz['scoring_mode']=='points' else quiz['max_score']
+        await conn.execute('INSERT INTO quiz_starts(quiz_id,student_id,deadline_at,attempt_number,max_score_snapshot) VALUES($1,$2,$3,$4,$5)',item_id,user['id'],deadline,last_number+1,maximum)
+    return {'ok': True, 'attempt_number': last_number+1}
 
 
 async def save_quiz_answers(item_id, data, user, submit=False):
     await ensure_item_access(user, item_id)
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
-        start = await conn.fetchrow('SELECT * FROM quiz_starts WHERE quiz_id=$1 AND student_id=$2 FOR UPDATE',item_id,user['id'])
+        start = await conn.fetchrow('SELECT * FROM quiz_starts WHERE quiz_id=$1 AND student_id=$2 ORDER BY attempt_number DESC LIMIT 1 FOR UPDATE',item_id,user['id'])
         if start is None:
             raise HTTPException(403,'Start the quiz first')
-        existing = await conn.fetchrow('SELECT * FROM quiz_attempts WHERE quiz_id=$1 AND student_id=$2',item_id,user['id'])
+        if start['attempt_number'] != data.attempt_number:
+            raise HTTPException(409,'Attempt changed. Reload the current attempt.')
+        existing = await conn.fetchrow('SELECT * FROM quiz_attempts WHERE quiz_id=$1 AND student_id=$2 AND attempt_number=$3',item_id,user['id'],start['attempt_number'])
         expired = bool(start['deadline_at'] and start['deadline_at']<=utcnow())
         if existing or expired:
             result = existing or await complete_quiz(conn,start)
@@ -599,7 +714,7 @@ async def save_quiz_answers(item_id, data, user, submit=False):
             if not replay:
                 responses = decoded(start['responses']) or {}
                 responses.update(await normalized_answers(conn,item_id,data.answers))
-                start = await conn.fetchrow('UPDATE quiz_starts SET responses=$3::jsonb,response_revision=response_revision+1,last_save_request_id=$4 WHERE quiz_id=$1 AND student_id=$2 RETURNING *',item_id,user['id'],json.dumps(responses),data.request_id)
+                start = await conn.fetchrow('UPDATE quiz_starts SET responses=$3::jsonb,response_revision=response_revision+1,last_save_request_id=$4 WHERE quiz_id=$1 AND student_id=$2 AND attempt_number=$5 RETURNING *',item_id,user['id'],json.dumps(responses),data.request_id,start['attempt_number'])
             result = await complete_quiz(conn,start) if submit else None
         return {'ok': True,'revision':start['response_revision'],'submitted':result is not None,
                 'attempt_id':result['id'] if result else None,'auto_score':float(result['auto_score']) if result else None,
@@ -742,7 +857,8 @@ async def grade_answer(answer_id: int, data: GradeAnswerIn, user: dict = Depends
             total_points = await conn.fetchval(
                 "SELECT COALESCE(SUM(points), 1) FROM quiz_questions WHERE quiz_id = $1", ans["quiz_id"]
             )
-            manual_score = round(float(manual_points) / float(total_points) * quiz["max_score"], 2)
+            maximum = await conn.fetchval('SELECT COALESCE(max_score_snapshot,$2) FROM quiz_attempts WHERE id=$1',ans['attempt_id'],quiz['max_score'])
+            manual_score = round(float(manual_points) / float(total_points) * maximum, 2)
             await conn.execute(
                 "UPDATE quiz_attempts SET manual_score = $1, status = $2 WHERE id = $3",
                 manual_score,

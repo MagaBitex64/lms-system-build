@@ -465,6 +465,7 @@ ENT_MIGRATIONS = [
         duration_seconds INTEGER
     )""",
     "CREATE INDEX IF NOT EXISTS idx_ent_absence_periods_attempt ON ent_absence_periods(attempt_id,started_at DESC)",
+    "ALTER TABLE ent_trial_attempts ADD COLUMN IF NOT EXISTS question_scores JSONB",
 ]
 
 RELEASE_MIGRATIONS = [
@@ -546,7 +547,8 @@ async def main() -> None:
             for migration in MIGRATIONS:
                 await conn.execute(migration)
             await conn.execute('CREATE TABLE IF NOT EXISTS schema_migrations(id TEXT PRIMARY KEY,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())')
-            for migration in ENT_MIGRATIONS + RELEASE_MIGRATIONS:
+            from scripts.topical_migrations import TOPICAL_MIGRATIONS
+            for migration in ENT_MIGRATIONS + RELEASE_MIGRATIONS + TOPICAL_MIGRATIONS:
                 key = hashlib.sha256(migration.encode()).hexdigest()
                 if not await conn.fetchval('SELECT 1 FROM schema_migrations WHERE id=$1', key):
                     await conn.execute(migration)

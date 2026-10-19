@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import useSWR from 'swr'
 import { ArrowLeft, Award, ClipboardCheck, Clock3, EyeOff, Users } from 'lucide-react'
 
@@ -161,6 +162,7 @@ export default function AccessResultsPage() {
                         <p className="text-xs font-semibold text-muted">{submitted ? `${Number(item.percentage).toFixed(2)}%` : 'Тест орындалуда'}</p>
                       </div>
                       <Button type="button" size="sm" variant="secondary" aria-expanded={proctorOpen} onClick={() => { setProctorPage(1); setProctorAttemptId(proctorOpen ? null : item.id) }}><EyeOff size={15} />Тесттен шығу журналы</Button>
+                      {submitted && <Button size="sm" variant="secondary" asChild><Link href={`/ent-trial/admin/attempts/${item.id}/result`}><ClipboardCheck size={15} />Нәтижені толық көру</Link></Button>}
                     </div>
                   </div>
 

@@ -9,7 +9,6 @@ import {
   ArrowRight,
   BookOpen,
   CalendarClock,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ClipboardList,
@@ -39,15 +38,14 @@ import {
   DropdownMenu,
   EmptyState,
   ErrorState,
-  FadeIn,
   Field,
   Input,
   Modal,
-  PageHeader,
   Select,
   Spinner,
   Textarea,
 } from '@/components/ui'
+import styles from '@/components/course-detail.module.css'
 
 type ItemType = 'lesson' | 'quiz' | 'homework'
 
@@ -71,6 +69,7 @@ type Item = {
   topic_open?: boolean
   access_group_ids?: number[]
   access_student_ids?: number[]
+  quiz_access_rules?: Array<{target_type:string;target_id:number;max_attempts:number;deadline_at:string|null}>
 }
 
 type CourseGroup = {
@@ -137,6 +136,10 @@ export default function CoursePage() {
   const [accessItem, setAccessItem] = useState<Item | null>(null)
   const [accessGroupIds, setAccessGroupIds] = useState<number[]>([])
   const [accessStudentIds, setAccessStudentIds] = useState<number[]>([])
+  const [accessAttempts,setAccessAttempts]=useState('1')
+  const [accessDeadline,setAccessDeadline]=useState('')
+  const [accessRulesDirty,setAccessRulesDirty]=useState(false)
+  const [mixedAccessRules,setMixedAccessRules]=useState(false)
   const [expandedGroupIds, setExpandedGroupIds] = useState<number[]>([])
   const [contentExpanded, setContentExpanded] = useState(true)
   const [entExpanded, setEntExpanded] = useState(true)
@@ -146,6 +149,7 @@ export default function CoursePage() {
   
   // Delete course states
   const [menuOpen, setMenuOpen] = useState(false)
+  const [itemMenuId, setItemMenuId] = useState<number | null>(null)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
@@ -217,6 +221,12 @@ export default function CoursePage() {
     setAccessGroupIds(item.access_group_ids ?? [])
     setAccessStudentIds(item.access_student_ids ?? [])
     setExpandedGroupIds(item.access_group_ids ?? [])
+    const rules=item.type === 'quiz' ? item.quiz_access_rules ?? [] : []
+    const mixed=new Set(rules.map(r=>`${r.max_attempts}:${r.deadline_at??''}`)).size>1
+    setMixedAccessRules(mixed);setAccessRulesDirty(false)
+    setAccessAttempts(String(!mixed&&rules[0]?rules[0].max_attempts:1))
+    const deadline=!mixed?rules[0]?.deadline_at:null
+    if(deadline){const d=new Date(deadline);setAccessDeadline(new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16))}else setAccessDeadline('')
   }
 
   function toggleNumber(list: number[], value: number) {
@@ -243,7 +253,8 @@ export default function CoursePage() {
     try {
       await api(`/courses/items/${accessItem.id}/access`, {
         method: 'PUT',
-        body: { group_ids: accessGroupIds, student_ids: accessStudentIds },
+        body: { group_ids: accessGroupIds, student_ids: accessStudentIds,
+          ...(accessItem.type==='quiz' && (!mixedAccessRules||accessRulesDirty)?{quiz_rules:{max_attempts:Number(accessAttempts),deadline_at:!accessRulesDirty&&!mixedAccessRules&&accessItem.quiz_access_rules?.[0]?accessItem.quiz_access_rules[0].deadline_at:accessDeadline?new Date(accessDeadline).toISOString():null}}:{}) },
       })
       setAccessItem(null)
       await mutate()
@@ -277,105 +288,46 @@ export default function CoursePage() {
     }
   }
 
-  const canDeleteCourse = user && (user.id === course?.teacher_id || user.role === 'admin')
   const studentCount = (course?.students ?? []).length
-  const itemCount = (course?.items ?? []).length
   const shouldShowWarning = course?.is_published && studentCount > 0
 
   return (
-    <div className="space-y-8">
-      <Link href="/courses" className="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground">
-        <ArrowLeft size={16} />
-        {t('catalog')}
-      </Link>
+    <div className={styles.page}>
+      <nav className={styles.breadcrumb} aria-label="Курсқа өту жолы">
+        <Link href="/courses" className="inline-flex items-center gap-1"><ArrowLeft size={15} />{t('catalog')}</Link>
+        <ChevronRight size={15} aria-hidden="true" /><span aria-current="page">Курс</span>
+      </nav>
 
-      <PageHeader
-        eyebrow={t('courses')}
-        title={course.title}
-        description={course.description}
-        actions={
-          <div className="flex flex-wrap gap-2 items-center">
-            {course.enrollment_status && (
-              <Badge tone={course.enrollment_status === 'approved' ? 'success' : 'warning'}>
-                {t(course.enrollment_status as TKey)}
-              </Badge>
-            )}
-            <Badge tone={course.is_published ? 'primary' : 'neutral'}>
-              {course.is_published ? t('published') : t('draft')}
-            </Badge>
-            {isOwner && (
-              <>
-                <Button asChild variant="outline">
-                <Link href={`/teacher/courses/${courseId}/gradebook`}>{t('gradebook')}</Link>
-                </Button>
-                <Button onClick={() => setAddOpen(true)}>
-                  <PlusCircle size={16} />
-                  {t('addItem')}
-                </Button>
-
-                {/* Menu button */}
-                <div className="relative">
-                  <button
-                    onClick={() => setMenuOpen(!menuOpen)}
-                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-border transition-colors hover:bg-surface-muted text-muted hover:text-foreground"
-                    aria-label={t('courseOptions')}
-                  >
-                    <MoreVertical size={18} />
-                  </button>
-
-                  {/* Dropdown Menu */}
-                  <DropdownMenu
-                    open={menuOpen}
-                    onClose={() => setMenuOpen(false)}
-                    items={[
-                      {
-                        label: t('deleteCourse'),
-                        icon: <Trash size={16} />,
-                        destructive: true,
-                        divider: true,
-                        onClick: () => setDeleteModalOpen(true),
-                      },
-                    ]}
-                    position="right"
-                  />
-                </div>
-              </>
-            )}
+      <header className={styles.hero}>
+        <div className={styles.heroIcon}><BookOpen size={37} aria-hidden="true" /></div>
+        <div className={styles.heroMain}>
+          <div className={styles.heroTop}>
+            <div className={styles.heroCopy}>
+              <div className="flex flex-wrap gap-2">
+                <Badge tone={course.is_published ? 'success' : 'neutral'}>{course.is_published ? t('published') : t('draft')}</Badge>
+                {course.enrollment_status && <Badge tone={course.enrollment_status === 'approved' ? 'success' : 'warning'}>{t(course.enrollment_status as TKey)}</Badge>}
+              </div>
+              <h1 className={styles.heroTitle}>{course.title}</h1>
+              {course.description && <p className={styles.heroDescription}>{course.description}</p>}
+            </div>
+            {isOwner && <div className={styles.heroActions}>
+              <div className={styles.menuAnchor}>
+                <button type="button" className={styles.menuTrigger} aria-label={t('courseOptions')} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreVertical size={18} /></button>
+                <DropdownMenu open={menuOpen} onClose={() => setMenuOpen(false)} items={[{label:t('deleteCourse'),icon:<Trash size={16} />,destructive:true,onClick:()=>setDeleteModalOpen(true)}]} />
+              </div>
+              <Button asChild variant="outline"><Link href={`/teacher/courses/${courseId}/gradebook`}>{t('gradebook')}</Link></Button>
+              <Button onClick={() => setAddOpen(true)}><PlusCircle size={16} />{t('addItem')}</Button>
+            </div>}
           </div>
-        }
-      />
+          <div className={styles.heroMeta}>
+            <div className={styles.metaItem}><span className={styles.metaIcon}><UserRound size={18} /></span><span className={styles.metaText}><small>{t('instructor')}</small><strong>{course.teacher_name}</strong></span></div>
+            <div className={styles.metaItem}><span className={styles.metaIcon}><BookOpen size={18} /></span><span className={styles.metaText}><small>{t('lessons')}</small><strong>{items.length} {t('itemsCount')}</strong>{!isOwner && <em>{completed} / {items.length} {t('completed')}</em>}</span></div>
+            {isOwner && <div className={styles.metaItem}><span className={styles.metaIcon}><Users size={18} /></span><span className={styles.metaText}><small>{t('courseGroups')}{course.groups?.length ? ` · ${course.groups.length}` : ''}</small><strong>{course.groups?.length ? course.groups.map(group => `${group.code} — ${group.title}`).join(', ') : t('noGroups')}</strong>{course.groups?.length ? <em>{course.groups.map(group => `${group.code}: ${group.student_count}/${group.capacity} ${t('studentsCount')}`).join(' · ')}</em> : null}</span></div>}
+          </div>
+        </div>
+      </header>
 
       {actionError && <ErrorState message={actionError} />}
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="flex items-center gap-4">
-          <div className="flex size-11 items-center justify-center rounded-xl bg-primary-soft text-primary">
-            <UserRound size={20} />
-          </div>
-          <div>
-            <p className="text-xs font-medium text-muted">{t('instructor')}</p>
-            <p className="font-semibold text-foreground">{course.teacher_name}</p>
-          </div>
-        </Card>
-        <Card className="flex items-center gap-4">
-          <div className="flex size-11 items-center justify-center rounded-xl bg-success-soft text-success">
-            <BookOpen size={20} />
-          </div>
-          <div>
-            <p className="text-xs font-medium text-muted">{t('lessons')}</p>
-            <p className="font-semibold text-foreground">{items.length} {t('itemsCount')}</p>
-          </div>
-        </Card>
-        <Card className="flex items-center gap-4">
-          <div className="flex size-11 items-center justify-center rounded-xl bg-warning-soft text-warning">
-            <CheckCircle2 size={20} />
-          </div>
-          <div>
-            <p className="text-xs font-medium text-muted">{t('completed')}</p>
-            <p className="font-semibold text-foreground">{completed} {t('of')} {items.length}</p>
-          </div>
-        </Card>
-      </div>
 
       {course.announcement && (
         <Card className="flex gap-3 border-primary/20 bg-primary-soft/50">
@@ -387,37 +339,19 @@ export default function CoursePage() {
         </Card>
       )}
 
-      {isOwner && (
-        <Card className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Users size={18} className="text-primary" />
-            <h2 className="text-base font-semibold">{t('courseGroups')}</h2>
-          </div>
-          {course.groups?.length ? (
-            <div className="flex flex-wrap gap-2">
-              {course.groups.map((group) => (
-                <span key={group.id} className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2 text-sm">
-                  <span className="font-semibold">{group.code}</span>
-                  <span className="text-muted">{group.student_count}/{group.capacity}</span>
-                </span>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted">{t('noGroups')}</p>
-          )}
-        </Card>
-      )}
+      <nav className={styles.sectionTabs} aria-label="Курс бөлімдері"><a href="#course-content">{t('courseContent')}</a>{isOwner && <a href="#course-ent">Пәндік сынақ ҰБТ</a>}</nav>
 
-      <section className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
+      <section id="course-content" className={styles.sectionCard}>
+        <div className={styles.sectionHeader}>
           <button
             type="button"
-            className="flex min-w-0 items-center gap-2 rounded-lg text-left hover:text-primary"
+            className={`${styles.sectionHeading} ${styles.sectionToggle}`}
             onClick={() => setContentExpanded((value) => !value)}
             aria-expanded={contentExpanded}
           >
-            {contentExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
-            <h2 className="text-lg font-semibold">{t('courseContent')}</h2>
+            <span className={styles.sectionIcon}><ClipboardList size={20} /></span>
+            <span><h2>{t('courseContent')}</h2><p>Курстың оқу материалдары: сабақтар, тапсырмалар мен тесттер.</p></span>
+            {contentExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
           </button>
           {isOwner && (
             <Button variant="secondary" size="sm" onClick={() => setAddOpen(true)}>
@@ -434,87 +368,46 @@ export default function CoursePage() {
             hint={t('lockedHint')}
           />
         ) : items.length ? (
-          <div className="space-y-3">
-            {items.map((item, i) => {
+          <div className={styles.rows}>
+            {items.map((item) => {
               const locked = item.locked
               const deadline = fmtDate(item.deadline_at)
               const content = (
-                <Card interactive={!locked} className={`flex flex-col gap-4 sm:flex-row sm:items-center ${locked ? 'opacity-70' : ''}`}>
-                  <div
-                    className={`flex size-11 shrink-0 items-center justify-center rounded-xl ${ 
-                      item.completed ? 'bg-success-soft text-success' : 'bg-surface-muted text-muted'
-                    }`}
-                  >
-{!locked || isOwner ? TYPE_ICON[item.type] : <Lock size={18} />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-foreground">{item.title}</p>
-                      <Badge tone="neutral">{t(item.type)}</Badge>
+                <div className={`${styles.itemRow} ${locked && !isOwner ? styles.itemRowLocked : ''}`}>
+                  <span className={styles.itemIcon}>{!locked || isOwner ? TYPE_ICON[item.type] : <Lock size={18} />}</span>
+                  <div className={styles.itemMain}>
+                    <div className={styles.itemTitle}>
+                      <strong>{item.title}</strong>
+                      <span className={styles.itemBadges}><Badge tone="neutral">{t(item.type)}</Badge>
                       {item.completed && <Badge tone="success">{t('completed')}</Badge>}
                       {!isOwner && locked && <Badge tone="warning">{t('locked')}</Badge>}
-                      {isOwner && (
-                        <Badge tone={item.is_visible ? 'success' : 'neutral'}>
-                          {item.is_visible ? t('visible') : t('hidden')}
-                        </Badge>
-                      )}
-                      {isOwner && (
-                        <Badge tone={(item.access_group_ids?.length || item.access_student_ids?.length) ? 'primary' : 'neutral'}>
-                          {t('topicAccess')}: {(item.access_group_ids?.length ?? 0) + (item.access_student_ids?.length ?? 0)}
-                        </Badge>
-                      )}
+                      {isOwner && <><Badge tone={item.is_visible ? 'success' : 'neutral'}>{item.is_visible ? t('visible') : t('hidden')}</Badge><Badge tone={item.sequential_unlock ? 'warning' : 'neutral'}>{item.sequential_unlock ? 'Кезекпен құлыпталады' : 'Құлып шарты жоқ'}</Badge></>}
+                      </span>
                     </div>
-                    {item.note && <p className="mt-1 line-clamp-1 text-sm text-muted">{item.note}</p>}
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-                      {deadline && (
-                        <span className="inline-flex items-center gap-1">
-                          <CalendarClock size={13} />
-                          {t('deadline')}: {deadline}
-                        </span>
-                      )}
-                      {item.time_limit_minutes ? (
-                        <span className="inline-flex items-center gap-1">
-                          <Settings2 size={13} />
-                          {item.time_limit_minutes} min
-                        </span>
-                      ) : null}
-                      {item.max_score != null && <span>{t('maxScore')}: {item.max_score}</span>}
-                      {item.weight_pct ? <span>{t('weight')}: {item.weight_pct}%</span> : null}
-                    </div>
+                    {item.note && <p className={styles.itemNote}>{item.note}</p>}
+                    {isOwner && <p className={styles.itemNote}>{t('topicAccess')}: {(item.access_group_ids?.length ?? 0) + (item.access_student_ids?.length ?? 0)}</p>}
                   </div>
-                  {isOwner ? (
-                    <div className="flex flex-wrap gap-2 sm:justify-end">
-                      <Button asChild size="sm">
-                        <Link href={`/items/${item.id}`}>{t('openItem')}</Link>
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => patchItem(item.id, { is_visible: !item.is_visible })}
-                      >
-                        {item.is_visible ? <EyeOff size={14} /> : <Eye size={14} />}
-                        {item.is_visible ? t('hidden') : t('visible')}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => patchItem(item.id, { sequential_unlock: !item.sequential_unlock })}
-                      >
-                        <Lock size={14} />
-                        {item.sequential_unlock ? t('open') : t('locked')}
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => openAccessModal(item)}>
-                        <Users size={14} />
-                        {t('topicAccess')}
-                      </Button>
+                  <div className={styles.itemMetrics}>
+                    {item.time_limit_minutes ? <span><CalendarClock size={14} />{item.time_limit_minutes} минут</span> : item.type === 'quiz' ? <span><CalendarClock size={14} />Уақыт шегі: —</span> : null}
+                    {item.max_score != null && <span><Settings2 size={14} />{t('maxScore')}: {item.max_score}</span>}
+                    {deadline && <span><CalendarClock size={14} />{t('deadline')}: {deadline}</span>}
+                    {item.weight_pct ? <span><Settings2 size={14} />{t('weight')}: {item.weight_pct}%</span> : null}
+                  </div>
+                  {isOwner ? <div className={styles.itemActions}>
+                    <Button asChild size="sm" variant="outline" className={styles.openButton}><Link href={`/items/${item.id}`}>{t('openItem')}</Link></Button>
+                    <div className={styles.menuAnchor}>
+                      <button type="button" className={styles.menuTrigger} aria-label={`«${item.title}» әрекеттері`} aria-haspopup="menu" aria-expanded={itemMenuId === item.id} onClick={() => setItemMenuId(itemMenuId === item.id ? null : item.id)}><MoreVertical size={17} /></button>
+                      <DropdownMenu open={itemMenuId === item.id} onClose={() => setItemMenuId(null)} items={[
+                        {label:item.is_visible ? t('hidden') : t('visible'),icon:item.is_visible ? <EyeOff size={15} /> : <Eye size={15} />,onClick:()=>{void patchItem(item.id,{is_visible:!item.is_visible})}},
+                        {label:item.sequential_unlock ? t('open') : t('locked'),icon:<Lock size={15} />,onClick:()=>{void patchItem(item.id,{sequential_unlock:!item.sequential_unlock})}},
+                        {label:t('topicAccess'),icon:<Users size={15} />,onClick:()=>openAccessModal(item)},
+                      ]} />
                     </div>
-                  ) : (
-                    !locked && <ArrowRight size={18} className="shrink-0 text-muted" />
-                  )}
-                </Card>
+                  </div> : !locked && <span className={styles.itemActions}><span className="text-sm font-semibold text-primary">{t('openItem')}</span><ArrowRight size={18} className="text-primary" /></span>}
+                </div>
               )
               return (
-                <FadeIn key={item.id} delay={i * 30}>
+                <div key={item.id}>
                   {locked || isOwner ? (
                     <div title={locked ? (item.topic_open === false ? t('topicClosedHint') : t('lockedHint')) : undefined}>{content}</div>
                   ) : (
@@ -522,7 +415,7 @@ export default function CoursePage() {
                       {content}
                     </Link>
                   )}
-                </FadeIn>
+                </div>
               )
             })}
           </div>
@@ -535,19 +428,16 @@ export default function CoursePage() {
         ))}
       </section>
 
-      {isOwner && <section className="space-y-4 border-t border-border pt-6">
+      {isOwner && <section id="course-ent" className={styles.sectionCard}>
         <button
           type="button"
-          className="flex w-full items-center gap-3 rounded-xl text-left hover:text-primary"
+          className={`${styles.sectionHeading} ${styles.sectionToggle} mb-4 w-full`}
           onClick={() => setEntExpanded((value) => !value)}
           aria-expanded={entExpanded}
         >
-          {entExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
-          <span className="flex size-9 items-center justify-center rounded-lg bg-primary-soft text-primary"><ClipboardList size={18} /></span>
-          <span>
-            <span className="block text-lg font-semibold">Пәндік сынақ ҰБТ</span>
-            <span className="block text-sm font-normal text-muted">Курс пәні бойынша варианттарды құру және редакциялау</span>
-          </span>
+          <span className={styles.sectionIcon}><ClipboardList size={20} /></span>
+          <span className="flex-1"><h2>Пәндік сынақ ҰБТ</h2><p>Курс пәні бойынша нұсқаларды құру және редакциялау.</p></span>
+          {entExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
         </button>
         {entExpanded && user?.role === 'admin' && (
           <Card className="space-y-3 border-primary/20 bg-primary-soft/30">
@@ -700,6 +590,11 @@ export default function CoursePage() {
             )}
           </div>
 
+          {accessItem?.type==='quiz'&&<div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2"><Field label="Тапсыру саны"><Input type="number" required min={1} max={100} step={1} value={accessAttempts} onChange={e=>{setAccessAttempts(e.target.value);setAccessRulesDirty(true)}}/></Field><Field label="Тапсыру мерзімі"><Input type="datetime-local" value={accessDeadline} onChange={e=>{setAccessDeadline(e.target.value);setAccessRulesDirty(true)}}/></Field></div>
+            <p className="text-xs text-muted">Мерзім жергілікті уақытпен көрсетіледі. Қабаттасатын рұқсаттарда ең қатаң шектеу қолданылады. Басталған әрекеттің таймері өзгермейді.</p>
+            {mixedAccessRules&&!accessRulesDirty&&<p role="status" className="text-xs text-muted">Таңдалған рұқсаттардың шектеулері әртүрлі. Өрістерді өзгертпесеңіз, бұрынғы шектеулер сақталады; жаңа рұқсатқа 1 әрекет және мерзімсіз қолжетімділік беріледі.</p>}
+          </div>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setAccessItem(null)}>{t('cancel')}</Button>
             <Button type="submit" disabled={working}>{working ? t('loading') : t('save')}</Button>

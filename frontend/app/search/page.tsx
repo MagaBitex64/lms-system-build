@@ -1,25 +1,13 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import useSWR from 'swr'
 import { Search as SearchIcon, BookOpen, FileText, Paperclip } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
-import { fetcher } from '@/lib/api'
+import { api } from '@/lib/api'
+import { createSearchPager, emptySearchState, mergeSearchPages, validSearchQuery, type SearchPage } from '@/lib/search-results'
 import { Badge, Button, Card, Input, PageHeader, Spinner, EmptyState } from '@/components/ui'
-
-type Result = {
-  id: number
-  title?: string
-  label?: string
-  description?: string
-  course_title?: string
-  course_id?: number
-  teacher_name?: string
-}
-
-type SearchResponse = { courses: Result[]; lessons: Result[]; materials: Result[] }
 
 function SearchContent() {
   const { t } = useI18n()
@@ -27,26 +15,35 @@ function SearchContent() {
   const params = useSearchParams()
   const q = params.get('q') ?? ''
   const [query, setQuery] = useState(q)
-
-  const { data, isLoading } = useSWR<SearchResponse>(
-    q ? `/search?q=${encodeURIComponent(q)}` : null,
-    fetcher,
-  )
+  const [inputError, setInputError] = useState(false)
+  const [state, setState] = useState(() => emptySearchState(q))
+  const pager = useRef<ReturnType<typeof createSearchPager> | null>(null)
+  useEffect(() => {
+    setQuery(q)
+    setInputError(false)
+    const current = createSearchPager((value, page) => api<SearchPage>(`/search?q=${encodeURIComponent(value)}&page=${page}`), setState)
+    pager.current = current
+    current.setQuery(q)
+    return () => { current.dispose(); pager.current = null }
+  }, [q])
+  const current = state.query === q ? state : emptySearchState(q)
+  const data = mergeSearchPages(current.pages)
+  const hasMore = current.pages.at(-1)?.has_more ?? false
+  const error = inputError ? 'invalid' : current.error
+  const totalResults = data.courses.length + data.lessons.length + data.materials.length
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (query.trim()) router.push(`/search?q=${encodeURIComponent(query.trim())}`)
+    if (!validSearchQuery(query)) { setInputError(true); return }
+    setInputError(false)
+    router.push(`/search?q=${encodeURIComponent(query.trim())}`)
   }
 
-  const groups = data
-    ? [
+  const groups = [
         { key: 'courses', title: t('courses'), icon: <BookOpen size={16} />, items: data.courses },
         { key: 'lessons', title: t('lessons'), icon: <FileText size={16} />, items: data.lessons },
         { key: 'materials', title: t('materials'), icon: <Paperclip size={16} />, items: data.materials },
       ]
-    : []
-
-  const totalResults = data ? data.courses.length + data.lessons.length + data.materials.length : 0
 
   return (
     <div className="space-y-8">
@@ -56,24 +53,32 @@ function SearchContent() {
         <div className="relative flex-1">
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
           <Input
-            className="pl-9"
+            className={`pl-9 ${error === 'invalid' ? 'border-danger' : ''}`}
             type="search"
             placeholder={t('searchPlaceholder')}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            maxLength={200}
+            aria-label={t('searchPlaceholder')}
+            aria-invalid={error === 'invalid'}
+            aria-describedby={error ? 'search-error' : undefined}
+            onChange={(e) => { setQuery(e.target.value); setInputError(false) }}
             autoFocus
           />
         </div>
         <Button type="submit">{t('search')}</Button>
       </form>
 
-      {!q ? (
+      {error && <div id="search-error" role="alert" className="space-y-3 rounded-xl border border-border bg-surface p-4 text-sm">
+        <p>{error === 'invalid' ? 'Іздеу сұранысын тексеріңіз' : 'Іздеу кезінде қате орын алды. Қайталап көріңіз.'}</p>
+        {error === 'request' && <Button variant="secondary" disabled={current.pending} onClick={() => pager.current?.retry()}>Қайталау</Button>}
+      </div>}
+      {!q && !error ? (
         <EmptyState icon={<SearchIcon size={22} />} title={t('search')} hint={t('searchPlaceholder')} />
-      ) : isLoading ? (
+      ) : current.pending && !current.pages.length ? (
         <Spinner />
-      ) : totalResults === 0 ? (
+      ) : !error && current.pages.length > 0 && totalResults === 0 && !hasMore ? (
         <EmptyState icon={<SearchIcon size={22} />} title={t('noResults')} />
-      ) : (
+      ) : totalResults > 0 ? (
         <div className="grid gap-6 lg:grid-cols-3">
           {groups.map((group) => (
             <section key={group.key} className="space-y-3">
@@ -110,14 +115,15 @@ function SearchContent() {
                   })}
                 </div>
               ) : (
-                <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted">
+                !error && <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted">
                   {t('noResults')}
                 </p>
               )}
             </section>
           ))}
         </div>
-      )}
+      ) : null}
+      {hasMore && !error && <Button variant="secondary" disabled={current.pending} onClick={() => pager.current?.loadMore()}>{current.pending ? 'Жүктелуде…' : 'Тағы көрсету'}</Button>}
     </div>
   )
 }

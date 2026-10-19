@@ -11,7 +11,8 @@ async def compute_student_course_grades(pool, course_ids: list[int], student_ids
     gradables = await pool.fetch(
         """
         SELECT ci.id, ci.course_id, students.student_id, ci.type, ci.title,
-               COALESCE(q.max_score, h.max_score) AS max_score,
+               CASE WHEN q.scoring_mode='points' THEN (SELECT COALESCE(sum(points),0) FROM quiz_questions WHERE quiz_id=ci.id)
+                    ELSE COALESCE(q.max_score,h.max_score) END AS max_score,
                COALESCE(q.weight_pct, h.weight_pct) AS weight_pct,
                h.deadline_at
         FROM course_items ci
@@ -42,9 +43,11 @@ async def compute_student_course_grades(pool, course_ids: list[int], student_ids
     homework_ids = [g["id"] for g in gradables if g["max_score"] is None or g["type"] == "homework"]
     quiz_attempts = await pool.fetch(
         """
-        SELECT student_id, quiz_id, auto_score, manual_score, status
-        FROM quiz_attempts
-        WHERE quiz_id = ANY($1::bigint[]) AND student_id = ANY($2::bigint[])
+        SELECT DISTINCT ON (a.student_id,a.quiz_id) a.student_id,a.quiz_id,a.auto_score,a.manual_score,a.status,
+               COALESCE(a.max_score_snapshot,q.max_score) AS result_max
+        FROM quiz_attempts a JOIN quizzes q ON q.item_id=a.quiz_id
+        WHERE a.quiz_id = ANY($1::bigint[]) AND a.student_id = ANY($2::bigint[])
+        ORDER BY a.student_id,a.quiz_id,(a.auto_score+COALESCE(a.manual_score,0))/NULLIF(COALESCE(a.max_score_snapshot,q.max_score),0) DESC,a.attempt_number DESC
         """,
         quiz_ids,
         student_ids,
@@ -81,6 +84,7 @@ async def compute_student_course_grades(pool, course_ids: list[int], student_ids
                 completed_item = True
                 score = float(a["auto_score"]) + float(a["manual_score"] or 0)
                 status = a["status"]
+                g = dict(g) | {'max_score': a['result_max']}
         else:
             s = submissions_by_item.get((g["student_id"], g["id"]))
             if s:

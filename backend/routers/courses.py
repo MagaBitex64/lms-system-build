@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+import datetime
 from pydantic import BaseModel, Field
 
 from core.access import (
@@ -52,6 +53,15 @@ class ReorderIn(BaseModel):
 class ItemAccessIn(BaseModel):
     group_ids: list[int] = []
     student_ids: list[int] = []
+    quiz_rules: 'QuizAccessRulesIn | None' = None
+
+
+class QuizAccessRulesIn(BaseModel):
+    max_attempts: int = Field(strict=True, ge=1, le=100)
+    deadline_at: datetime.datetime | None = None
+
+
+ItemAccessIn.model_rebuild()
 
 
 class LessonIn(BaseModel):
@@ -268,7 +278,8 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
 
     items_rows = await pool.fetch(
         """
-        SELECT ci.*, q.max_score AS quiz_max_score, q.weight_pct AS quiz_weight,
+        SELECT ci.*, CASE WHEN q.scoring_mode='points' THEN (SELECT COALESCE(sum(points),0) FROM quiz_questions WHERE quiz_id=ci.id)
+                         ELSE q.max_score END AS quiz_max_score, q.weight_pct AS quiz_weight,
                q.open_at AS quiz_open_at, q.deadline_at AS quiz_deadline_at, q.close_at AS quiz_close_at,
                q.time_limit_minutes,
                h.deadline_at AS hw_deadline_at, h.open_at AS hw_open_at, h.close_at AS hw_close_at,
@@ -286,11 +297,11 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
     access_student_map: dict[int, list[int]] = {item_id: [] for item_id in item_ids}
     if is_owner and item_ids:
         access_group_rows = await pool.fetch(
-            "SELECT item_id, group_id FROM item_group_access WHERE item_id = ANY($1::bigint[])",
+            "SELECT item_id, group_id,max_attempts,deadline_at FROM item_group_access WHERE item_id = ANY($1::bigint[])",
             item_ids,
         )
         access_student_rows = await pool.fetch(
-            "SELECT item_id, student_id FROM item_student_access WHERE item_id = ANY($1::bigint[])",
+            "SELECT item_id, student_id,max_attempts,deadline_at FROM item_student_access WHERE item_id = ANY($1::bigint[])",
             item_ids,
         )
         for row in access_group_rows:
@@ -308,7 +319,8 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
              OR EXISTS(SELECT 1 FROM item_group_access iga JOIN group_students gs ON gs.group_id=iga.group_id AND gs.student_id=$2
                 JOIN course_groups cg ON cg.group_id=iga.group_id AND cg.course_id=ci.course_id WHERE iga.item_id=ci.id)) topic_open
             FROM course_items ci LEFT JOIN quizzes q ON q.item_id=ci.id
-            LEFT JOIN quiz_attempts qa ON qa.quiz_id=ci.id AND qa.student_id=$2
+            LEFT JOIN LATERAL (SELECT * FROM quiz_attempts a WHERE a.quiz_id=ci.id AND a.student_id=$2
+                ORDER BY (a.auto_score+COALESCE(a.manual_score,0))/NULLIF(COALESCE(a.max_score_snapshot,q.max_score),0) DESC,a.attempt_number DESC LIMIT 1) qa ON true
             LEFT JOIN homework_submissions hs ON hs.homework_id=ci.id AND hs.student_id=$2
             WHERE ci.course_id=$1""",course_id,user['id'])
         student_states = {row['id']:row for row in rows}
@@ -355,6 +367,8 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         if is_owner:
             d["access_group_ids"] = access_group_map.get(r["id"], [])
             d["access_student_ids"] = access_student_map.get(r["id"], [])
+            if r['type'] == 'quiz':
+                d['quiz_access_rules'] = [{'target_type':'group','target_id':a['group_id'],'max_attempts':a['max_attempts'],'deadline_at':str(a['deadline_at']) if a['deadline_at'] else None} for a in access_group_rows if a['item_id']==r['id']] + [{'target_type':'student','target_id':a['student_id'],'max_attempts':a['max_attempts'],'deadline_at':str(a['deadline_at']) if a['deadline_at'] else None} for a in access_student_rows if a['item_id']==r['id']]
         items.append(d)
 
     groups = None
@@ -448,7 +462,7 @@ async def create_item(course_id: int, data: ItemIn, user: dict = Depends(require
             if data.type == "lesson":
                 await conn.execute("INSERT INTO lessons (item_id) VALUES ($1)", item["id"])
             elif data.type == "quiz":
-                await conn.execute("INSERT INTO quizzes (item_id) VALUES ($1)", item["id"])
+                await conn.execute("INSERT INTO quizzes (item_id,scoring_mode) VALUES ($1,'points')", item["id"])
             elif data.type == "homework":
                 await conn.execute("INSERT INTO homework (item_id) VALUES ($1)", item["id"])
     return dict(item) | {"created_at": str(item["created_at"])}
@@ -484,6 +498,8 @@ async def update_item_access(item_id: int, data: ItemAccessIn, user: dict = Depe
     group_ids = sorted(set(data.group_ids))
     student_ids = sorted(set(data.student_ids))
     pool = await get_pool()
+    if data.quiz_rules is not None and item['type'] != 'quiz':
+        raise HTTPException(422, 'Attempt rules are only supported for topical tests')
     if group_ids:
         valid_group_count = await pool.fetchval(
             """
@@ -508,20 +524,21 @@ async def update_item_access(item_id: int, data: ItemAccessIn, user: dict = Depe
             raise HTTPException(status_code=422, detail="Some students are not enrolled in this course")
     async with pool.acquire() as conn:
         async with conn.transaction():
-            await conn.execute("DELETE FROM item_group_access WHERE item_id = $1", item_id)
-            await conn.execute("DELETE FROM item_student_access WHERE item_id = $1", item_id)
-            for group_id in group_ids:
-                await conn.execute(
-                    "INSERT INTO item_group_access (item_id, group_id) VALUES ($1, $2)",
-                    item_id,
-                    group_id,
-                )
-            for student_id in student_ids:
-                await conn.execute(
-                    "INSERT INTO item_student_access (item_id, student_id) VALUES ($1, $2)",
-                    item_id,
-                    student_id,
-                )
+            # Serialize permission updates with starts; retain existing row settings unless explicitly edited.
+            await conn.fetchrow('SELECT item_id FROM quizzes WHERE item_id=$1 FOR UPDATE', item_id)
+            for table, key, ids in [('item_group_access','group_id',group_ids),('item_student_access','student_id',student_ids)]:
+                for target_id in ids:
+                    old = await conn.fetchrow(f'SELECT max_attempts,deadline_at FROM {table} WHERE item_id=$1 AND {key}=$2',item_id,target_id)
+                    rules = data.quiz_rules
+                    if rules is not None:
+                        deadline = rules.deadline_at
+                        if deadline and (deadline.tzinfo is None or ((not old or deadline != old['deadline_at'] or rules.max_attempts != old['max_attempts']) and deadline <= datetime.datetime.now(datetime.timezone.utc))):
+                            raise HTTPException(422, 'Deadline must include timezone and be in the future')
+                        await conn.execute(f'''INSERT INTO {table}(item_id,{key},max_attempts,deadline_at) VALUES($1,$2,$3,$4)
+                            ON CONFLICT(item_id,{key}) DO UPDATE SET max_attempts=EXCLUDED.max_attempts,deadline_at=EXCLUDED.deadline_at''',item_id,target_id,rules.max_attempts,deadline)
+                    else:
+                        await conn.execute(f'INSERT INTO {table}(item_id,{key}) VALUES($1,$2) ON CONFLICT DO NOTHING',item_id,target_id)
+                await conn.execute(f'DELETE FROM {table} WHERE item_id=$1 AND NOT ({key}=ANY($2::bigint[]))',item_id,ids)
     return {"ok": True, "group_ids": group_ids, "student_ids": student_ids}
 
 

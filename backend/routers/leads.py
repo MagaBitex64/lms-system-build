@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator
 
 from core.db import get_pool
 from core.deps import require_admin
@@ -14,6 +15,45 @@ class LeadCreateIn(BaseModel):
     phone: str = Field(min_length=5, max_length=40)
     course: str = Field(min_length=2, max_length=160)
     branch: str = Field(default="", max_length=160)
+
+    @field_validator('name', 'course', 'branch', mode='before')
+    @classmethod
+    def trim_text(cls, value):
+        return ' '.join(value.split()) if isinstance(value, str) else value
+
+    @field_validator('phone', mode='before')
+    @classmethod
+    def normalize_phone(cls, value):
+        if not isinstance(value, str):
+            raise ValueError('Телефон нөмірін тексеріңіз')
+        phone = value.strip()
+        if not re.fullmatch(r'\+?[0-9 ()-]+', phone):
+            raise ValueError('Телефон нөмірін тексеріңіз')
+        if '(' in phone or ')' in phone:
+            if phone.count('(') != 1 or phone.count(')') != 1 or not re.search(r'\([0-9]{2,5}\)', phone):
+                raise ValueError('Телефон нөмірін тексеріңіз')
+        digits = re.sub(r'[^0-9]', '', phone)
+        if phone.startswith('+') and (len(digits) != 11 or digits[0] != '7'):
+            raise ValueError('Қазақстанның телефон нөмірін енгізіңіз')
+        if len(digits) == 11 and digits[0] in '78':
+            digits = digits[1:]
+        if not re.fullmatch(r'[67][0-9]{9}', digits):
+            raise ValueError('Қазақстанның телефон нөмірін енгізіңіз')
+        return '+7' + digits
+
+    @field_validator('course')
+    @classmethod
+    def allowed_course(cls, value):
+        if value not in LEAD_COURSES:
+            raise ValueError('Курсты тізімнен таңдаңыз')
+        return value
+
+
+# Public form subject values, not course database IDs or new course records.
+LEAD_COURSES = frozenset({
+    'Математика', 'Физика', 'Биология', 'Химия', 'Қазақстан тарихы',
+    'Оқу сауаттылығы', 'Математикалық сауаттылық', 'Информатика',
+})
 
 
 class LeadStatusIn(BaseModel):

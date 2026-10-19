@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 're
 import Image from 'next/image'
 import Link from 'next/link'
 import { api } from '@/lib/api'
+import { validateLead } from '@/lib/lead-validation'
 import {
   ArrowRight, Atom, BarChart3, BookOpen, Check,
   ChevronDown, ChevronLeft, ChevronRight, Clock3, ExternalLink, FlaskConical, GraduationCap, History, Laptop,
@@ -460,6 +461,7 @@ function LeadFormSection() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
+  const submitting = useRef(false)
 
   useEffect(() => {
     const section = sectionRef.current
@@ -476,24 +478,20 @@ function LeadFormSection() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (busy) return
+    if (submitting.current) return
     setSent(false)
     const formElement = event.currentTarget
     const form = new FormData(formElement)
-    const next: Record<string, string> = {}
-    if (!String(form.get('name') || '').trim()) next.name = 'Аты-жөніңізді енгізіңіз'
-    if (!String(form.get('phone') || '').trim()) next.phone = 'Телефон нөмірін енгізіңіз'
-    if (!String(form.get('course') || '').trim()) next.course = 'Курсты таңдаңыз'
+    const {errors: next, values} = validateLead({name: String(form.get('name') || ''), phone: String(form.get('phone') || ''), course: String(form.get('course') || '')})
     setErrors(next)
     if (Object.keys(next).length === 0) {
+      submitting.current = true
       setBusy(true)
       setSent(false)
       try {
         await api('/leads', {
           body: {
-            name: String(form.get('name') || '').trim(),
-            phone: String(form.get('phone') || '').trim(),
-            course: String(form.get('course') || '').trim(),
+            ...values,
             branch: 'Шымкент, Төле би, 32А',
           },
         })
@@ -501,8 +499,8 @@ function LeadFormSection() {
         formElement.reset()
       } catch {
         setErrors({ form: 'Өтінімді жіберу мүмкін болмады. Қайтадан көріңіз.' })
-        window.alert('Өтінімді жіберу мүмкін болмады. Қайтадан көріңіз.')
       } finally {
+        submitting.current = false
         setBusy(false)
       }
     }
@@ -522,11 +520,11 @@ function LeadFormSection() {
       </div>
       <form className={styles.consultationForm} onSubmit={submit} noValidate aria-busy={busy}>
         <label htmlFor="lead-name">Аты-жөніңіз
-          <input id="lead-name" name="name" placeholder="Аты-жөніңізді жазыңыз" aria-invalid={!!errors.name} aria-describedby={errors.name ? 'lead-name-error' : undefined} />
+          <input id="lead-name" name="name" required minLength={2} maxLength={120} placeholder="Аты-жөніңізді жазыңыз" aria-invalid={!!errors.name} aria-describedby={errors.name ? 'lead-name-error' : undefined} />
           {errors.name && <small id="lead-name-error">{errors.name}</small>}
         </label>
         <label htmlFor="lead-phone">Телефон нөміріңіз
-          <input id="lead-phone" name="phone" type="tel" placeholder="+7 (___) ___-__-__" aria-invalid={!!errors.phone} aria-describedby={errors.phone ? 'lead-phone-error' : undefined} />
+          <input id="lead-phone" name="phone" type="tel" required maxLength={40} placeholder="+7 (___) ___-__-__" aria-invalid={!!errors.phone} aria-describedby={errors.phone ? 'lead-phone-error' : undefined} />
           {errors.phone && <small id="lead-phone-error">{errors.phone}</small>}
         </label>
         <label htmlFor="lead-course">Қызықтырған курс

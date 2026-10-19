@@ -60,6 +60,7 @@ type Question = {
   points: number
   explanation?: string
   options: QuestionOption[]
+  is_complete?: boolean
 }
 
 type AttemptAnswer = {
@@ -81,6 +82,16 @@ type QuizAttempt = {
 type ItemDetail = {
   type?: ItemType
   is_owner?: boolean
+  is_topical?: boolean
+  has_history?: boolean
+  ready?: boolean
+  scoring_mode?: string
+  attempt_number?: number
+  max_attempts?: number | null
+  remaining_attempts?: number | null
+  access_deadline_at?: string | null
+  can_start?: boolean
+  attempt_history?: Array<{id:number;attempt_number:number;auto_score:number;manual_score:number|null;submitted_at:string;max_score_snapshot:number|null}>
   course_subject?: string | null
   item: { id: number; title: string; note?: string; course_id: number }
   content?: string
@@ -249,7 +260,7 @@ export default function ItemDetailPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             {data.max_score != null && <Badge tone="primary">{t('maxScore')}: {data.max_score}</Badge>}
-            {data.weight_pct != null && <Badge tone="neutral">{t('weight')}: {data.weight_pct}%</Badge>}
+            {!data.is_topical && data.weight_pct != null && <Badge tone="neutral">{t('weight')}: {data.weight_pct}%</Badge>}
             {data.time_limit_minutes ? <Badge tone="warning">{data.time_limit_minutes} min</Badge> : null}
             {data.submission && (
               <Badge tone={data.submission.status === 'graded' ? 'success' : 'warning'}>
@@ -288,7 +299,7 @@ export default function ItemDetailPage() {
       )}
 
       {itemType === 'quiz' && (
-        isOwner ? <QuizEditor data={data} reload={reload} /> : <StudentQuiz data={data} reload={reload} />
+        isOwner ? <QuizEditor data={data} reload={reload} /> : <><QuizAccessSummary data={data} /><StudentQuiz key={data.attempt_number ?? 1} data={data} reload={reload} /></>
       )}
 
       {itemType === 'homework' && (
@@ -575,11 +586,13 @@ function QuizSettings({ data, reload }: { data: ItemDetail; reload: () => Promis
       await api(`/quizzes/${data.item.id}/settings`, {
         method: 'PUT',
         body: {
+          ...(!data.is_topical ? {
           max_score: Number(maxScore),
           weight_pct: Number(weight),
           open_at: fromDateInput(openAt),
           deadline_at: fromDateInput(deadlineAt),
           close_at: fromDateInput(closeAt),
+          } : {}),
           time_limit_minutes: timeLimit ? Number(timeLimit) : null,
           shuffle_questions: shuffleQuestions,
           shuffle_options: shuffleOptions,
@@ -611,16 +624,17 @@ function QuizSettings({ data, reload }: { data: ItemDetail; reload: () => Promis
           </label>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label={t('maxScore')}>
+          {!data.is_topical && <><Field label={t('maxScore')}>
             <Input type="number" min={1} max={1000} value={maxScore} onChange={(e) => setMaxScore(e.target.value)} />
           </Field>
           <Field label={t('weight')}>
             <Input type="number" min={0} max={100} value={weight} onChange={(e) => setWeight(e.target.value)} />
           </Field>
+          </>}
           <Field label="Time limit">
             <Input type="number" min={1} max={1440} value={timeLimit} onChange={(e) => setTimeLimit(e.target.value)} placeholder="minutes" />
           </Field>
-          <Field label={t('openDate')}>
+          {!data.is_topical && <><Field label={t('openDate')}>
             <Input type="datetime-local" value={openAt} onChange={(e) => setOpenAt(e.target.value)} />
           </Field>
           <Field label={t('deadline')}>
@@ -629,7 +643,12 @@ function QuizSettings({ data, reload }: { data: ItemDetail; reload: () => Promis
           <Field label={t('closeDate')}>
             <Input type="datetime-local" value={closeAt} onChange={(e) => setCloseAt(e.target.value)} />
           </Field>
+          </>}
         </div>
+        {data.is_topical && <p className="text-sm text-muted">Есептелген ең жоғары ұпай: <strong>{data.max_score ?? 0}</strong>. Тапсыру саны мен мерзімі курс ішіндегі «Рұқсаттарда» беріледі. Бұрынғы баға салмағы өзгермейді.</p>}
+        {data.is_topical && (data.open_at || data.deadline_at || data.close_at) && <p className="text-sm text-muted">Бұрын берілген уақыт шектеулері сақталған және қолданыла береді.</p>}
+        {data.has_history && <p role="status" className="text-sm text-muted">Оқушылар бастаған тесттің сұрақтары мен баптаулары тарихты сақтау үшін құлыпталған.</p>}
+        {data.ready === false && <p role="status" className="text-sm text-warning-foreground">Тест дайын емес. Толық емес сұрақтарды аяқтаңыз.</p>}
         {error && <ErrorState message={error} />}
         <Button type="submit" disabled={working}>
           <Save size={16} />
@@ -644,30 +663,36 @@ type ImportedQuestion = {
   prompt: string
   options: Array<{ text: string; is_correct: boolean }>
   image_data_url?: string | null
+  is_complete?: boolean
+  type?: string
+  warnings?: string[]
 }
 
 function QuizWordTools({ data, reload }: { data: ItemDetail; reload: () => Promise<unknown> }) {
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<ImportedQuestion[]>([])
+  const [parsingErrors, setParsingErrors] = useState<string[]>([])
+  const importLock = useRef(false)
   const [working, setWorking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const latexEnabled = quizUsesLatex(data)
 
-  async function previewImport() {
-    if (!file) return
+  async function previewImport(selectedFile: File | null = file) {
+    if (!selectedFile || working) return
     setWorking(true)
     setError(null)
     setMessage(null)
     try {
       const formData = new FormData()
-      formData.append('file', file)
-      const result = await api<{ questions: ImportedQuestion[]; count: number }>(
+      formData.append('file', selectedFile)
+      const result = await api<{ questions: ImportedQuestion[]; count: number; errors: string[]; with_answers: number; missing_answers:number }>(
         `/quizzes/${data.item.id}/import-docx?preview=true`,
         { formData },
       )
       setPreview(result.questions)
-      setMessage(`${result.count} сұрақ табылды. Тексеріп, импортты растаңыз.`)
+      setParsingErrors(result.errors ?? [])
+      setMessage(`Барлығы: ${result.count}. Дұрыс жауабы бар: ${result.with_answers}. Аяқтау қажет: ${result.missing_answers}.`)
     } catch (err) {
       setPreview([])
       setError((err as Error).message)
@@ -677,20 +702,22 @@ function QuizWordTools({ data, reload }: { data: ItemDetail; reload: () => Promi
   }
 
   async function confirmImport() {
-    if (!file || preview.length === 0) return
+    if (!file || preview.length === 0 || parsingErrors.length || importLock.current) return
+    importLock.current = true
     setWorking(true)
     setError(null)
     try {
       const formData = new FormData()
       formData.append('file', file)
-      const result = await api<{ imported: number }>(`/quizzes/${data.item.id}/import-docx?preview=false`, { formData })
-      setMessage(`${result.imported} сұрақ сәтті импортталды.`)
+      const result = await api<{ imported: number;duplicate?:boolean }>(`/quizzes/${data.item.id}/import-docx?preview=false`, { formData })
+      setMessage(result.duplicate ? 'Бұл файл бұрын импортталған. Қайталанған сұрақтар қосылмады.' : `${result.imported} сұрақ импортталды. Толық емес сұрақтардың дұрыс жауабын таңдаңыз.`)
       setPreview([])
       setFile(null)
       await reload()
     } catch (err) {
       setError((err as Error).message)
     } finally {
+      importLock.current = false
       setWorking(false)
     }
   }
@@ -723,26 +750,31 @@ function QuizWordTools({ data, reload }: { data: ItemDetail; reload: () => Promi
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <input
           type="file"
+          disabled={working}
           accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           onChange={(event) => {
-            setFile(event.target.files?.[0] ?? null)
+            const selected=event.target.files?.[0]??null
+            setFile(selected)
             setPreview([])
+            setParsingErrors([])
             setMessage(null)
             setError(null)
+            if(selected)void previewImport(selected)
           }}
           className="block flex-1 text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-primary-soft file:px-3 file:py-2 file:text-sm file:font-medium file:text-primary"
         />
-        <Button type="button" variant="outline" onClick={previewImport} disabled={!file || working}>
+        <Button type="button" variant="outline" onClick={()=>void previewImport()} disabled={!file || working}>
           <Upload size={16} /> Word-тан импорттау
         </Button>
       </div>
       {message && <p className="text-sm font-medium text-success">{message}</p>}
       {error && <ErrorState message={error} />}
+      {parsingErrors.length > 0 && <ErrorState message={parsingErrors.join('; ')} />}
       {preview.length > 0 && (
         <div className="space-y-3 rounded-xl border border-border bg-surface-muted p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-semibold">Алдын ала қарау · {preview.length} сұрақ</h3>
-            <Button type="button" onClick={confirmImport} disabled={working}>Импортты растау</Button>
+            <Button type="button" onClick={confirmImport} disabled={working || parsingErrors.length > 0}>Импортты растау</Button>
           </div>
           <div className="max-h-96 space-y-3 overflow-auto pr-1">
             {preview.map((question, index) => (
@@ -751,6 +783,7 @@ function QuizWordTools({ data, reload }: { data: ItemDetail; reload: () => Promi
                   <span>{index + 1}.</span>
                   <QuizText text={question.prompt} enabled={latexEnabled} />
                 </div>
+                {question.is_complete === false && <p className="mt-2 text-sm text-warning-foreground">Дұрыс жауап таңдалмаған · Аяқталмаған</p>}
                 {question.image_data_url && (
                   <img
                     src={question.image_data_url}
@@ -782,7 +815,7 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
   const [points, setPoints] = useState('1')
   const [explanation, setExplanation] = useState('')
   const [options, setOptions] = useState([
-    { text: '', is_correct: true, image_file_id: null as number | null, image_preview: null as string | null },
+    { text: '', is_correct: false, image_file_id: null as number | null, image_preview: null as string | null },
     { text: '', is_correct: false, image_file_id: null as number | null, image_preview: null as string | null },
   ])
   const [error, setError] = useState<string | null>(null)
@@ -880,7 +913,7 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
       setPoints('1')
       setExplanation('')
       setOptions([
-        { text: '', is_correct: true, image_file_id: null, image_preview: null },
+        { text: '', is_correct: false, image_file_id: null, image_preview: null },
         { text: '', is_correct: false, image_file_id: null, image_preview: null },
       ])
       removeImage()
@@ -1048,17 +1081,7 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
                   </Button>
                 </div>
                 {q.options.length > 0 && (
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {q.options.map((o) => (
-                      <div key={o.id} className="flex items-center gap-2 rounded-md bg-surface px-3 py-2 text-sm">
-                        {o.is_correct ? <CheckCircle2 size={14} className="text-success" /> : <span className="size-3 rounded-full border border-border" />}
-                        <div className="min-w-0">
-                          {o.text && <QuizText text={o.text} enabled={latexEnabled} />}
-                          {o.image_file_id && <AuthImage fileId={o.image_file_id} alt={o.text || 'Вариант ответа'} className="mt-2 max-h-40 rounded-md border border-border" />}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <CorrectAnswerEditor key={`${q.id}:${q.type}:${q.options.filter(o=>o.is_correct).map(o=>o.id).join(',')}`} question={q} locked={!!data.has_history} reload={reload} latexEnabled={latexEnabled} />
                 )}
                 {q.explanation && <div className="mt-3 text-xs text-muted"><span className="font-medium">{t('explanation')}:</span><QuizText text={q.explanation} enabled={latexEnabled} /></div>}
               </div>
@@ -1070,6 +1093,32 @@ function QuestionBuilder({ data, reload }: { data: ItemDetail; reload: () => Pro
       </Card>
     </div>
   )
+}
+
+function CorrectAnswerEditor({question,locked,reload,latexEnabled}:{question:Question;locked:boolean;reload:()=>Promise<unknown>;latexEnabled:boolean}) {
+  const [selected,setSelected]=useState(question.options.filter(o=>o.is_correct).map(o=>o.id))
+  const [type,setType]=useState(question.type)
+  const [busy,setBusy]=useState(false)
+  const [error,setError]=useState('')
+  async function save() {
+    if(busy) return
+    setBusy(true);setError('')
+    try {await api(`/quizzes/questions/${question.id}/correct-answers`,{method:'PATCH',body:{option_ids:selected,type}});await reload()}
+    catch(err){setError((err as Error).message)}finally{setBusy(false)}
+  }
+  return <div className="mt-3 space-y-3">
+    {!selected.length && <p role="status" className="text-sm text-warning-foreground">Дұрыс жауап таңдалмаған · Аяқталмаған сұрақ</p>}
+    <select aria-label="Дұрыс жауап форматы" disabled={locked||busy} value={type} onChange={e=>{setType(e.target.value as QuestionType);setSelected([])}} className="rounded border border-border bg-surface p-2 text-sm"><option value="single">Бір дұрыс жауап</option><option value="multiple">Бірнеше дұрыс жауап</option></select>
+    <div className="grid gap-2 sm:grid-cols-2">{question.options.map(o=><label key={o.id} className="flex items-start gap-2 rounded-md bg-surface px-3 py-2 text-sm"><input aria-label={`Дұрыс жауап: ${o.text || o.id}`} type={type==='single'?'radio':'checkbox'} name={`correct-${question.id}`} checked={selected.includes(o.id)} disabled={locked||busy} onChange={e=>setSelected(type==='single'?[o.id]:e.target.checked?[...selected,o.id]:selected.filter(id=>id!==o.id))}/><span className="min-w-0">{o.text&&<QuizText text={o.text} enabled={latexEnabled}/>} {o.image_file_id&&<AuthImage fileId={o.image_file_id} alt={o.text||'Жауап'} className="mt-2 max-h-40 rounded"/>}</span></label>)}</div>
+    {!locked && <Button size="sm" onClick={save} disabled={busy}>{busy?'Сақталуда…':'Дұрыс жауапты сақтау'}</Button>}
+    {error&&<ErrorState message={error}/>}
+  </div>
+}
+
+function QuizAccessSummary({data}:{data:ItemDetail}) {
+  if(!data.is_topical)return null
+  const active = data.quiz_started && !data.attempt
+  return <Card className="space-y-2 text-sm"><strong>{data.item.title}</strong><p>Ұзақтығы: {data.time_limit_minutes ? `${data.time_limit_minutes} мин` : 'Уақыт шектеуі жоқ'}</p><p>Қалған мүмкіндік: {data.remaining_attempts ?? 0}/{data.max_attempts ?? 1}</p><p>Тапсыру мерзімі: {data.access_deadline_at ? fmtDate(data.access_deadline_at) : 'Мерзімі белгіленбеген'}</p>{active&&<p role="status">Тест орындалуда. Ағымдағы әрекеттің таймері қолданылады.</p>}{!active&&isAfter(data.access_deadline_at)&&<p role="status">Тапсыру мерзімі аяқталды</p>}{!active&&!data.remaining_attempts&&<p role="status">Мүмкіндік аяқталды</p>}{data.ready===false&&<p role="status">Тест әзірге дайын емес</p>}{(data.attempt_history?.length??0)>0&&<details><summary>Алдыңғы нәтижелер</summary>{data.attempt_history?.map(a=><p key={a.id}>{a.attempt_number}-әрекет · {fmtDate(a.submitted_at)} · {a.auto_score+(a.manual_score??0)} / {a.max_score_snapshot??data.max_score}</p>)}</details>}</Card>
 }
 
 function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise<unknown> }) {
@@ -1118,7 +1167,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
     const batch = retryRequest.current ?? createAnswerBatch(answerPayload(), revision.current, dirty.current)
     retryRequest.current = batch
     try {
-      const result = await persistAnswerBatch(batch, body => api(`/quizzes/${data.item.id}/answers`, { method: 'PATCH', body }))
+      const result = await persistAnswerBatch(batch, body => api(`/quizzes/${data.item.id}/answers`, { method: 'PATCH', body: {...body,attempt_number:data.attempt_number??1} }))
       saved.current = batch.sequence
       retryRequest.current = null
       return result
@@ -1202,7 +1251,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
         if (retryRequest.current) await flushAnswers()
         if (dirty.current !== saved.current) await flushAnswers()
       }
-      await api(`/quizzes/${data.item.id}/attempt`, { body: { revision: revision.current, answers: [] } })
+      await api(`/quizzes/${data.item.id}/attempt`, { body: { revision: revision.current, answers: [],attempt_number:data.attempt_number??1 } })
       saved.current = dirty.current
       await reload()
     } catch (err) {
@@ -1226,6 +1275,8 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
             <Badge tone={data.attempt.status === 'graded' ? 'success' : 'warning'}>{statusLabel(data.attempt.status, t)}</Badge>
           </div>
         </div>
+        {error&&<ErrorState message={error}/>}
+        {data.is_topical && data.can_start && <Button onClick={startQuiz} disabled={working}>Қайта тапсыру</Button>}
         <div className="space-y-4">
           {questions.map((q, index) => {
             const answer = attemptAnswers.get(q.id)
@@ -1278,7 +1329,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
         {notOpen && <ErrorState message={t('homeworkNotOpen')} />}
         {closed && <ErrorState message={t('homeworkClosed')} />}
         {error && <ErrorState message={error} />}
-        <Button onClick={startQuiz} disabled={working || notOpen || closed || (data.question_count ?? 0) === 0}>
+        <Button onClick={startQuiz} disabled={working || notOpen || closed || data.ready === false || (data.is_topical && !data.can_start) || (data.question_count ?? 0) === 0}>
           {working ? t('loading') : t('startQuiz')}
         </Button>
       </Card>

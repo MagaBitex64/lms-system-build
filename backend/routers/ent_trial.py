@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from core.access import ensure_course_owner
 from core.db import get_pool
+from core.ent_review import answer_review
 from core.deps import get_current_user, require_admin, require_student, require_teacher
 from core.ent_rules import (COMBINATIONS, DURATION_SECONDS, RULES_VERSION, SUBJECT_LABELS,
                             blueprint, blueprint_metrics, question_issues, score_question,
@@ -610,6 +611,7 @@ async def get_access_results(access_id: int, user: dict = Depends(require_admin)
         item["subjects"] = subjects
         item.pop("snapshot", None)
         item.pop("responses", None)
+        item.pop('question_scores', None)
         items.append(item)
     access_data = dict(access)
     combination_subjects = COMBINATIONS.get(access_data["combination"], ())
@@ -661,6 +663,22 @@ async def get_ent_leaderboard(user: dict = Depends(get_current_user)):
             'submitted_at':row['submitted_at'],'variant_title':row['variant_title'],'attempt_number':row['attempt_number'],
             'attempt_count':row['attempt_count'],'rank':row['rank'],'subjects':parts})
     return {'general':categories['general'],'subjects':[categories[key] for key in SUBJECT_LABELS],'limit':100}
+
+
+@router.get('/admin/attempts/{attempt_id}/review')
+async def get_admin_attempt_review(attempt_id: int, user: dict = Depends(require_admin)):
+    pool = await get_pool()
+    # Do not call ensure_snapshot/finalize_expired: a review must not modify data.
+    async with pool.acquire() as conn, conn.transaction(isolation='repeatable_read', readonly=True):
+        attempt = await conn.fetchrow('''SELECT a.*,u.full_name,u.email,
+            (SELECT count(*) FROM ent_trial_attempts other WHERE other.access_id=a.access_id
+             AND other.student_id=a.student_id AND (other.started_at,other.id)<=(a.started_at,a.id)) attempt_number
+            FROM ent_trial_attempts a JOIN users u ON u.id=a.student_id WHERE a.id=$1''', attempt_id)
+        if not attempt:
+            raise HTTPException(404, 'Әрекет табылмады')
+        if attempt['status'] != 'submitted':
+            raise HTTPException(409, 'Тест әлі аяқталмаған. Жауап кілті көрсетілмейді.')
+        return answer_review(dict(attempt))
 
 
 @router.get("/admin/attempts/{attempt_id}/proctor-events")
@@ -889,14 +907,18 @@ async def finish(conn, attempt):
     await close_absence(conn, attempt["id"])
     snapshot, responses = decoded(attempt["snapshot"]), decoded(attempt["responses"])
     scores = dict.fromkeys(snapshot.get("subjects") or {q["subject"] for q in snapshot["questions"]}, 0)
+    question_scores = {}
     for q in snapshot["questions"]:
-        scores[q["subject"]] = scores.get(q["subject"], 0) + question_score(q, responses.get(str(q["question_id"]), {}))
+        awarded = question_score(q, responses.get(str(q["question_id"]), {}))
+        scores[q["subject"]] = scores.get(q["subject"], 0) + awarded
+        question_scores[str(q['question_id'])] = {'awarded': awarded, 'maximum': q.get('max_points')}
     s1, s2 = COMBINATIONS[attempt["combination"]]
     return dict(await conn.fetchrow("""UPDATE ent_trial_attempts SET status='submitted',submitted_at=LEAST(clock_timestamp(),deadline_at),
         kaz_history_score=$2,reading_score=$3,math_score=$4,subject1_score=$5,subject2_score=$6,total_score=$7,
-        scores_by_subject=$8::jsonb,proctor_status=CASE WHEN proctor_status='terminated' THEN 'terminated' ELSE 'finished' END
+        scores_by_subject=$8::jsonb,question_scores=$9::jsonb,proctor_status=CASE WHEN proctor_status='terminated' THEN 'terminated' ELSE 'finished' END
         WHERE id=$1 RETURNING *""", attempt["id"], scores.get("kaz_history", 0), scores.get("reading", 0),
-        scores.get("math_literacy", 0), scores.get(s1, 0), scores.get(s2, 0), sum(scores.values()), json.dumps(scores)))
+        scores.get("math_literacy", 0), scores.get(s1, 0), scores.get(s2, 0), sum(scores.values()), json.dumps(scores),
+        json.dumps({'version': 1, 'rules_version': snapshot.get('version'), 'points': question_scores})))
 
 
 async def finalize_expired(student_id=None):

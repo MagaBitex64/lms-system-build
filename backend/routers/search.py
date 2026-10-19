@@ -21,18 +21,22 @@ async def search(
     courses the student has an approved enrollment for.
     """
     pool = await get_pool()
+    q = q.strip()
+    if not q:
+        raise HTTPException(422, 'Search query cannot be blank')
     like = f"%{q}%"
     offset = (page - 1) * per_page
+    limit = per_page + 1  # Look ahead before permission filtering, so sparse pages remain navigable.
 
     courses = await pool.fetch(
         """
         SELECT c.id, c.title, c.description, u.full_name AS teacher_name
         FROM courses c JOIN users u ON u.id = c.teacher_id
         WHERE c.is_published AND (c.title ILIKE $1 OR c.description ILIKE $1)
-        ORDER BY c.title LIMIT $2 OFFSET $3
+        ORDER BY c.title,c.id LIMIT $2 OFFSET $3
         """,
         like,
-        per_page,
+        limit,
         offset,
     )
 
@@ -58,11 +62,11 @@ async def search(
                   WHERE iga.item_id = ci.id
                 )
               )
-            ORDER BY ci.title LIMIT $3 OFFSET $4
+            ORDER BY ci.title,ci.id LIMIT $3 OFFSET $4
             """,
             like,
             user["id"],
-            per_page,
+            limit,
             offset,
         )
         materials = await pool.fetch(
@@ -87,11 +91,11 @@ async def search(
                   WHERE iga.item_id = ci.id
                 )
               )
-            ORDER BY lm.label LIMIT $3 OFFSET $4
+            ORDER BY lm.label,lm.id LIMIT $3 OFFSET $4
             """,
             like,
             user["id"],
-            per_page,
+            limit,
             offset,
         )
     elif user["role"] in ("teacher", "admin"):
@@ -103,12 +107,12 @@ async def search(
             LEFT JOIN lessons l ON l.item_id = ci.id
             WHERE ($2 = 'admin' OR c.teacher_id = $3)
               AND (ci.title ILIKE $1 OR l.content ILIKE $1)
-            ORDER BY ci.title LIMIT $4 OFFSET $5
+            ORDER BY ci.title,ci.id LIMIT $4 OFFSET $5
             """,
             like,
             user["role"],
             user["id"],
-            per_page,
+            limit,
             offset,
         )
         materials = await pool.fetch(
@@ -119,18 +123,20 @@ async def search(
             JOIN course_items ci ON ci.id = lm.lesson_id
             JOIN courses c ON c.id = ci.course_id
             WHERE ($2 = 'admin' OR c.teacher_id = $3) AND lm.label ILIKE $1
-            ORDER BY lm.label LIMIT $4 OFFSET $5
+            ORDER BY lm.label,lm.id LIMIT $4 OFFSET $5
             """,
             like,
             user["role"],
             user["id"],
-            per_page,
+            limit,
             offset,
         )
     else:
         lessons = []
         materials = []
 
+    has_more = any(len(rows) > per_page for rows in (courses, lessons, materials))
+    courses, lessons, materials = courses[:per_page], lessons[:per_page], materials[:per_page]
     if user['role'] == 'student':
         async def readable(rows, key):
             result = []
@@ -150,4 +156,5 @@ async def search(
         "materials": [dict(r) for r in materials],
         "page": page,
         "per_page": per_page,
+        "has_more": has_more,
     }

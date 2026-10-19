@@ -222,6 +222,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
                   <input
                     type="search"
                     name="q"
+                    maxLength={200}
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
                     placeholder={t('searchPlaceholder')}
