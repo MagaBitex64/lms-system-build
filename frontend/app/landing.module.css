@@ -612,7 +612,7 @@
 .facultyTrack:focus-visible{outline:2px solid #00809c;outline-offset:3px;border-radius:24px}
 .facultyCard{min-width:0;display:grid;grid-row:span 5;grid-template-rows:subgrid;padding:10px;border:1px solid rgba(255,255,255,.95);border-radius:24px;background:#fff;box-shadow:0 12px 24px rgba(20,93,116,.055);scroll-snap-align:start;transition:transform 220ms ease,box-shadow 220ms ease}
 .facultyPhoto{position:relative;height:230px;flex-shrink:0;border-radius:17px;overflow:hidden;background:#e8f1f3}
-.facultyPhoto>div{display:block;width:100%;height:100%}
+.facultyPhoto>div{position:relative;display:block;width:100%;height:100%}
 .facultyPhoto img{display:block;width:100%;height:100%;object-fit:cover;object-position:center var(--portrait-position,28%);transform:scale(var(--portrait-scale,1.18));transform-origin:center}
 /* Match head size and headroom across the differently framed original portraits. */
 .facultyCard:nth-child(2){--portrait-scale:1.3;--portrait-position:30%}

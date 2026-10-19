@@ -116,7 +116,7 @@ function WhatsAppIcon() {
 
 function Picture({ src, alt, className = '' }: { src: string; alt: string; className?: string }) {
   const [failed, setFailed] = useState(false)
-  return <div className={`${styles.picture} ${className}`}>{!failed && <img src={src} alt={alt} onError={() => setFailed(true)} />}{failed && <GraduationCap aria-hidden="true" />}</div>
+  return <div className={`${styles.picture} ${className}`}>{!failed && <Image src={src} alt={alt} fill quality={80} loading="lazy" sizes="(max-width: 640px) calc(100vw - 58px), (max-width: 1100px) calc(50vw - 56px), (max-width: 1440px) calc(25vw - 49px), 311px" onError={() => setFailed(true)} />}{failed && <GraduationCap aria-hidden="true" />}</div>
 }
 
 function SectionHead({ eyebrow, title, text, light = false }: { eyebrow: string; title: string; text?: string; light?: boolean }) {
