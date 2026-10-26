@@ -30,6 +30,9 @@ import { useAuth } from '@/lib/auth'
 import { api, fetcher } from '@/lib/api'
 import { SUBJECT_NAMES } from '@/lib/ent'
 import CourseEntVariants from '@/components/course-ent-variants'
+import CourseContentSections from '@/components/course-content-sections'
+import {CourseEnrollmentManagement} from '@/components/enrollment-management'
+import type {CourseSection} from '@/lib/course-sections'
 import {
   Badge,
   Button,
@@ -54,6 +57,7 @@ type Item = {
   type: ItemType
   title: string
   position: number
+  section_id?: number | null
   is_visible: boolean
   sequential_unlock: boolean
   note?: string
@@ -87,6 +91,8 @@ type CourseStudent = {
   full_name: string
   email: string
   groups: Array<{ id: number; code: string }>
+  direct_enrollment?: boolean | null
+  legacy_access?: boolean
 }
 
 type Course = {
@@ -100,6 +106,7 @@ type Course = {
   is_owner?: boolean
   enrollment_status?: string | null
   items: Item[] | null
+  sections?: CourseSection[]
   groups?: CourseGroup[] | null
   students?: CourseStudent[] | null
   ent_subject?: string | null
@@ -131,6 +138,7 @@ export default function CoursePage() {
   const [itemNote, setItemNote] = useState('')
   const [itemVisible, setItemVisible] = useState(true)
   const [itemSequential, setItemSequential] = useState(false)
+  const [itemSectionId, setItemSectionId] = useState<number | null>(null)
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [accessItem, setAccessItem] = useState<Item | null>(null)
@@ -190,6 +198,7 @@ export default function CoursePage() {
           note: itemNote,
           is_visible: itemVisible,
           sequential_unlock: itemSequential,
+          section_id: itemSectionId,
         },
       })
       setItemTitle('')
@@ -214,6 +223,12 @@ export default function CoursePage() {
     } catch (err) {
       setActionError((err as Error).message || t('errorOccurred'))
     }
+  }
+
+  function openAddItem(sectionId: number | null = null) {
+    setItemSectionId(sectionId)
+    setActionError(null)
+    setAddOpen(true)
   }
 
   function openAccessModal(item: Item) {
@@ -339,7 +354,7 @@ export default function CoursePage() {
         </Card>
       )}
 
-      <nav className={styles.sectionTabs} aria-label="Курс бөлімдері"><a href="#course-content">{t('courseContent')}</a>{isOwner && <a href="#course-ent">Пәндік сынақ ҰБТ</a>}</nav>
+      <nav className={styles.sectionTabs} aria-label="Курс бөлімдері"><a href="#course-content">{t('courseContent')}</a>{isOwner && <><a href="#course-enrollments">Оқушылар мен топтар</a><a href="#course-ent">Пәндік сынақ ҰБТ</a></>}</nav>
 
       <section id="course-content" className={styles.sectionCard}>
         <div className={styles.sectionHeader}>
@@ -354,7 +369,7 @@ export default function CoursePage() {
             {contentExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
           </button>
           {isOwner && (
-            <Button variant="secondary" size="sm" onClick={() => setAddOpen(true)}>
+            <Button variant="secondary" size="sm" onClick={() => openAddItem()}>
               <PlusCircle size={15} />
               {t('addItem')}
             </Button>
@@ -367,9 +382,9 @@ export default function CoursePage() {
             title={t('locked')}
             hint={t('lockedHint')}
           />
-        ) : items.length ? (
-          <div className={styles.rows}>
-            {items.map((item) => {
+        ) : items.length || course.sections?.length || isOwner ? (
+          <CourseContentSections key={courseId} courseId={courseId} sections={course.sections ?? []} items={items} isOwner={isOwner} reload={mutate} onAdd={openAddItem}
+            renderItem={(item, moveActions) => {
               const locked = item.locked
               const deadline = fmtDate(item.deadline_at)
               const content = (
@@ -401,6 +416,7 @@ export default function CoursePage() {
                         {label:item.is_visible ? t('hidden') : t('visible'),icon:item.is_visible ? <EyeOff size={15} /> : <Eye size={15} />,onClick:()=>{void patchItem(item.id,{is_visible:!item.is_visible})}},
                         {label:item.sequential_unlock ? t('open') : t('locked'),icon:<Lock size={15} />,onClick:()=>{void patchItem(item.id,{sequential_unlock:!item.sequential_unlock})}},
                         {label:t('topicAccess'),icon:<Users size={15} />,onClick:()=>openAccessModal(item)},
+                        ...moveActions,
                       ]} />
                     </div>
                   </div> : !locked && <span className={styles.itemActions}><span className="text-sm font-semibold text-primary">{t('openItem')}</span><ArrowRight size={18} className="text-primary" /></span>}
@@ -417,16 +433,17 @@ export default function CoursePage() {
                   )}
                 </div>
               )
-            })}
-          </div>
+            }} />
         ) : (
           <EmptyState
             icon={<BookOpen size={22} />}
             title={t('noData')}
-            action={isOwner ? <Button onClick={() => setAddOpen(true)}>{t('addItem')}</Button> : undefined}
+            action={isOwner ? <Button onClick={() => openAddItem()}>{t('addItem')}</Button> : undefined}
           />
         ))}
       </section>
+
+      {isOwner && <CourseEnrollmentManagement key={`enrollments-${courseId}`} courseId={courseId} groups={course.groups ?? []} students={course.students ?? []} canManage={user?.role === 'admin'} />}
 
       {isOwner && <section id="course-ent" className={styles.sectionCard}>
         <button
@@ -480,6 +497,10 @@ export default function CoursePage() {
 
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title={t('addItem')}>
         <form onSubmit={createItem} className="space-y-4">
+          <Field label="Бөлім"><Select value={itemSectionId ?? ''} onChange={event => setItemSectionId(event.target.value ? Number(event.target.value) : null)}>
+            <option value="">Бөлімге бөлінбеген материалдар</option>
+            {(course.sections ?? []).map(section => <option key={section.id} value={section.id}>{section.title}</option>)}
+          </Select></Field>
           <Field label={t('title')}>
             <Input value={itemTitle} onChange={(e) => setItemTitle(e.target.value)} required />
           </Field>

@@ -1,11 +1,14 @@
 'use client'
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import useSWR from 'swr'
 import { BookOpen, Check, ChevronDown, GraduationCap, Pencil, PlusCircle, Search, Trash2, UserMinus, Users, UserPlus, X, ClipboardList } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { api, fetcher } from '@/lib/api'
 import { fetchAllGroups, useAllGroups } from '@/lib/groups'
+import { groupDirectionOptions, validateGroupForm } from '@/lib/group-form'
+import {GroupCourseAssignments} from '@/components/enrollment-management'
+import {refreshEnrollmentQueries} from '@/lib/enrollments'
 import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Field, Input, Select, Spinner, Modal, DeletionConfirmModal } from '../components/ui'
 import { buildStudentGroups, studentGroupLabel } from './student-groups'
 import styles from './users.module.css'
@@ -32,7 +35,7 @@ type Group = {
 
 type GroupDetail = Group & {
   students: Array<User & { added_at: string }>
-  courses: Array<{ id: number; title: string; teacher_name: string }>
+  courses: Array<{ id: number; title: string; teacher_name: string; is_published: boolean }>
 }
 
 type TeacherDetail = User & {
@@ -380,6 +383,9 @@ function GroupsTab() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const groupSaveLock = useRef(false)
+  const [savingGroup, setSavingGroup] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
   const groupsReq = useAllGroups<Group>()
   const detailReq = useSWR<GroupDetail>(selectedId ? `/admin/groups/${selectedId}` : null, fetcher)
   const searchReq = useSWR<{ items: User[] }>(
@@ -395,23 +401,23 @@ function GroupsTab() {
 
   async function createGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (groupSaveLock.current) return
     const formElement = event.currentTarget
     const form = new FormData(formElement)
     setError(null)
+    groupSaveLock.current = true
+    setSavingGroup(true)
     try {
       await api('/admin/groups', {
-        body: {
-          code: String(form.get('code') ?? ''),
-          title: String(form.get('title') ?? ''),
-          direction: String(form.get('direction') ?? ''),
-          stream: String(form.get('stream') ?? ''),
-          capacity: Number(form.get('capacity') || 20),
-        },
+        body: validateGroupForm(form),
       })
       formElement.reset()
       await groupsReq.mutate()
     } catch (err) {
       setError((err as Error).message || t('errorOccurred'))
+    } finally {
+      groupSaveLock.current = false
+      setSavingGroup(false)
     }
   }
 
@@ -422,6 +428,7 @@ function GroupsTab() {
     await detailReq.mutate()
     await searchReq.mutate()
     await groupsReq.mutate()
+    await refreshEnrollmentQueries()
   }
 
   async function deleteGroup(groupId: number) {
@@ -431,27 +438,33 @@ function GroupsTab() {
       setConfirmDelete(false)
       setSelectedId(null)
       await groupsReq.mutate()
+      await refreshEnrollmentQueries()
     } catch (err) { setDeleteError((err as Error).message) }
     finally { setDeleting(false) }
   }
 
   async function updateGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selectedId) return
+    if (!selectedId || groupSaveLock.current) return
     const form = new FormData(event.currentTarget)
-    await api(`/admin/groups/${selectedId}`, {
-      method: 'PATCH',
-      body: {
-        code: String(form.get('code') ?? ''),
-        title: String(form.get('title') ?? ''),
-        direction: String(form.get('direction') ?? ''),
-        stream: String(form.get('stream') ?? ''),
-        capacity: Number(form.get('capacity') || 20),
-      },
-    })
-    setEditingGroup(false)
-    await detailReq.mutate()
-    await groupsReq.mutate()
+    setEditError(null)
+    groupSaveLock.current = true
+    setSavingGroup(true)
+    try {
+      const values = validateGroupForm(form)
+      await api(`/admin/groups/${selectedId}`, {
+        method: 'PATCH',
+        body: {...values, direction: String(form.get('direction')) === detailReq.data?.direction ? undefined : values.direction},
+      })
+      setEditingGroup(false)
+      await detailReq.mutate()
+      await groupsReq.mutate()
+    } catch (err) {
+      setEditError((err as Error).message || t('errorOccurred'))
+    } finally {
+      groupSaveLock.current = false
+      setSavingGroup(false)
+    }
   }
 
   return (
@@ -464,16 +477,16 @@ function GroupsTab() {
       <div className="space-y-6">
         <Card className={styles.panel}>
           <h2 className="text-base font-semibold">{t('createGroup')}</h2>
-          <form onSubmit={createGroup} className="mt-4 space-y-4">
-            <Field label={t('groupCode')}><Input name="code" placeholder="ИМ1" required /></Field>
-            <Field label={t('title')}><Input name="title" placeholder="ИМ1 - Информатика-математика" required /></Field>
-            <Field label={t('direction')}><Input name="direction" placeholder="Информатика-математика" required /></Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label={t('stream')}><Input name="stream" placeholder="1" required /></Field>
-              <Field label={t('capacity')}><Input name="capacity" type="number" defaultValue={20} min={1} max={40} required /></Field>
-            </div>
+          <form onSubmit={createGroup} noValidate className="mt-4 space-y-4">
+            <Field label={t('groupCode')}><Input name="code" placeholder="ИМ1" minLength={2} maxLength={20} required /></Field>
+            <Field label={t('title')}><Input name="title" placeholder="ИМ1 - Информатика-математика" minLength={2} maxLength={120} required /></Field>
+            <Field label={t('direction')}><Select name="direction" defaultValue="" required>
+              <option value="" disabled>Бағытты таңдаңыз</option>
+              {groupDirectionOptions(groupsReq.data?.items ?? []).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </Select></Field>
+            <Field label={t('capacity')}><Input name="capacity" type="number" defaultValue={20} min={1} max={40} step={1} required /></Field>
             {error && <ErrorState message={error} />}
-            <Button type="submit" className="w-full"><PlusCircle size={16} />{t('create')}</Button>
+            <Button type="submit" disabled={savingGroup} className="w-full"><PlusCircle size={16} />{savingGroup ? t('loading') : t('create')}</Button>
           </form>
         </Card>
 
@@ -484,7 +497,8 @@ function GroupsTab() {
               {groups.map((group) => (
                 <button
                   key={group.id}
-                  onClick={() => setSelectedId(group.id)}
+                  disabled={savingGroup}
+                  onClick={() => { setSelectedId(group.id); setEditingGroup(false); setEditError(null) }}
                   className={styles.groupChoice}
                   data-selected={selectedId === group.id}
                 >
@@ -510,18 +524,21 @@ function GroupsTab() {
         ) : (
           <>
             {editingGroup ? (
-              <form onSubmit={updateGroup} className="space-y-3 rounded-lg border border-border bg-surface-muted p-4">
+              <form key={selectedId} onSubmit={updateGroup} noValidate className="space-y-3 rounded-lg border border-border bg-surface-muted p-4">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label={t('groupCode')}><Input name="code" defaultValue={detailReq.data.code} required /></Field>
-                  <Field label={t('title')}><Input name="title" defaultValue={detailReq.data.title} required /></Field>
-                  <Field label={t('direction')}><Input name="direction" defaultValue={detailReq.data.direction} required /></Field>
-                  <Field label={t('stream')}><Input name="stream" defaultValue={detailReq.data.stream} required /></Field>
-                  <Field label={t('capacity')}><Input name="capacity" type="number" defaultValue={detailReq.data.capacity} min={1} max={40} required /></Field>
+                  <Field label={t('groupCode')}><Input name="code" defaultValue={detailReq.data.code} minLength={2} maxLength={20} required /></Field>
+                  <Field label={t('title')}><Input name="title" defaultValue={detailReq.data.title} minLength={2} maxLength={120} required /></Field>
+                  <Field label={t('direction')}><Select name="direction" defaultValue={detailReq.data.direction} required>
+                    <option value="" disabled>Бағытты таңдаңыз</option>
+                    {groupDirectionOptions(groupsReq.data?.items ?? [], detailReq.data.direction).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </Select></Field>
+                  <Field label={t('capacity')}><Input name="capacity" type="number" defaultValue={detailReq.data.capacity} min={1} max={40} step={1} required /></Field>
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => setEditingGroup(false)}><X size={15} />{t('cancel')}</Button>
-                  <Button type="submit"><Check size={15} />{t('save')}</Button>
+                  <Button type="button" disabled={savingGroup} variant="outline" onClick={() => setEditingGroup(false)}><X size={15} />{t('cancel')}</Button>
+                  <Button type="submit" disabled={savingGroup}><Check size={15} />{savingGroup ? t('loading') : t('save')}</Button>
                 </div>
+                {editError && <ErrorState message={editError} />}
               </form>
             ) : (
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -574,24 +591,13 @@ function GroupsTab() {
                     await detailReq.mutate()
                     await groupsReq.mutate()
                     await searchReq.mutate()
+                    await refreshEnrollmentQueries()
                   }}
                 />
               ) : <EmptyState title={t('noData')} />}
             </div>
 
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold">{t('courses')}</h3>
-              {detailReq.data.courses.length ? (
-                <div className="space-y-2">
-                  {detailReq.data.courses.map((course) => (
-                    <div key={course.id} className="rounded-lg border border-border bg-surface-muted px-3 py-2">
-                      <p className="text-sm font-medium">{course.title}</p>
-                      <p className="text-xs text-muted">{course.teacher_name}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : <p className="text-sm text-muted">{t('noCoursesYet')}</p>}
-            </div>
+            <GroupCourseAssignments key={detailReq.data.id} groupId={detailReq.data.id} courses={detailReq.data.courses} />
           </>
         )}
       </Card>

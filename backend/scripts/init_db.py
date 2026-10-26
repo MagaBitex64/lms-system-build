@@ -548,7 +548,9 @@ async def main() -> None:
                 await conn.execute(migration)
             await conn.execute('CREATE TABLE IF NOT EXISTS schema_migrations(id TEXT PRIMARY KEY,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())')
             from scripts.topical_migrations import TOPICAL_MIGRATIONS
-            for migration in ENT_MIGRATIONS + RELEASE_MIGRATIONS + TOPICAL_MIGRATIONS:
+            from scripts.course_section_migrations import COURSE_SECTION_MIGRATIONS
+            from scripts.enrollment_migrations import ENROLLMENT_MIGRATIONS
+            for migration in ENT_MIGRATIONS + RELEASE_MIGRATIONS + TOPICAL_MIGRATIONS + COURSE_SECTION_MIGRATIONS + ENROLLMENT_MIGRATIONS:
                 key = hashlib.sha256(migration.encode()).hexdigest()
                 if not await conn.fetchval('SELECT 1 FROM schema_migrations WHERE id=$1', key):
                     await conn.execute(migration)

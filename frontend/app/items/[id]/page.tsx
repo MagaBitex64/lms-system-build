@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { useParams } from 'next/navigation'
+import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
@@ -223,9 +223,14 @@ function isAfter(value?: string | null) {
 }
 
 export default function ItemDetailPage() {
+  return <Suspense fallback={<Spinner className="mt-20" />}><ItemDetailContent /></Suspense>
+}
+
+function ItemDetailContent() {
   const { t } = useI18n()
   const { user } = useAuth()
   const params = useParams()
+  const searchParams = useSearchParams()
   const id = params.id as string
   const { data, error, isLoading, mutate } = useSWR<ItemDetail>(id ? ['item', id] : null, () => itemFetcher(id))
 
@@ -234,6 +239,11 @@ export default function ItemDetailPage() {
 
   const itemType = inferType(data)
   const isOwner = !!data.is_owner || user?.role === 'admin'
+  const legacyQuizAvailable = itemType === 'lesson' && !!data.has_quiz && (
+    isOwner ? (data.question_count ?? data.questions?.length ?? 0) > 0 || !!data.has_history : !!data.attempt || !!data.quiz_started
+  )
+  const legacyQuiz = legacyQuizAvailable && searchParams.get('legacyQuiz') === '1'
+  const showAssessment = itemType !== 'lesson' || legacyQuiz
   const reload = async () => {
     await mutate()
   }
@@ -241,7 +251,7 @@ export default function ItemDetailPage() {
     { label: t('openDate'), value: fmtDate(data.open_at) },
     { label: t('deadline'), value: fmtDate(data.deadline_at) },
     { label: t('closeDate'), value: fmtDate(data.close_at) },
-  ].filter((d) => d.value)
+  ].filter((d) => showAssessment && d.value)
 
   return (
     <div className="space-y-8">
@@ -259,15 +269,15 @@ export default function ItemDetailPage() {
         description={data.item.note}
         actions={
           <div className="flex flex-wrap gap-2">
-            {data.max_score != null && <Badge tone="primary">{t('maxScore')}: {data.max_score}</Badge>}
-            {!data.is_topical && data.weight_pct != null && <Badge tone="neutral">{t('weight')}: {data.weight_pct}%</Badge>}
-            {data.time_limit_minutes ? <Badge tone="warning">{data.time_limit_minutes} min</Badge> : null}
+            {showAssessment && data.max_score != null && <Badge tone="primary">{t('maxScore')}: {data.max_score}</Badge>}
+            {showAssessment && !data.is_topical && data.weight_pct != null && <Badge tone="neutral">{t('weight')}: {data.weight_pct}%</Badge>}
+            {showAssessment && data.time_limit_minutes ? <Badge tone="warning">{data.time_limit_minutes} min</Badge> : null}
             {data.submission && (
               <Badge tone={data.submission.status === 'graded' ? 'success' : 'warning'}>
                 {statusLabel(data.submission.status, t)}
               </Badge>
             )}
-            {data.attempt && (
+            {showAssessment && data.attempt && (
               <Badge tone={data.attempt.status === 'graded' ? 'success' : 'warning'}>
                 {statusLabel(data.attempt.status, t)}
               </Badge>
@@ -294,8 +304,21 @@ export default function ItemDetailPage() {
         </Card>
       )}
 
-      {itemType === 'lesson' && (
+      {itemType === 'lesson' && !legacyQuiz && (
         isOwner ? <LessonEditor data={data} reload={reload} /> : <LessonViewer data={data} />
+      )}
+
+      {legacyQuizAvailable && (
+        <Link href={legacyQuiz ? `/items/${id}` : `/items/${id}?legacyQuiz=1`} className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline">
+          <ArrowLeft size={16} />
+          {legacyQuiz ? 'Сабақ материалдарына оралу' : 'Бұрынғы тест мұрағаты'}
+        </Link>
+      )}
+      {legacyQuiz && (
+        <>
+          <p className="text-sm text-muted">Сабақтың бұрынғы тесті мен нәтижелері сақталған. Жаңа тесттерді курс ішіндегі «Тараулық тест» арқылы жасаңыз.</p>
+          {isOwner ? <QuizEditor data={data} reload={reload} /> : <StudentQuiz data={data} reload={reload} />}
+        </>
       )}
 
       {itemType === 'quiz' && (
@@ -330,10 +353,6 @@ function LessonViewer({ data }: { data: ItemDetail }) {
                 allowFullScreen
               />
             </div>
-          ) : data.has_quiz && data.quiz_started ? (
-            <div className="rounded-lg border border-warning/30 bg-warning-soft p-4 text-sm font-medium text-warning">
-              {t('videoLockedDuringQuiz')}
-            </div>
           ) : null}
           <p className="whitespace-pre-line text-sm leading-relaxed text-muted">{data.content || t('noData')}</p>
           {data.youtube_url && !embedUrl && (
@@ -347,7 +366,6 @@ function LessonViewer({ data }: { data: ItemDetail }) {
         </Card>
         <MaterialsList materials={data.materials ?? []} />
       </div>
-      {data.has_quiz && <StudentQuiz data={data} reload={async () => { window.location.reload() }} />}
     </div>
   )
 }
@@ -538,7 +556,6 @@ function LessonEditor({ data, reload }: { data: ItemDetail; reload: () => Promis
         </div>
       </div>
       <MaterialsList materials={data.materials ?? []} onDelete={deleteMaterial} />
-      <QuizEditor data={data} reload={reload} />
     </div>
   )
 }

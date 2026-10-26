@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+import re
 
 from core.db import get_pool
 from core.config import APP_ENV, PRODUCTION_ADMIN_EMAIL
@@ -34,15 +35,36 @@ class BlockIn(BaseModel):
     is_blocked: bool
 
 
-class GroupIn(BaseModel):
+class GroupValidation(BaseModel):
+    @field_validator('code', 'title', 'direction', 'stream', mode='before', check_fields=False)
+    @classmethod
+    def validate_group_text(cls, value, info):
+        if value is None:
+            return value
+        limits = {'code': (2, 20, 'Топ коды'), 'title': (2, 120, 'Атауы'),
+                  'direction': (2, 120, 'Бағыт'), 'stream': (1, 20, 'Лек')}
+        minimum, maximum, label = limits[info.field_name]
+        if not isinstance(value, str) or not minimum <= len(value.strip()) <= maximum:
+            raise ValueError(f'{label}: {minimum}–{maximum} таңба енгізіңіз')
+        return value.strip()
+
+    @field_validator('capacity', mode='before', check_fields=False)
+    @classmethod
+    def validate_capacity(cls, value):
+        if value is not None and (type(value) is not int or not 1 <= value <= 40):
+            raise ValueError('Орын саны 1–40 аралығындағы бүтін сан болуы керек')
+        return value
+
+
+class GroupIn(GroupValidation):
     code: str = Field(min_length=2, max_length=20)
     title: str = Field(min_length=2, max_length=120)
     direction: str = Field(min_length=2, max_length=120)
-    stream: str = Field(min_length=1, max_length=20)
+    stream: str | None = Field(default=None, min_length=1, max_length=20)
     capacity: int = Field(default=20, ge=1, le=40)
 
 
-class GroupUpdateIn(BaseModel):
+class GroupUpdateIn(GroupValidation):
     code: str | None = Field(default=None, min_length=2, max_length=20)
     title: str | None = Field(default=None, min_length=2, max_length=120)
     direction: str | None = Field(default=None, min_length=2, max_length=120)
@@ -56,6 +78,16 @@ class GroupStudentIn(BaseModel):
 
 class CourseGroupIn(BaseModel):
     group_id: int
+
+
+class CourseStudentIn(BaseModel):
+    student_id: int = Field(gt=0)
+
+
+async def lock_enrollments(conn):
+    # Serialize membership/source changes before row locks: two independent
+    # group removals must not leave an orphaned effective enrollment behind.
+    await conn.execute('SELECT pg_advisory_xact_lock(72419013)')
 
 
 def public_user(r) -> dict:
@@ -72,8 +104,8 @@ def public_user(r) -> dict:
 async def enroll_group_students(conn, course_id: int, group_id: int) -> None:
     await conn.execute(
         """
-        INSERT INTO enrollments (course_id, student_id, status, decided_at)
-        SELECT $1, gs.student_id, 'approved', now()
+        INSERT INTO enrollments (course_id, student_id, status, decided_at, direct_enrollment)
+        SELECT $1, gs.student_id, 'approved', now(), FALSE
         FROM group_students gs
         JOIN users u ON u.id = gs.student_id AND u.role = 'student'
         WHERE gs.group_id = $2
@@ -88,8 +120,8 @@ async def enroll_group_students(conn, course_id: int, group_id: int) -> None:
 async def enroll_student_in_group_courses(conn, group_id: int, student_id: int) -> None:
     await conn.execute(
         """
-        INSERT INTO enrollments (course_id, student_id, status, decided_at)
-        SELECT cg.course_id, $2, 'approved', now()
+        INSERT INTO enrollments (course_id, student_id, status, decided_at, direct_enrollment)
+        SELECT cg.course_id, $2, 'approved', now(), FALSE
         FROM course_groups cg
         WHERE cg.group_id = $1
         ON CONFLICT (course_id, student_id)
@@ -103,8 +135,9 @@ async def enroll_student_in_group_courses(conn, group_id: int, student_id: int) 
 async def cleanup_orphan_group_enrollments(conn) -> None:
     await conn.execute(
         """
-        DELETE FROM enrollments e
+        UPDATE enrollments e SET status='rejected', decided_at=now()
         WHERE e.status = 'approved'
+          AND e.direct_enrollment IS FALSE
           AND NOT EXISTS (
             SELECT 1
             FROM course_groups cg
@@ -311,11 +344,11 @@ async def create_group(data: GroupIn, user: dict = Depends(require_admin)):
             data.code.strip().upper(),
             data.title.strip(),
             data.direction.strip(),
-            data.stream.strip(),
+            data.stream or (re.search(r'\d+$', data.code).group() if re.search(r'\d+$', data.code) else data.code.upper()),
             data.capacity,
         )
     except asyncpg.UniqueViolationError as exc:
-        raise HTTPException(status_code=409, detail="Group code already exists") from exc
+        raise HTTPException(status_code=409, detail="Бұл топ коды бұрын тіркелген") from exc
     return dict(row) | {"created_at": str(row["created_at"])}
 
 
@@ -345,7 +378,9 @@ async def update_group(group_id: int, data: GroupUpdateIn, user: dict = Depends(
             group_id,
         )
     except asyncpg.UniqueViolationError as exc:
-        raise HTTPException(status_code=409, detail="Group code already exists") from exc
+        raise HTTPException(status_code=409, detail="Бұл топ коды бұрын тіркелген") from exc
+    except asyncpg.CheckViolationError as exc:
+        raise HTTPException(status_code=422, detail="Орын саны топтағы оқушылар санынан кем болмауы керек") from exc
     return dict(row) | {"created_at": str(row["created_at"])}
 
 
@@ -354,6 +389,7 @@ async def delete_group(group_id: int, user: dict = Depends(require_admin)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await lock_enrollments(conn)
             row = await conn.fetchrow("DELETE FROM groups WHERE id = $1 RETURNING id", group_id)
             if row is None:
                 raise HTTPException(status_code=404, detail="Group not found")
@@ -379,7 +415,7 @@ async def group_detail(group_id: int, user: dict = Depends(require_admin)):
     )
     courses = await pool.fetch(
         """
-        SELECT c.id, c.title, u.full_name AS teacher_name
+        SELECT c.id, c.title, c.is_published, u.full_name AS teacher_name
         FROM course_groups cg
         JOIN courses c ON c.id = cg.course_id
         JOIN users u ON u.id = c.teacher_id
@@ -428,6 +464,7 @@ async def add_student_to_group(group_id: int, data: GroupStudentIn, user: dict =
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await lock_enrollments(conn)
             group = await conn.fetchrow("SELECT id, capacity FROM groups WHERE id = $1 FOR UPDATE", group_id)
             if group is None:
                 raise HTTPException(status_code=404, detail="Group not found")
@@ -457,6 +494,7 @@ async def remove_student_from_group(group_id: int, student_id: int, user: dict =
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await lock_enrollments(conn)
             await conn.execute("DELETE FROM group_students WHERE group_id = $1 AND student_id = $2", group_id, student_id)
             await cleanup_orphan_group_enrollments(conn)
     return {"ok": True}
@@ -528,6 +566,7 @@ async def add_group_to_course(course_id: int, data: CourseGroupIn, user: dict = 
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await lock_enrollments(conn)
             course = await conn.fetchrow("SELECT id FROM courses WHERE id = $1", course_id)
             if course is None:
                 raise HTTPException(status_code=404, detail="Course not found")
@@ -548,6 +587,7 @@ async def remove_group_from_course(course_id: int, group_id: int, user: dict = D
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await lock_enrollments(conn)
             await conn.execute("DELETE FROM course_groups WHERE course_id = $1 AND group_id = $2", course_id, group_id)
             await conn.execute(
                 """
@@ -560,6 +600,31 @@ async def remove_group_from_course(course_id: int, group_id: int, user: dict = D
             )
             await cleanup_orphan_group_enrollments(conn)
     return {"ok": True}
+
+
+@router.post('/courses/{course_id}/students')
+async def add_direct_student(course_id: int, data: CourseStudentIn, user: dict = Depends(require_admin)):
+    pool = await get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        await lock_enrollments(conn)
+        if not await conn.fetchval('SELECT EXISTS(SELECT 1 FROM courses WHERE id=$1)', course_id):
+            raise HTTPException(404, 'Курс табылмады')
+        if not await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND role='student')", data.student_id):
+            raise HTTPException(422, 'Оқушы табылмады')
+        await conn.execute('''INSERT INTO enrollments(course_id,student_id,status,decided_at,direct_enrollment)
+            VALUES($1,$2,'approved',now(),TRUE) ON CONFLICT(course_id,student_id)
+            DO UPDATE SET status='approved',direct_enrollment=TRUE,decided_at=now()''', course_id, data.student_id)
+    return {'ok': True}
+
+
+@router.delete('/courses/{course_id}/students/{student_id}')
+async def remove_direct_student(course_id: int, student_id: int, user: dict = Depends(require_admin)):
+    pool = await get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        await lock_enrollments(conn)
+        await conn.execute('UPDATE enrollments SET direct_enrollment=FALSE WHERE course_id=$1 AND student_id=$2', course_id, student_id)
+        await cleanup_orphan_group_enrollments(conn)
+    return {'ok': True}
 
 
 @router.get("/students/{student_id}")

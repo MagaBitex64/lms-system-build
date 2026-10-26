@@ -12,11 +12,14 @@ from core.access import (
     is_item_unlocked,
 )
 from core.db import get_pool
+from core.course_sections import lock_course, normalize_item_order, require_same_ids, validate_section
 from core.deps import get_current_user, require_admin, require_teacher
 from core.ent_rules import SUBJECT_LABELS
 from storage.local import storage
 
 router = APIRouter(prefix="/courses", tags=["courses"])
+from routers.course_sections import router as section_router
+router.include_router(section_router)
 
 
 class CourseIn(BaseModel):
@@ -37,6 +40,7 @@ class ItemIn(BaseModel):
     is_visible: bool = True
     sequential_unlock: bool = False
     note: str = Field(default="", max_length=5000)
+    section_id: int | None = Field(default=None, gt=0)
 
 
 class ItemUpdate(BaseModel):
@@ -47,7 +51,8 @@ class ItemUpdate(BaseModel):
 
 
 class ReorderIn(BaseModel):
-    item_ids: list[int]
+    item_ids: list[int] = Field(max_length=10000)
+    section_id: int | None = Field(default=None, gt=0)
 
 
 class ItemAccessIn(BaseModel):
@@ -288,7 +293,7 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         LEFT JOIN quizzes q ON q.item_id = ci.id
         LEFT JOIN homework h ON h.item_id = ci.id
         WHERE ci.course_id = $1
-        ORDER BY ci.position
+        ORDER BY ci.position, ci.id
         """,
         course_id,
     )
@@ -344,6 +349,7 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
             "type": r["type"],
             "title": r["title"],
             "position": r["position"],
+            "section_id": r["section_id"],
             "is_visible": r["is_visible"],
             "sequential_unlock": r["sequential_unlock"],
             "note": r["note"],
@@ -388,7 +394,8 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         groups = [dict(g) for g in group_rows]
         student_rows = await pool.fetch(
             """
-            SELECT DISTINCT u.id, u.full_name, u.email
+            SELECT DISTINCT u.id, u.full_name, u.email, e.direct_enrollment,
+                   (e.direct_enrollment IS NULL) AS legacy_access
             FROM enrollments e
             JOIN users u ON u.id = e.student_id
             WHERE e.course_id = $1 AND e.status = 'approved'
@@ -418,6 +425,7 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         for student in student_rows:
             students.append(dict(student) | {"groups": groups_by_student.get(student["id"], [])})
 
+    sections = await pool.fetch('SELECT id,title,position FROM course_sections WHERE course_id=$1 ORDER BY position,id', course_id)
     return {
         "id": course["id"],
         "title": course["title"],
@@ -430,6 +438,7 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         "ent_subject": course["ent_subject"] if is_owner else None,
         "enrollment_status": "approved" if enrolled else None,
         "items": items,
+        "sections": [dict(section) for section in sections],
         "groups": groups,
         "students": students,
     }
@@ -443,13 +452,15 @@ async def create_item(course_id: int, data: ItemIn, user: dict = Depends(require
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await lock_course(conn, course_id)
+            await validate_section(conn, course_id, data.section_id)
             pos = await conn.fetchval(
                 "SELECT COALESCE(MAX(position), -1) + 1 FROM course_items WHERE course_id = $1", course_id
             )
             item = await conn.fetchrow(
                 """
-                INSERT INTO course_items (course_id, type, title, position, is_visible, sequential_unlock, note)
-                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
+                INSERT INTO course_items (course_id, type, title, position, is_visible, sequential_unlock, note, section_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
                 """,
                 course_id,
                 data.type,
@@ -458,6 +469,7 @@ async def create_item(course_id: int, data: ItemIn, user: dict = Depends(require
                 data.is_visible,
                 data.sequential_unlock,
                 data.note,
+                data.section_id,
             )
             if data.type == "lesson":
                 await conn.execute("INSERT INTO lessons (item_id) VALUES ($1)", item["id"])
@@ -465,6 +477,8 @@ async def create_item(course_id: int, data: ItemIn, user: dict = Depends(require
                 await conn.execute("INSERT INTO quizzes (item_id,scoring_mode) VALUES ($1,'points')", item["id"])
             elif data.type == "homework":
                 await conn.execute("INSERT INTO homework (item_id) VALUES ($1)", item["id"])
+            await normalize_item_order(conn, course_id)
+            item = await conn.fetchrow('SELECT * FROM course_items WHERE id=$1', item['id'])
     return dict(item) | {"created_at": str(item["created_at"])}
 
 
@@ -557,6 +571,11 @@ async def reorder_items(course_id: int, data: ReorderIn, user: dict = Depends(re
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await lock_course(conn, course_id)
+            await validate_section(conn, course_id, data.section_id)
+            rows = await conn.fetch('SELECT id,section_id FROM course_items WHERE course_id=$1', course_id)
+            scoped = 'section_id' in data.model_fields_set
+            require_same_ids(data.item_ids, [row['id'] for row in rows if not scoped or row['section_id'] == data.section_id])
             for pos, item_id in enumerate(data.item_ids):
                 await conn.execute(
                     "UPDATE course_items SET position = $1 WHERE id = $2 AND course_id = $3",
@@ -564,6 +583,7 @@ async def reorder_items(course_id: int, data: ReorderIn, user: dict = Depends(re
                     item_id,
                     course_id,
                 )
+            await normalize_item_order(conn, course_id)
     return {"ok": True}
 
 
@@ -589,7 +609,7 @@ async def get_lesson(item_id: int, user: dict = Depends(get_current_user)):
     quiz_data = {}
     if quiz:
         from routers.quizzes import get_quiz
-        quiz_data = await get_quiz(item_id, user)
+        quiz_data = await get_quiz(item_id, user=user)
     attempt = quiz_data.get('attempt')
     quiz_started = quiz_data.get('quiz_started', False)
     questions = quiz_data.get('questions', [])
@@ -602,9 +622,10 @@ async def get_lesson(item_id: int, user: dict = Depends(get_current_user)):
         "is_owner": is_owner,
         "item": {"id": item["id"], "title": item["title"], "note": item["note"], "course_id": item["course_id"]},
         "content": lesson["content"],
-        "youtube_url": None if (quiz and user["role"] == "student" and quiz_started and not attempt) else lesson["youtube_url"],
+        "youtube_url": lesson["youtube_url"],
         "materials": [dict(m) for m in materials],
         "has_quiz": quiz is not None,
+        "has_history": quiz_data.get("has_history", False),
         "quiz_started": quiz_started,
         "question_count": question_count,
         "max_score": quiz["max_score"] if quiz else None,
