@@ -67,10 +67,21 @@ jobs:
           NEXT_PUBLIC_API_BASE_URL: https://ci.invalid/api
         run: pnpm build
 
+  build-images:
+    name: Build Docker images without touching production
+    needs: [backend-tests, frontend-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build --tag lms-backend:ci ./backend
+      - name: Build frontend image
+        run: docker build --build-arg NEXT_PUBLIC_API_BASE_URL=https://ci.invalid/api --tag lms-frontend:ci ./frontend
+
   production-config:
     name: Read current public API address
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_PRODUCTION_DEPLOY == 'true' }}
-    needs: [backend-tests, frontend-tests]
+    needs: [backend-tests, frontend-tests, build-images]
     runs-on: ubuntu-latest
     outputs:
       api_base_url: ${{ steps.read.outputs.api_base_url }}
@@ -96,7 +107,7 @@ jobs:
   publish:
     name: Build and publish immutable images
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_PRODUCTION_DEPLOY == 'true' }}
-    needs: [backend-tests, frontend-tests, production-config]
+    needs: [backend-tests, frontend-tests, build-images, production-config]
     runs-on: ubuntu-latest
     permissions:
       contents: read
