@@ -39,3 +39,5 @@ the pnpm lockfile actually used by Docker.
 
 See [release fixes](docs/release-fixes.md) for the audit findings and validation
 boundaries, and [ENT rules](docs/ent-rules.md) for scoring and browser telemetry.
+
+Automated CI checks run before production deployment.
