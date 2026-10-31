@@ -159,7 +159,9 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
       - name: Copy deployment files
         run: |
-          scp -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes docker-compose.deploy.yml deploy/release.sh root@93.170.73.162:/opt/lms/app/
+          ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes root@93.170.73.162 "mkdir -p /opt/lms/app/deploy"
+          scp -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes docker-compose.deploy.yml root@93.170.73.162:/opt/lms/app/
+          scp -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes deploy/release.sh root@93.170.73.162:/opt/lms/app/deploy/release.sh
       - name: Back up, pull and deploy
         env:
           API_BASE_URL: ${{ needs.production-config.outputs.api_base_url }}
