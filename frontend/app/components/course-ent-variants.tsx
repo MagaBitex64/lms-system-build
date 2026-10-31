@@ -24,7 +24,7 @@ type Variant = {
 
 type VariantsResponse = { items: Variant[]; subject: string | null }
 
-export default function CourseEntVariants({ courseId, subject }: { courseId: number; subject: string | null }) {
+export default function CourseEntVariants({ courseId, subject, onConfigure }: { courseId: number; subject: string | null; onConfigure?: () => void }) {
   const router = useRouter()
   const { data, error, isLoading, mutate } = useSWR<VariantsResponse>(
     `/ent-trial/teacher/courses/${courseId}/variants`,
@@ -70,19 +70,18 @@ export default function CourseEntVariants({ courseId, subject }: { courseId: num
   if (isLoading) return <Spinner />
   if (error) return <ErrorState message={error.message} />
 
-  if (!subject) {
-    return <ErrorState message="Курстың пәні белгіленбеген. Бұл ескі курсқа пәнді әкімші бекітуі керек." />
-  }
+  const validSubject = !!subject && Object.hasOwn(SUBJECT_NAMES, subject)
 
   return <div className={styles.variantsShell}>
+    {!validSubject && <div role="status" className="rounded-lg border border-border p-3 text-sm">Курстың нақты ҰБТ пәні белгіленбеген. Бірнеше пәнді курс үшін бір пәнді автоматты түрде таңдамаймыз. {onConfigure ? <button type="button" className="text-primary underline" onClick={onConfigure}>Курс параметрлерін ашу</button> : 'Курс параметрлерін тексеру үшін әкімшіге хабарласыңыз.'}</div>}
     <div className={styles.variantToolbar}>
       <div>
         <p>Курс пәні</p>
-        <strong>{SUBJECT_NAMES[subject] ?? subject}</strong>
+        <strong>{subject ? SUBJECT_NAMES[subject] ?? subject : 'Пән белгіленбеген'}</strong>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <Badge tone="primary">{variants.length} нұсқа</Badge>
-        <Button size="sm" onClick={() => { setCreating(true); setTitle(''); setDescription(''); setMessage('') }}>
+        <Button size="sm" disabled={!validSubject} onClick={() => { setCreating(true); setTitle(''); setDescription(''); setMessage('') }}>
           <PlusCircle size={15} /> Нұсқа қосу
         </Button>
       </div>
@@ -94,7 +93,7 @@ export default function CourseEntVariants({ courseId, subject }: { courseId: num
       <form onSubmit={createVariant} className="space-y-4">
         <div>
           <h3 className="font-semibold">Жаңа сынақ нұсқасы</h3>
-          <p className="mt-1 text-sm text-muted">Пән: {SUBJECT_NAMES[subject] ?? subject}. Нұсқа құрылғаннан кейін сұрақтар редакторы жеке бетте ашылады.</p>
+          <p className="mt-1 text-sm text-muted">Пән: {subject ? SUBJECT_NAMES[subject] ?? subject : 'Пән белгіленбеген'}. Нұсқа құрылғаннан кейін сұрақтар редакторы жеке бетте ашылады.</p>
         </div>
         <Field label="Атауы"><Input required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} /></Field>
         <Field label="Сипаттамасы"><Textarea rows={3} maxLength={1000} value={description} onChange={(event) => setDescription(event.target.value)} /></Field>
@@ -112,6 +111,7 @@ export default function CourseEntVariants({ courseId, subject }: { courseId: num
         <span className={styles.itemIcon}><ClipboardList size={19} /></span>
         <div className={styles.variantMain}>
           <div className="flex flex-wrap items-center gap-2"><strong className={styles.variantTitle}>{variant.title}</strong><Badge tone={variant.ready ? 'success' : 'warning'}>{variant.ready ? 'Дайын' : 'Толықтыру қажет'}</Badge></div>
+          {variant.single_subject !== subject && <p role="status" className="text-sm text-amber-800">Бұрынғы нұсқа пәні: {SUBJECT_NAMES[variant.single_subject] ?? variant.single_subject}. Курс пәнінен өзгеше; деректер өзгертілмеді.</p>}
           {variant.description && <p className={styles.variantDescription}>{variant.description}</p>}
           {!variant.ready && <p className={styles.variantDescription}><CircleAlert size={13} className="inline" /> {variant.issue_count} ескерту</p>}
           {variant.ready && <p className={styles.variantDescription}><CheckCircle2 size={13} className="inline" /> ҰБТ талабына сай</p>}

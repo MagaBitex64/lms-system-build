@@ -1,4 +1,6 @@
 import datetime
+import hashlib
+import base64
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
@@ -24,6 +26,9 @@ async def hash_password_async(password: str) -> str:
 
 
 async def verify_password_async(password: str, password_hash: str) -> bool:
+    if password_hash.startswith("sha256$"):
+        password = base64.b64encode(hashlib.sha256(password.encode("utf-8")).digest()).decode()
+        password_hash = password_hash[7:]
     if len(password.encode("utf-8")) > 72:
         return False
     async with _password_slots:
@@ -61,3 +66,9 @@ def decode_token(token: str) -> dict | None:
         return payload
     except jwt.PyJWTError:
         return None
+
+
+async def hash_personal_password(password: str) -> str:
+    # Prehash prevents bcrypt truncation while preserving existing bcrypt verification.
+    digest = base64.b64encode(hashlib.sha256(password.encode("utf-8")).digest()).decode()
+    return "sha256$" + await hash_password_async(digest)

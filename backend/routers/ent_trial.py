@@ -1,4 +1,6 @@
 import copy
+import hashlib
+import secrets
 import datetime as dt
 import json
 from typing import Literal
@@ -91,6 +93,8 @@ class AnswerIn(BaseModel):
 
 
 class AnswersIn(BaseModel):
+    session_id: str | None = Field(default=None, max_length=100)
+    proctor_token: str | None = Field(default=None, max_length=100)
     answers: list[AnswerIn] = Field(default_factory=list, max_length=200)
     revision: int = Field(ge=0)
 
@@ -103,6 +107,7 @@ class ProctorActivateIn(BaseModel):
 
 
 class ProctorEventIn(BaseModel):
+    proctor_token: str | None = Field(default=None, max_length=100)
     session_id: str = Field(min_length=16, max_length=100)
     event_type: Literal["heartbeat", "absence_start", "absence_end", "tab_hidden", "window_blur", "fullscreen_exit", "camera_stopped", "screen_share_stopped", "copy", "cut", "paste", "context_menu", "forbidden_shortcut"]
     details: dict = Field(default_factory=dict)
@@ -125,11 +130,10 @@ async def managed_variant_or_404(conn, variant_id: int, user: dict, lock: bool =
     allowed = await conn.fetchval(
         """SELECT EXISTS(
             SELECT 1 FROM courses
-            WHERE id=$1 AND teacher_id=$2 AND ent_subject=$3
+            WHERE id=$1 AND teacher_id=$2
         )""",
         variant["course_id"],
         user["id"],
-        variant["single_subject"],
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Бұл вариантты редакциялауға рұқсат жоқ")
@@ -354,18 +358,20 @@ async def list_course_ent_variants(course_id: int, user: dict = Depends(require_
 @router.post("/teacher/courses/{course_id}/variants")
 async def create_course_ent_variant(course_id: int, data: TeacherVariantIn, user: dict = Depends(require_teacher)):
     course = await ensure_course_owner(user, course_id)
-    subject = course.get("ent_subject")
-    if subject not in SUBJECT_LABELS:
-        raise HTTPException(status_code=409, detail="Алдымен курстың ҰБТ пәнін таңдаңыз")
     if not data.title.strip():
         raise HTTPException(status_code=422, detail="Вариант атауы қажет")
     pool = await get_pool()
-    variant_id = await pool.fetchval(
-        """INSERT INTO ent_variants(
-            title,description,combination,exam_mode,single_subject,course_id,created_by_id
-        ) VALUES($1,$2,'infmat','single',$3,$4,$5) RETURNING id""",
-        data.title.strip(), data.description, subject, course_id, user["id"],
-    )
+    async with pool.acquire() as conn, conn.transaction():
+        # Serialize with subject changes; never rewrite historical variants.
+        subject = await conn.fetchval("SELECT ent_subject FROM courses WHERE id=$1 FOR UPDATE", course_id)
+        if subject not in SUBJECT_LABELS:
+            raise HTTPException(409, "Курс параметрлерінде нақты ҰБТ пәнін белгілеңіз")
+        variant_id = await conn.fetchval(
+            """INSERT INTO ent_variants(
+                title,description,combination,exam_mode,single_subject,course_id,created_by_id
+            ) VALUES($1,$2,'infmat','single',$3,$4,$5) RETURNING id""",
+            data.title.strip(), data.description, subject, course_id, user["id"],
+        )
     return {"ok": True, "id": variant_id}
 
 
@@ -790,13 +796,6 @@ async def activate_proctor(attempt_id: int, data: ProctorActivateIn, user: dict 
         attempt = await owned_attempt(conn, attempt_id, user["id"])
         if attempt["status"] == "submitted":
             return {"ok": True, "status": "submitted"}
-        if attempt["proctor_session_id"] and attempt["proctor_session_id"] != data.session_id:
-            recently_seen = attempt["proctor_last_seen_at"] and attempt["proctor_last_seen_at"] > now() - dt.timedelta(seconds=35)
-            if recently_seen:
-                raise HTTPException(409, "Тест басқа терезеде ашылған")
-            await conn.execute("""INSERT INTO ent_proctor_events(attempt_id,event_type,severity,details)
-                VALUES($1,'window_blur',1,$2::jsonb)""", attempt_id, json.dumps({"action": "session_recovered"}))
-            await conn.execute("UPDATE ent_trial_attempts SET proctor_session_id=$2 WHERE id=$1", attempt_id, data.session_id)
         if attempt["deadline_at"] is None:
             snapshot = decoded(attempt["snapshot"])
             duration = int(snapshot.get("duration_seconds", DURATION_SECONDS))
@@ -812,7 +811,10 @@ async def activate_proctor(attempt_id: int, data: ProctorActivateIn, user: dict 
                 WHERE id=$1 RETURNING *""", attempt_id, data.session_id))
         await conn.execute("INSERT INTO ent_proctor_events(attempt_id,event_type,severity,details) VALUES($1,'heartbeat',0,$2::jsonb)",
                            attempt_id, json.dumps({"action": "activated"}))
-    return {"ok": True, "status": attempt["status"], "deadline_at": attempt["deadline_at"],
+        await close_absence(conn, attempt_id)
+        lease = secrets.token_urlsafe(32)
+        await conn.execute("UPDATE ent_trial_attempts SET proctor_session_id=$2,proctor_lease_hash=$3,proctor_last_seen_at=now() WHERE id=$1", attempt_id, data.session_id, hashlib.sha256(lease.encode()).hexdigest())
+    return {"proctor_token": lease, "expires_in": 45, "ok": True, "status": attempt["status"], "deadline_at": attempt["deadline_at"],
             "violations": attempt["proctor_violations"]}
 
 
@@ -828,14 +830,20 @@ async def proctor_event(attempt_id: int, data: ProctorEventIn, user: dict = Depe
         attempt = await owned_attempt(conn, attempt_id, user["id"])
         if attempt["status"] == "submitted":
             return {"ok": True, "status": "submitted", "violations": attempt["proctor_violations"]}
-        if attempt["proctor_session_id"] != data.session_id or attempt["deadline_at"] is None:
-            raise HTTPException(409, "Прокторинг сессиясы сәйкес емес")
+        require_proctor_lease(attempt, data.session_id, data.proctor_token)
+        loss = data.event_type in {"absence_start", "fullscreen_exit", "screen_share_stopped"} or (data.event_type == "camera_stopped" and decoded(attempt["snapshot"]).get("camera_required", True))
         if data.event_type == "heartbeat":
+            required_camera = decoded(attempt["snapshot"]).get("camera_required", True)
+            if not data.details.get("fullscreen") or not data.details.get("screen") or (required_camera and not data.details.get("camera")):
+                await conn.execute("UPDATE ent_trial_attempts SET proctor_lease_hash=NULL WHERE id=$1", attempt_id)
+                return {"ok": False, "status": attempt["status"], "violations": attempt["proctor_violations"], "requires_reactivation": True}
             attempt = dict(await conn.fetchrow("UPDATE ent_trial_attempts SET proctor_last_seen_at=now() WHERE id=$1 RETURNING *", attempt_id))
             if attempt["deadline_at"] <= now():
                 attempt = await finish(conn, attempt)
             return {"ok": True, "status": attempt["status"], "violations": attempt["proctor_violations"],
                     "terminated": attempt["proctor_status"] == "terminated"}
+        if loss:
+            await conn.execute("UPDATE ent_trial_attempts SET proctor_lease_hash=NULL WHERE id=$1", attempt_id)
         if data.event_type == "absence_start":
             await conn.execute("""INSERT INTO ent_absence_periods(attempt_id)
                 SELECT $1 WHERE NOT EXISTS (
@@ -849,12 +857,22 @@ async def proctor_event(attempt_id: int, data: ProctorEventIn, user: dict = Depe
         await conn.execute("INSERT INTO ent_proctor_events(attempt_id,event_type,severity,details) VALUES($1,$2,$3,$4::jsonb)",
                            attempt_id, data.event_type, 0 if duplicate else severity, json.dumps(data.details))
         increment = 0
-        attempt = dict(await conn.fetchrow("""UPDATE ent_trial_attempts SET proctor_last_seen_at=now(),
-            proctor_violations=proctor_violations+$2 WHERE id=$1 RETURNING *""", attempt_id, increment))
+        attempt = dict(await conn.fetchrow("""UPDATE ent_trial_attempts SET proctor_violations=proctor_violations+$2 WHERE id=$1 RETURNING *""", attempt_id, increment))
         if attempt["deadline_at"] <= now():
             attempt = await finish(conn, attempt)
     return {"ok": True, "status": attempt["status"], "violations": attempt["proctor_violations"],
             "terminated": attempt["proctor_status"] == "terminated"}
+
+
+def require_proctor_lease(attempt, session_id, token):
+    # Client reports cannot prove media capture; this capability only authorizes a fresh session.
+    digest = hashlib.sha256((token or "").encode()).hexdigest()
+    last_seen = attempt.get("proctor_last_seen_at")
+    if (not session_id or session_id != attempt.get("proctor_session_id")
+        or not token or not attempt.get("proctor_lease_hash")
+        or not secrets.compare_digest(digest, attempt["proctor_lease_hash"])
+        or not last_seen or last_seen <= now() - dt.timedelta(seconds=45)):
+        raise HTTPException(403, "PROCTOR_SESSION_REQUIRED: Экран бөлісу мен толық экранды қайта қосыңыз")
 
 
 def normalized_answers(snapshot, data):
@@ -1021,6 +1039,7 @@ async def save_or_submit(attempt_id, data, user, submit=False):
         if attempt["status"] == "submitted" or attempt["deadline_at"] <= now():
             attempt = await finish(conn, attempt)
         else:
+            require_proctor_lease(attempt, data.session_id, data.proctor_token)
             if data.revision != attempt["response_revision"]:
                 raise HTTPException(409, "Жауаптар басқа терезеде өзгертілген. Бетті жаңартыңыз.")
             responses = decoded(attempt["responses"])

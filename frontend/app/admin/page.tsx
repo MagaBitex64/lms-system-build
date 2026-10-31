@@ -6,7 +6,7 @@ import { BookOpen, Check, ChevronDown, GraduationCap, Pencil, PlusCircle, Search
 import { useI18n } from '@/lib/i18n'
 import { api, fetcher } from '@/lib/api'
 import { fetchAllGroups, useAllGroups } from '@/lib/groups'
-import { groupDirectionOptions, validateGroupForm } from '@/lib/group-form'
+import { validateGroupForm } from '@/lib/group-form'
 import {GroupCourseAssignments} from '@/components/enrollment-management'
 import {refreshEnrollmentQueries} from '@/lib/enrollments'
 import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Field, Input, Select, Spinner, Modal, DeletionConfirmModal } from '../components/ui'
@@ -107,6 +107,7 @@ function StudentsTab() {
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [notice, setNotice] = useState('')
+  const [temporaryPassword, setTemporaryPassword] = useState('')
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [groupFilter, setGroupFilter] = useState('')
@@ -124,16 +125,15 @@ function StudentsTab() {
     setCreating(true)
     setError(null)
     try {
-      await api('/admin/users', {
+      const created = await api<{temporary_password: string}>('/admin/users', {
         body: {
           full_name: String(form.get('full_name') ?? ''),
           email: String(form.get('email') ?? ''),
-          password: String(form.get('password') ?? ''),
           role: 'student',
         },
       })
       formElement.reset()
-      setCreateOpen(false)
+      setTemporaryPassword(created.temporary_password)
       setNotice('Оқушы қосылды')
       await mutate()
     } catch (err) {
@@ -151,14 +151,13 @@ function StudentsTab() {
         <Select aria-label="Топ бойынша" value={groupFilter} onChange={event => setGroupFilter(event.target.value)}><option value="">Топ бойынша</option>{(data?.groups ?? []).map(group => <option key={group.id} value={group.id}>{studentGroupLabel(group)}</option>)}<option value="unassigned">Топқа тіркелмеген оқушылар</option></Select>
         <Button onClick={() => { setCreateOpen(true); setError(null) }}><UserPlus size={16} />{t('createStudent')}</Button>
       </div>
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={t('createStudent')} closeDisabled={creating}>
-        <form onSubmit={createUser} autoComplete="off" className="space-y-4">
+      <Modal open={createOpen} onClose={() => { setCreateOpen(false); setTemporaryPassword('') }} title={t('createStudent')} closeDisabled={creating}>
+        <>{temporaryPassword ? <TemporaryPassword value={temporaryPassword} /> : <form onSubmit={createUser} autoComplete="off" className="space-y-4">
           <Field label={t('fullName')}><Input name="full_name" required minLength={2} /></Field>
           <Field label={t('email')}><Input name="email" type="email" autoComplete="off" required /></Field>
-          <Field label={t('password')} hint={t('passwordHint')}><Input name="password" type="password" autoComplete="new-password" required minLength={8} /></Field>
           {error && <ErrorState message={error} />}
           <Button type="submit" disabled={creating} className="w-full"><UserPlus size={16} />{creating ? 'Қосылуда…' : 'Оқушыны қосу'}</Button>
-        </form>
+        </form>}</>
       </Modal>
 
       {isLoading ? <Spinner /> : loadError ? <ErrorState message={t('errorOccurred')} /> : !visibleGroups.length ? <EmptyState icon={<Users size={22} />} title={query.trim() || groupFilter ? t('noResults') : t('noData')} /> : <div className={styles.groupedStudents}>
@@ -187,6 +186,7 @@ function TeachersTab() {
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [notice, setNotice] = useState('')
+  const [temporaryPassword, setTemporaryPassword] = useState('')
   const [groupToRemove, setGroupToRemove] = useState<{ courseId: number; group: Group } | null>(null)
   const [removingGroup, setRemovingGroup] = useState(false)
   const [removeError, setRemoveError] = useState('')
@@ -208,16 +208,15 @@ function TeachersTab() {
     setCreating(true)
     setError(null)
     try {
-      await api('/admin/users', {
+      const created = await api<{temporary_password: string}>('/admin/users', {
         body: {
           full_name: String(form.get('full_name') ?? ''),
           email: String(form.get('email') ?? ''),
-          password: String(form.get('password') ?? ''),
           role: 'teacher',
         },
       })
       formElement.reset()
-      setCreateOpen(false)
+      setTemporaryPassword(created.temporary_password)
       setNotice('Мұғалім қосылды')
       await teachersReq.mutate()
     } catch (err) {
@@ -239,14 +238,13 @@ function TeachersTab() {
         <p role="status" className="text-sm text-success-foreground">{notice}</p>
         <Button onClick={() => { setCreateOpen(true); setError(null) }}><UserPlus size={16} />{t('createTeacher')}</Button>
       </div>
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={t('createTeacher')} closeDisabled={creating}>
-          <form onSubmit={createTeacher} autoComplete="off" className="space-y-4">
+      <Modal open={createOpen} onClose={() => { setCreateOpen(false); setTemporaryPassword('') }} title={t('createTeacher')} closeDisabled={creating}>
+          <>{temporaryPassword ? <TemporaryPassword value={temporaryPassword} /> : <form onSubmit={createTeacher} autoComplete="off" className="space-y-4">
             <Field label={t('fullName')}><Input name="full_name" required minLength={2} /></Field>
             <Field label={t('email')}><Input name="email" type="email" autoComplete="off" required /></Field>
-            <Field label={t('password')} hint={t('passwordHint')}><Input name="password" type="password" autoComplete="new-password" required minLength={8} /></Field>
             {error && <ErrorState message={error} />}
             <Button type="submit" disabled={creating} className="w-full"><UserPlus size={16} />{creating ? 'Қосылуда…' : 'Мұғалімді қосу'}</Button>
-          </form>
+          </form>}</>
       </Modal>
       <DeletionConfirmModal open={groupToRemove !== null} onClose={() => setGroupToRemove(null)}
         title="Топты курстан алып тастау" description="Осы топты курстан алып тастағыңыз келе ме?"
@@ -454,7 +452,7 @@ function GroupsTab() {
       const values = validateGroupForm(form)
       await api(`/admin/groups/${selectedId}`, {
         method: 'PATCH',
-        body: {...values, direction: String(form.get('direction')) === detailReq.data?.direction ? undefined : values.direction},
+        body: values,
       })
       setEditingGroup(false)
       await detailReq.mutate()
@@ -480,10 +478,6 @@ function GroupsTab() {
           <form onSubmit={createGroup} noValidate className="mt-4 space-y-4">
             <Field label={t('groupCode')}><Input name="code" placeholder="ИМ1" minLength={2} maxLength={20} required /></Field>
             <Field label={t('title')}><Input name="title" placeholder="ИМ1 - Информатика-математика" minLength={2} maxLength={120} required /></Field>
-            <Field label={t('direction')}><Select name="direction" defaultValue="" required>
-              <option value="" disabled>Бағытты таңдаңыз</option>
-              {groupDirectionOptions(groupsReq.data?.items ?? []).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </Select></Field>
             <Field label={t('capacity')}><Input name="capacity" type="number" defaultValue={20} min={1} max={40} step={1} required /></Field>
             {error && <ErrorState message={error} />}
             <Button type="submit" disabled={savingGroup} className="w-full"><PlusCircle size={16} />{savingGroup ? t('loading') : t('create')}</Button>
@@ -528,10 +522,6 @@ function GroupsTab() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label={t('groupCode')}><Input name="code" defaultValue={detailReq.data.code} minLength={2} maxLength={20} required /></Field>
                   <Field label={t('title')}><Input name="title" defaultValue={detailReq.data.title} minLength={2} maxLength={120} required /></Field>
-                  <Field label={t('direction')}><Select name="direction" defaultValue={detailReq.data.direction} required>
-                    <option value="" disabled>Бағытты таңдаңыз</option>
-                    {groupDirectionOptions(groupsReq.data?.items ?? [], detailReq.data.direction).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </Select></Field>
                   <Field label={t('capacity')}><Input name="capacity" type="number" defaultValue={detailReq.data.capacity} min={1} max={40} step={1} required /></Field>
                 </div>
                 <div className="flex justify-end gap-2">
@@ -795,4 +785,9 @@ function Pagination({ page, total, perPage, onPage }: { page: number; total: num
     <span className="text-sm">{page} / {pages} · {total}</span>
     <Button variant="secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>Келесі</Button>
   </div>
+}
+
+function TemporaryPassword({value}: {value: string}) {
+  const [copied, setCopied] = useState(false)
+  return <div className="space-y-4"><p>Аккаунт құрылды. Бұл уақытша құпиясөз тек осы терезеде көрсетіледі. Алғашқы кіргенде оны ауыстыру қажет.</p><code className="block break-all rounded-lg bg-surface-muted p-4">{value}</code><Button onClick={async () => { await navigator.clipboard.writeText(value); setCopied(true) }}>Құпиясөзді көшіру</Button>{copied && <p role="status">Көшірілді</p>}</div>
 }

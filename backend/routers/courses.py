@@ -31,6 +31,7 @@ class CourseIn(BaseModel):
 
 
 class CourseSubjectIn(BaseModel):
+    confirm_subject_change: bool = False
     subject: str = Field(min_length=1, max_length=50)
 
 
@@ -191,11 +192,11 @@ async def set_course_ent_subject(course_id: int, data: CourseSubjectIn, user: di
     if data.subject not in SUBJECT_LABELS:
         raise HTTPException(status_code=422, detail="Дұрыс ҰБТ пәнін таңдаңыз")
     pool = await get_pool()
-    if course.get("ent_subject") and course["ent_subject"] != data.subject:
-        has_variants = await pool.fetchval("SELECT EXISTS(SELECT 1 FROM ent_variants WHERE course_id=$1)", course_id)
-        if has_variants:
-            raise HTTPException(status_code=409, detail="Пробный варианттар бар кезде курс пәнін өзгертуге болмайды")
-    await pool.execute("UPDATE courses SET ent_subject=$2 WHERE id=$1", course_id, data.subject)
+    async with pool.acquire() as conn, conn.transaction():
+        current = await conn.fetchval("SELECT ent_subject FROM courses WHERE id=$1 FOR UPDATE", course_id)
+        if current and current != data.subject and not data.confirm_subject_change:
+            raise HTTPException(409, "Пән өзгерісін растаңыз. Бұрынғы нұсқалар мен нәтижелер өзгермейді")
+        await conn.execute("UPDATE courses SET ent_subject=$2 WHERE id=$1", course_id, data.subject)
     return {"ok": True, "ent_subject": data.subject}
 
 

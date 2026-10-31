@@ -34,7 +34,7 @@ test('valid payload trims text, keeps capacity numeric and contains no stream', 
 test('blank code, title, direction and invalid capacity are rejected in Kazakh', () => {
   for (const code of ['', '  ', 'A', 'A'.repeat(21)]) assert.throws(() => validateGroupForm(form({code})), /Топ коды/)
   for (const title of ['', ' ', 'A'.repeat(121)]) assert.throws(() => validateGroupForm(form({title})), /Атауы/)
-  assert.throws(() => validateGroupForm(form({direction: ''})), /Бағыт/)
+  assert.equal('direction' in validateGroupForm(form({direction: ''})), false)
   for (const capacity of ['', '0', '-1', '1.5', '41', 'abc']) assert.throws(() => validateGroupForm(form({capacity})), /Орын саны/)
   for (const capacity of ['1', '40']) assert.equal(validateGroupForm(form({capacity})).capacity, Number(capacity))
 })

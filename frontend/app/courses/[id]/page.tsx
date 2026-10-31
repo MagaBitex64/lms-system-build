@@ -151,6 +151,8 @@ export default function CoursePage() {
   const [expandedGroupIds, setExpandedGroupIds] = useState<number[]>([])
   const [contentExpanded, setContentExpanded] = useState(true)
   const [entExpanded, setEntExpanded] = useState(true)
+  const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false)
+  const [subjectConfirmed, setSubjectConfirmed] = useState(false)
   const [entSubjectDraft, setEntSubjectDraft] = useState('')
   const [savingEntSubject, setSavingEntSubject] = useState(false)
   const [entSubjectError, setEntSubjectError] = useState<string | null>(null)
@@ -176,8 +178,9 @@ export default function CoursePage() {
     setSavingEntSubject(true)
     setEntSubjectError(null)
     try {
-      await api(`/courses/${courseId}/ent-subject`, { method: 'PUT', body: { subject } })
+      await api(`/courses/${courseId}/ent-subject`, { method: 'PUT', body: { subject, confirm_subject_change: subjectConfirmed } })
       await mutate()
+      setSubjectSettingsOpen(false)
     } catch (err) {
       setEntSubjectError((err as Error).message || t('errorOccurred'))
     } finally {
@@ -328,7 +331,7 @@ export default function CoursePage() {
             {isOwner && <div className={styles.heroActions}>
               <div className={styles.menuAnchor}>
                 <button type="button" className={styles.menuTrigger} aria-label={t('courseOptions')} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreVertical size={18} /></button>
-                <DropdownMenu open={menuOpen} onClose={() => setMenuOpen(false)} items={[{label:t('deleteCourse'),icon:<Trash size={16} />,destructive:true,onClick:()=>setDeleteModalOpen(true)}]} />
+                <DropdownMenu open={menuOpen} onClose={() => setMenuOpen(false)} items={[...(user?.role === 'admin' ? [{label:'Курс параметрлері',icon:<Settings2 size={16} />,onClick:()=>{setEntSubjectDraft(currentEntSubject);setSubjectConfirmed(false);setEntSubjectError(null);setSubjectSettingsOpen(true)}}] : []),{label:t('deleteCourse'),icon:<Trash size={16} />,destructive:true,onClick:()=>setDeleteModalOpen(true)}]} />
               </div>
               <Button asChild variant="outline"><Link href={`/teacher/courses/${courseId}/gradebook`}>{t('gradebook')}</Link></Button>
               <Button onClick={() => setAddOpen(true)}><PlusCircle size={16} />{t('addItem')}</Button>
@@ -456,7 +459,14 @@ export default function CoursePage() {
           <span className="flex-1"><h2>Пәндік сынақ ҰБТ</h2><p>Курс пәні бойынша нұсқаларды құру және редакциялау.</p></span>
           {entExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
         </button>
-        {entExpanded && user?.role === 'admin' && (
+        {entExpanded && <CourseEntVariants
+          courseId={courseId}
+          subject={course.ent_subject ?? null}
+          onConfigure={user?.role === 'admin' ? () => { setEntSubjectDraft(currentEntSubject); setSubjectConfirmed(false); setEntSubjectError(null); setSubjectSettingsOpen(true) } : undefined}
+        />}
+      </section>}
+
+        {user?.role === 'admin' && <Modal open={subjectSettingsOpen} onClose={() => setSubjectSettingsOpen(false)} title="Курс параметрлері">
           <Card className="space-y-3 border-primary/20 bg-primary-soft/30">
             <div>
               <p className="text-sm font-semibold text-foreground">Курс пәні</p>
@@ -469,7 +479,7 @@ export default function CoursePage() {
                 <Field label="Пәнді таңдаңыз">
                   <Select
                     value={entSubjectDraft || currentEntSubject}
-                    onChange={(event) => setEntSubjectDraft(event.target.value)}
+                    onChange={(event) => {setEntSubjectDraft(event.target.value); setSubjectConfirmed(false)}}
                   >
                     <option value="">Пәнді таңдаңыз</option>
                     {Object.entries(SUBJECT_NAMES).map(([key, label]) => (
@@ -481,19 +491,16 @@ export default function CoursePage() {
               <Button
                 type="button"
                 onClick={saveEntSubject}
-                disabled={savingEntSubject || !(entSubjectDraft || currentEntSubject)}
+                disabled={savingEntSubject || !(entSubjectDraft || currentEntSubject) || (!!currentEntSubject && entSubjectDraft !== currentEntSubject && !subjectConfirmed)}
               >
                 {savingEntSubject ? t('loading') : 'Пәнді сақтау'}
               </Button>
             </div>
+            <p className="text-sm text-muted">Өзгеріс тек жаңа нұсқаларға қолданылады. Бұрынғы нұсқалар, сұрақтар мен нәтижелер өзгермейді.</p>
+            {currentEntSubject && entSubjectDraft && entSubjectDraft !== currentEntSubject && <label className="flex gap-2 text-sm"><input type="checkbox" checked={subjectConfirmed} onChange={e => setSubjectConfirmed(e.target.checked)} />Курс пәнін өзгертуді растаймын. Бұрынғы нұсқалардың пәні сақталады.</label>}
             {entSubjectError && <ErrorState message={entSubjectError} />}
           </Card>
-        )}
-        {entExpanded && <CourseEntVariants
-          courseId={courseId}
-          subject={course.ent_subject ?? null}
-        />}
-      </section>}
+        </Modal>}
 
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title={t('addItem')}>
         <form onSubmit={createItem} className="space-y-4">

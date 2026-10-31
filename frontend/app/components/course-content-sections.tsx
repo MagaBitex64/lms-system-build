@@ -72,15 +72,15 @@ export default function CourseContentSections<T extends SectionMaterial>({course
       const open = expanded.includes(group.id)
       const panelId = `course-${courseId}-section-${group.id ?? 'ungrouped'}`
       return <section key={group.id ?? 'ungrouped'} className="min-w-0 rounded-xl border border-border bg-surface">
-        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface-muted p-3">
-          <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-semibold" aria-expanded={open} aria-controls={panelId}
+        <div className="flex flex-col gap-2 rounded-xl bg-surface-muted p-3 sm:flex-row sm:items-center">
+          <button type="button" className="grid w-full min-w-0 grid-cols-[18px_minmax(0,1fr)_16px] items-center gap-x-2 gap-y-1 text-left text-sm font-semibold sm:w-auto sm:flex-1 sm:grid-cols-[18px_minmax(0,1fr)_auto_16px]" aria-expanded={open} aria-controls={panelId}
             onClick={() => setExpanded(previous => open ? previous.filter(id => id !== group.id) : [...previous, group.id])}>
             <Folder size={18} className="shrink-0 text-primary" />
-            <span className="min-w-0 break-words">{group.title}</span>
-            <span className="shrink-0 text-xs font-normal text-muted">{group.items.length} материал</span>
-            {open ? <ChevronDown size={16} className="shrink-0" /> : <ChevronRight size={16} className="shrink-0" />}
+            <span className="col-start-2 row-start-1 min-w-0 whitespace-normal break-words">{group.title}</span>
+            <span className="col-start-2 row-start-2 whitespace-nowrap text-xs font-normal text-muted sm:col-start-3 sm:row-start-1">{group.items.length} материал</span>
+            {open ? <ChevronDown size={16} className="col-start-3 row-start-1 sm:col-start-4" /> : <ChevronRight size={16} className="col-start-3 row-start-1 sm:col-start-4" />}
           </button>
-          {isOwner && <div className="flex shrink-0 items-center gap-1">
+          {isOwner && <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => {setExpanded(previous => [...new Set([...previous, group.id])]);onAdd(group.id)}} aria-label={`${group.title}: элемент қосу`}><PlusCircle size={15} /></Button>
             {group.id != null && <>
               <Button size="sm" variant="ghost" disabled={busy || index === 0} aria-label={`${group.title}: жоғары жылжыту`} onClick={() => reorderSection(index, -1)}><ArrowUp size={15} /></Button>

@@ -43,7 +43,8 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.conn.execute(f'CREATE SCHEMA "{name}"')
         await self.conn.execute(f'SET LOCAL search_path TO "{name}"')
         await self.conn.execute(SCHEMA)
-        for migration in ENT_MIGRATIONS:
+        from scripts.proctor_migrations import PROCTOR_MIGRATIONS
+        for migration in ENT_MIGRATIONS + PROCTOR_MIGRATIONS:
             await self.conn.execute(migration)
         self.users = {}
         for role in ("admin", "student", "teacher"):
@@ -117,6 +118,7 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "session_id": "integration-test-session", "camera_active": True, "screen_active": True, "fullscreen": True,
         })
         self.assertEqual(activated.status_code, 200, activated.text)
+        self.proctor_token = activated.json()["proctor_token"]
         return aid, attempt_id
 
     async def test_full_exam_snapshots_autosave_permissions_and_140_score(self):
@@ -151,9 +153,11 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(history[14]["context_text"], history[15]["context_text"])
         self.assertEqual(history[0]["image_file_id"], image_id)
         violation = await self.client.post(f"/ent-trial/attempts/{attempt_id}/proctor/events", json={
-            "session_id": "integration-test-session", "event_type": "fullscreen_exit", "details": {},
+            "session_id": "integration-test-session", "proctor_token": self.proctor_token, "event_type": "fullscreen_exit", "details": {},
         })
         self.assertEqual(violation.json()["violations"], 0)
+        restored_session = await self.client.post(f"/ent-trial/attempts/{attempt_id}/proctor/activate", json={"session_id":"integration-test-session","camera_active":True,"screen_active":True,"fullscreen":True})
+        self.proctor_token = restored_session.json()["proctor_token"]
         self.actor = {**self.users["student"], "id": 999999}
         self.assertEqual((await self.client.get(f"/ent-trial/attempts/{attempt_id}")).status_code, 404)
         for role in ("teacher", "admin"):
@@ -166,11 +170,11 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         answers = [{"question_id": q["question_id"], "selected_option_id": q["options"][0]["id"],
                     "selected_option_ids": [q["options"][0]["id"]],
                     "matching_answer": {str(p["id"]): p["correct_option_id"] for p in q["matching_pairs"]}} for q in snapshot["questions"]]
-        response = await self.client.patch(f"/ent-trial/attempts/{attempt_id}/answers", json={"revision": 0, "answers": answers})
+        response = await self.client.patch(f"/ent-trial/attempts/{attempt_id}/answers", json={"session_id": "integration-test-session", "proctor_token": self.proctor_token, "revision": 0, "answers": answers})
         self.assertEqual(response.status_code, 200, response.text)
         restored = (await self.client.get(f"/ent-trial/attempts/{attempt_id}")).json()
         self.assertEqual(restored["questions"]["kaz_history"][0]["selected_option_id"], answers[0]["selected_option_id"])
-        response = await self.client.patch(f"/ent-trial/attempts/{attempt_id}/answers", json={"revision": 0, "answers": []})
+        response = await self.client.patch(f"/ent-trial/attempts/{attempt_id}/answers", json={"session_id": "integration-test-session", "proctor_token": self.proctor_token, "revision": 0, "answers": []})
         self.assertEqual(response.status_code, 409)
         self.actor = self.users["admin"]
         changed = copy.deepcopy(qs[0]); changed["prompt"] = "Changed after start"
@@ -179,10 +183,10 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.delete(f"/ent-trial/admin/variants/{vid}")).status_code, 409)
         self.assertEqual((await self.client.delete(f"/ent-trial/admin/accesses/{aid}")).status_code, 200)
         self.actor = self.users["student"]
-        response = await self.client.post(f"/ent-trial/attempts/{attempt_id}/submit", json={"revision": 1, "answers": []})
+        response = await self.client.post(f"/ent-trial/attempts/{attempt_id}/submit", json={"session_id": "integration-test-session", "proctor_token": self.proctor_token, "revision": 1, "answers": []})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["total_score"], 140)
-        repeated = await self.client.post(f"/ent-trial/attempts/{attempt_id}/submit", json={"revision": 0, "answers": []})
+        repeated = await self.client.post(f"/ent-trial/attempts/{attempt_id}/submit", json={"session_id": "integration-test-session", "proctor_token": self.proctor_token, "revision": 0, "answers": []})
         self.assertEqual(repeated.json()["total_score"], 140)
         result = (await self.client.get(f"/ent-trial/attempts/{attempt_id}")).json()
         self.assertEqual(result["scores"]["total"], 140)
@@ -208,7 +212,7 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         _, attempt_id = await self.start(vid)
         snapshot = ent.decoded(await self.conn.fetchval("SELECT snapshot FROM ent_trial_attempts WHERE id=$1", attempt_id))
         q = snapshot["questions"][0]
-        body = {"revision": 0, "answers": [{"question_id": q["question_id"], "selected_option_id": q["options"][0]["id"]}]}
+        body = {"session_id": "integration-test-session", "proctor_token": self.proctor_token, "revision": 0, "answers": [{"question_id": q["question_id"], "selected_option_id": q["options"][0]["id"]}]}
         self.assertEqual((await self.client.patch(f"/ent-trial/attempts/{attempt_id}/answers", json=body)).status_code, 200)
         await self.conn.execute("UPDATE ent_trial_attempts SET deadline_at=now()-interval '1 second' WHERE id=$1", attempt_id)
         body["revision"] = 1; body["answers"][0]["selected_option_id"] = q["options"][1]["id"]
@@ -408,8 +412,10 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         vid = await self.create_variant(); await self.fill_variant(vid)
         _, attempt_id = await self.start(vid)
         for event_type in ("tab_hidden", "fullscreen_exit", "camera_stopped"):
+            activated = await self.client.post(f"/ent-trial/attempts/{attempt_id}/proctor/activate", json={"session_id":"integration-test-session","camera_active":True,"screen_active":True,"fullscreen":True})
+            self.proctor_token = activated.json()["proctor_token"]
             response = await self.client.post(f"/ent-trial/attempts/{attempt_id}/proctor/events", json={
-                "session_id": "integration-test-session", "event_type": event_type, "details": {},
+                "session_id": "integration-test-session", "proctor_token": self.proctor_token, "event_type": event_type, "details": {},
             })
             self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["status"], "in_progress")

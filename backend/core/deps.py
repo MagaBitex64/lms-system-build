@@ -14,7 +14,7 @@ async def get_current_user(request: Request) -> dict:
     pool = await get_pool()
     user = await pool.fetchrow(
         """
-        SELECT id, email, full_name, role, is_blocked, auth_version, created_at
+        SELECT id, email, full_name, role, is_blocked, auth_version, must_change_password, created_at
         FROM users
         WHERE id = $1
         """,
@@ -26,6 +26,8 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     if user["is_blocked"]:
         raise HTTPException(status_code=403, detail="Account is blocked")
+    if user["must_change_password"] and request.url.path not in {"/auth/me", "/auth/setup-password", "/auth/logout"}:
+        raise HTTPException(403, "PASSWORD_SETUP_REQUIRED")
     return dict(user)
 
 

@@ -10,6 +10,7 @@ export interface User {
   email: string
   full_name: string
   role: Role
+  must_change_password?: boolean
   is_blocked: boolean
   created_at: string
 }

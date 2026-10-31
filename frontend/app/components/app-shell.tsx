@@ -58,6 +58,12 @@ function AuthedShell({ children }: { children: ReactNode }) {
     return <Spinner className="mt-40" />
   }
 
+  if (user.must_change_password && pathname !== '/auth/setup-password') {
+    if (typeof window !== 'undefined') window.location.replace('/auth/setup-password')
+    return <Spinner className="mt-40" />
+  }
+  if (pathname === '/auth/setup-password') return <>{children}</>
+
   // The active ENT attempt has its own distraction-free shell. Authentication
   // still happens here, but the regular dashboard navigation must not occupy
   // the screen while the student is taking the exam.

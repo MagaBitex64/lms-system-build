@@ -43,8 +43,8 @@ export default function LoginPage() {
 
     setBusy(true)
     try {
-      await login(email, password, rememberMe)
-      router.replace('/dashboard')
+      const user = await login(email, password, rememberMe)
+      router.replace(user.must_change_password ? '/auth/setup-password' : '/dashboard')
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : t('errorOccurred')
       if (errorMessage.includes('Invalid') || errorMessage.includes('invalid')) {

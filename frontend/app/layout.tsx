@@ -5,7 +5,8 @@ import 'katex/dist/katex.min.css'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Fenomen School - Оқу платформасы',
+  title: 'Fenomen School — Оқу платформасы',
+  icons: {icon: [{url: '/favicon.ico', sizes: '16x16 32x32 48x48', type: 'image/x-icon'}]},
   description: 'Курстар, сабақтар, тесттер, тапсырмалар және бағалау жүйесіне арналған заманауи оқу платформасы.',
 }
 

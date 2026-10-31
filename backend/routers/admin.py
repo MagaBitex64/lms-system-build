@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, EmailStr, Field, field_validator
 import re
+import secrets
 
 from core.db import get_pool
 from core.config import APP_ENV, PRODUCTION_ADMIN_EMAIL
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 class UserCreateIn(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str | None = Field(default=None, min_length=8, max_length=128)
     full_name: str = Field(min_length=2, max_length=120)
     role: str = Field(pattern="^(student|teacher|admin)$")
 
@@ -59,7 +60,7 @@ class GroupValidation(BaseModel):
 class GroupIn(GroupValidation):
     code: str = Field(min_length=2, max_length=20)
     title: str = Field(min_length=2, max_length=120)
-    direction: str = Field(min_length=2, max_length=120)
+    direction: str | None = Field(default=None, min_length=2, max_length=120)
     stream: str | None = Field(default=None, min_length=1, max_length=20)
     capacity: int = Field(default=20, ge=1, le=40)
 
@@ -181,25 +182,27 @@ async def list_users(
 
 
 @router.post("/users")
-async def create_user(data: UserCreateIn, user: dict = Depends(require_admin)):
+async def create_user(data: UserCreateIn, response: Response, user: dict = Depends(require_admin)):
     if APP_ENV == 'production' and data.role == 'admin':
         raise HTTPException(422, 'Production has a single administrator')
     pool = await get_pool()
     existing = await pool.fetchrow("SELECT 1 FROM users WHERE email = $1", data.email.lower())
     if existing:
         raise HTTPException(status_code=409, detail="Email is already registered")
+    response.headers["Cache-Control"] = "no-store"
+    temporary_password = secrets.token_urlsafe(24)
     row = await pool.fetchrow(
         """
-        INSERT INTO users (email, password_hash, full_name, role)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO users (email, password_hash, full_name, role, must_change_password)
+        VALUES ($1, $2, $3, $4, TRUE)
         RETURNING id, email, full_name, role, is_blocked, created_at
         """,
         data.email.lower(),
-        await hash_password_async(data.password),
+        await hash_password_async(temporary_password),
         data.full_name.strip(),
         data.role,
     )
-    return public_user(row)
+    return public_user(row) | {"temporary_password": temporary_password}
 
 
 @router.patch("/users/{user_id}")
@@ -343,7 +346,7 @@ async def create_group(data: GroupIn, user: dict = Depends(require_admin)):
             """,
             data.code.strip().upper(),
             data.title.strip(),
-            data.direction.strip(),
+            data.direction.strip() if data.direction else None,
             data.stream or (re.search(r'\d+$', data.code).group() if re.search(r'\d+$', data.code) else data.code.upper()),
             data.capacity,
         )

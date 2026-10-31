@@ -298,7 +298,7 @@ class ReleaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_http_limits_password_validation_rate_limits_and_logout(self):
         anon=await self.client.post('/files/upload',content=b'x'*100,headers={'Content-Type':'multipart/form-data; boundary=x'});self.assertEqual(anon.status_code,401)
         large=await self.client.post('/leads',content=b'x'*(2*1024*1024+1));self.assertEqual(large.status_code,413)
-        long=await self.request('POST','/admin/users','admin',json={'email':'long@example.com','password':'я'*40,'full_name':'long','role':'student'});self.assertEqual(long.status_code,422,long.text)
+        long=await self.request('POST','/admin/users','admin',json={'email':'long@example.com','password':'я'*40,'full_name':'long','role':'student'});self.assertEqual(long.status_code,200,long.text);self.assertNotEqual(long.json()['temporary_password'],'я'*40)
         for _ in range(10):r=await self.client.post('/auth/login',json={'email':'student@example.com','password':'wrong'})
         self.assertEqual(r.status_code,401,r.text)
         r=await self.client.post('/auth/login',json={'email':'student@example.com','password':'wrong'});self.assertEqual(r.status_code,429,r.text)

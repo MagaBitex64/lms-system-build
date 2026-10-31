@@ -57,6 +57,7 @@ export default function EntTestPage() {
   const mediaRef = useRef<MediaStream | null>(null)
   const screenRef = useRef<MediaStream | null>(null)
   const sessionId = useRef('')
+  const proctorToken = useRef('')
   const initialized = useRef<number | null>(null)
   const revision = useRef(0)
   const sequence = useRef(0)
@@ -72,9 +73,15 @@ export default function EntTestPage() {
   const cameraRequired = data?.camera_required ?? true
 
   useEffect(() => {
+    sessionId.current = crypto.randomUUID(); proctorToken.current = ''
+    setCameraReady(false); setCameraPrepared(false); setScreenPrepared(false)
+    mediaRef.current?.getTracks().forEach(track => track.stop())
+    screenRef.current?.getTracks().forEach(track => track.stop())
+  }, [id])
+
+  useEffect(() => {
     if (!data) return
-    sessionId.current = sessionStorage.getItem(`ent-proctor-${data.id}`) || crypto.randomUUID()
-    sessionStorage.setItem(`ent-proctor-${data.id}`, sessionId.current)
+    if (!sessionId.current) sessionId.current = crypto.randomUUID()
     if (initialized.current === data.id || !Object.values(data.questions).some(questions => questions.length)) return
     initialized.current = data.id; revision.current = data.revision
     setSubject(Object.keys(data.questions)[0] ?? 'kaz_history'); setIndex(0); setViolations(data.proctor_violations ?? 0)
@@ -95,12 +102,13 @@ export default function EntTestPage() {
   const reportProctor = useCallback(async (event_type: string, details: Record<string, unknown> = {}) => {
     if (!sessionId.current) return
     try {
-      const result = await api<{ status: string; violations: number; terminated: boolean }>(`/ent-trial/attempts/${id}/proctor/events`, {
-        method: 'POST', body: { session_id: sessionId.current, event_type, details },
+      const result = await api<{ status: string; violations: number; terminated: boolean; requires_reactivation?: boolean }>(`/ent-trial/attempts/${id}/proctor/events`, {
+        method: 'POST', body: { session_id: sessionId.current, proctor_token: proctorToken.current, event_type, details },
       })
+      if (result.requires_reactivation) { proctorToken.current = ''; setCameraReady(false) }
       setViolations(result.violations)
       if (result.status === 'submitted' || result.terminated) router.replace(`/ent-trial/${id}/result`)
-    } catch (e) { if (event_type === 'heartbeat') setProctorError((e as Error).message) }
+    } catch (e) { if (event_type === 'heartbeat') { proctorToken.current = ''; setCameraReady(false); setProctorError((e as Error).message) } }
   }, [id, router])
 
   async function prepareCamera() {
@@ -140,7 +148,9 @@ export default function EntTestPage() {
       await document.documentElement.requestFullscreen()
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
       if (!document.fullscreenElement) throw new Error('Толық экран режимі қосылмады. Қайтадан көріңіз.')
-      await api(`/ent-trial/attempts/${id}/proctor/activate`, { method: 'POST', body: { session_id: sessionId.current, camera_active: mediaRef.current?.active ?? false, screen_active: screenRef.current.active, fullscreen: true } })
+      const activated = await api<{proctor_token: string}>(`/ent-trial/attempts/${id}/proctor/activate`, { method: 'POST', body: { session_id: sessionId.current, camera_active: mediaRef.current?.active ?? false, screen_active: screenRef.current.active, fullscreen: true } })
+      proctorToken.current = activated.proctor_token
+      setReentryRequired(false); absenceActive.current = false
       setCameraReady(true)
       await mutate()
     } catch (e) {
@@ -157,10 +167,13 @@ export default function EntTestPage() {
       await document.documentElement.requestFullscreen()
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
       if (!document.fullscreenElement) throw new Error('Толық экран режимі қосылмады. Қайтадан көріңіз.')
-      await api(`/ent-trial/attempts/${id}/proctor/activate`, { method: 'POST', body: { session_id: sessionId.current, camera_active: mediaRef.current?.active ?? false, screen_active: screenRef.current.active, fullscreen: true } })
+      const activated = await api<{proctor_token: string}>(`/ent-trial/attempts/${id}/proctor/activate`, { method: 'POST', body: { session_id: sessionId.current, camera_active: mediaRef.current?.active ?? false, screen_active: screenRef.current.active, fullscreen: true } })
+      proctorToken.current = activated.proctor_token
       await reportProctor('absence_end')
       absenceActive.current = false
       setReentryRequired(false)
+      proctorToken.current = activated.proctor_token
+      setReentryRequired(false); absenceActive.current = false
       setCameraReady(true)
       await mutate()
     } catch (e) {
@@ -170,8 +183,9 @@ export default function EntTestPage() {
   }
 
   useEffect(() => {
-    if (!data || data.requires_proctor_setup || data.status !== 'in_progress' || (data.proctor_status === 'active' && cameraRequired && !cameraReady)) return
+    if (!data || data.requires_proctor_setup || data.status !== 'in_progress' || !cameraReady) return
     const startAbsence = () => {
+      setCameraReady(false)
       if (absenceActive.current) return
       absenceActive.current = true
       setReentryRequired(true)
@@ -179,7 +193,7 @@ export default function EntTestPage() {
     }
     const visibility = () => { if (document.hidden) startAbsence() }
     const blur = () => { window.setTimeout(() => { if (!document.hasFocus()) startAbsence() }, 400) }
-    const fullscreen = () => { if (!document.fullscreenElement) startAbsence() }
+    const fullscreen = () => { if (!document.fullscreenElement) { setCameraReady(false); startAbsence() } }
     const block = (event: Event) => { event.preventDefault(); void reportProctor(event.type === 'contextmenu' ? 'context_menu' : event.type) }
     const shortcut = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
@@ -191,7 +205,7 @@ export default function EntTestPage() {
     document.addEventListener('fullscreenchange', fullscreen); document.addEventListener('copy', block)
     document.addEventListener('cut', block); document.addEventListener('paste', block); document.addEventListener('contextmenu', block)
     document.addEventListener('keydown', shortcut)
-    const heartbeat = window.setInterval(() => { void reportProctor('heartbeat', { fullscreen: Boolean(document.fullscreenElement), camera: mediaRef.current?.active ?? false, screen: screenRef.current?.active ?? false }) }, 15000)
+    const heartbeat = window.setInterval(() => { void reportProctor('heartbeat', { fullscreen: Boolean(document.fullscreenElement), camera: !!mediaRef.current?.active && mediaRef.current.getVideoTracks().every(t => t.enabled && !t.muted), screen: !!screenRef.current?.active && screenRef.current.getVideoTracks().every(t => t.enabled && !t.muted) }) }, 15000)
     return () => {
       document.removeEventListener('visibilitychange', visibility); window.removeEventListener('blur', blur)
       document.removeEventListener('fullscreenchange', fullscreen); document.removeEventListener('copy', block)
@@ -204,18 +218,25 @@ export default function EntTestPage() {
 
   useEffect(() => () => { mediaRef.current?.getTracks().forEach(track => track.stop()); screenRef.current?.getTracks().forEach(track => track.stop()) }, [])
 
+  function requirementsReady() {
+    const live = (stream: MediaStream | null) => !!stream?.active && stream.getVideoTracks().every(track => track.readyState === 'live' && track.enabled && !track.muted)
+    return !!proctorToken.current && !!document.fullscreenElement && live(screenRef.current) && (!cameraRequired || live(mediaRef.current))
+  }
+
   const save = useCallback(async () => {
+    if (!requirementsReady()) return
     if (inFlight.current) { await inFlight.current; return }
     if (conflict.current || submissionLock.current || sequence.current === savedSequence.current) return
     const current = sequence.current
     setSaveStatus('Сақталуда…'); setSaveError('')
     const request = (async () => {
       try {
-        const res = await api<SaveResult>(`/ent-trial/attempts/${id}/answers`, { method: 'PATCH', body: { revision: revision.current, answers: payload() } })
+        const res = await api<SaveResult>(`/ent-trial/attempts/${id}/answers`, { method: 'PATCH', body: { session_id: sessionId.current, proctor_token: proctorToken.current, revision: revision.current, answers: payload() } })
         revision.current = res.revision; savedSequence.current = current
         setSaveStatus(sequence.current === current ? 'Барлық жауап сақталды' : 'Сақталуда…')
         if (res.status === 'submitted') router.replace(`/ent-trial/${id}/result`)
       } catch (e) {
+        if (e instanceof ApiError && e.status === 403) { proctorToken.current = ''; setCameraReady(false) }
         if (e instanceof ApiError && e.status === 409) conflict.current = true
         setSaveError((e as Error).message); setSaveStatus('Сақтау орындалмады')
       }
@@ -225,7 +246,7 @@ export default function EntTestPage() {
   }, [id, payload, router])
 
   useEffect(() => {
-    if (!data || data.status !== 'in_progress' || data.requires_proctor_setup || (data.proctor_status === 'active' && cameraRequired && !cameraReady) || initialized.current !== data.id) return
+    if (!data || data.status !== 'in_progress' || data.requires_proctor_setup || !cameraReady || initialized.current !== data.id) return
     const timer = window.setTimeout(() => { void save() }, 350)
     // Periodic retry also saves edits made while a previous request was in flight.
     const retry = window.setInterval(() => { void save() }, 5000)
@@ -239,16 +260,17 @@ export default function EntTestPage() {
   }, [])
 
   const submit = useCallback(async (confirmFirst: boolean) => {
-    if (submissionLock.current || data?.status !== 'in_progress') return
+    if (submissionLock.current || data?.status !== 'in_progress' || !requirementsReady()) return
     const missing = all.filter(q => !answered(q, latest.current[q.question_id] ?? empty())).length
     if (confirmFirst && !confirm(`Тестті аяқтайсыз ба? Толық жауап берілмеген сұрақтар: ${missing}. Аяқтағаннан кейін жауаптарды өзгерту мүмкін емес.`)) return
     submissionLock.current = true; setSubmitting(true); setSaveError('')
     if (inFlight.current) await inFlight.current
     try {
-      const res = await api<SaveResult>(`/ent-trial/attempts/${id}/submit`, { method: 'POST', body: { revision: revision.current, answers: payload() } })
+      const res = await api<SaveResult>(`/ent-trial/attempts/${id}/submit`, { method: 'POST', body: { session_id: sessionId.current, proctor_token: proctorToken.current, revision: revision.current, answers: payload() } })
       revision.current = res.revision; savedSequence.current = sequence.current
       router.replace(`/ent-trial/${id}/result`)
     } catch (e) {
+      if (e instanceof ApiError && e.status === 403) { proctorToken.current = ''; setCameraReady(false) }
       setSaveError((e as Error).message); submissionLock.current = false; setSubmitting(false)
     }
   }, [all, data?.status, id, payload, router])
@@ -256,7 +278,7 @@ export default function EntTestPage() {
   useEffect(() => { if (timeLeft === 0 && data?.status === 'in_progress') void submit(false) }, [timeLeft, data?.status, submit])
 
   function change(qid: number, answer: Answer) {
-    if (submitting || timeLeft === 0 || conflict.current) return
+    if (submitting || timeLeft === 0 || conflict.current || !requirementsReady()) return
     const next = { ...latest.current, [qid]: answer }
     latest.current = next; sequence.current += 1; setAnswers(next); setSaveStatus('Сақталуда…')
   }
@@ -267,9 +289,10 @@ export default function EntTestPage() {
   if (isLoading || !data) return error ? <ErrorState message={error.message} /> : <Spinner className="mt-20" />
   if (error) return <ErrorState message={error.message} />
   if (data.status === 'submitted') return <Spinner />
-  if (data.requires_proctor_setup || (data.proctor_status === 'active' && cameraRequired && !cameraReady)) return <div className="mx-auto max-w-2xl py-10"><div className="space-y-5 rounded-2xl border border-border bg-surface p-6 sm:p-8">
+  if (data.requires_proctor_setup || !cameraReady) return <div className="mx-auto max-w-2xl py-10"><div className="space-y-5 rounded-2xl border border-border bg-surface p-6 sm:p-8">
     <div><p className="text-sm font-semibold text-primary">Прокторингті тексеру</p><h1 className="mt-1 text-2xl font-bold">{data.title}</h1></div>
     <p className="text-muted">Тест уақыты {cameraRequired ? 'камера, ' : ''}бүкіл экранды бөлісу және толық экран режимі қосылғаннан кейін ғана басталады.</p>
+    {data.deadline_at && <p role="alert" className="text-sm text-warning-foreground">Прокторингті қайта қосыңыз. Сақталған жауаптар сақталады, таймер тоқтамайды.</p>}
     <ul className="list-disc space-y-2 pl-5 text-sm">{cameraRequired && <li>Алдымен камераны тексеріңіз, содан кейін «Бүкіл экран» нұсқасын таңдаңыз.</li>}<li>{cameraRequired ? 'Камера, ' : ''}экран бөлісу және толық экран режимі тест барысында міндетті.</li><li>Қойынды немесе терезе ауысса, оның ұзақтығы әкімші журналында сақталады.</li><li>Көшіру, қою, оң жақ мәзір және тыйым салынған пернелер бұғатталады.</li>{cameraRequired && <li>Камера мен экран бейнесі жазылмайды және серверге жіберілмейді; браузер тек олардың қосулы екенін бақылайды.</li>}</ul>
     {cameraRequired && <video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full rounded-xl bg-black object-cover" />}
     {proctorError && <p role="alert" className="rounded-xl border border-danger p-3 text-sm text-danger">{proctorError}</p>}

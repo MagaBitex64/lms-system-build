@@ -14,7 +14,7 @@ from core.config import (
 )
 from core.db import get_pool
 from core.deps import get_current_user
-from core.security import create_access_token, hash_password_async, verify_password_async
+from core.security import create_access_token, hash_password_async, verify_password_async, hash_personal_password
 from core.rate_limit import check_rate_limit, client_key
 from services.email import send_password_reset_email
 
@@ -27,7 +27,7 @@ GENERIC_RESET_MESSAGE = (
 
 class LoginIn(BaseModel):
     email: EmailStr
-    password: str = Field(max_length=128)
+    password: str = Field(max_length=1024)
 
 
 class ForgotPasswordIn(BaseModel):
@@ -47,6 +47,7 @@ def public_user(u) -> dict:
         "role": u["role"],
         "is_blocked": u["is_blocked"],
         "created_at": str(u["created_at"]),
+        "must_change_password": bool(dict(u).get("must_change_password", False)),
     }
 
 
@@ -189,7 +190,7 @@ async def reset_password(data: ResetPasswordIn, request: Request):
             await conn.execute(
                 """
                 UPDATE users
-                SET password_hash = $1, auth_version = auth_version + 1
+                SET password_hash = $1, auth_version = auth_version + 1, must_change_password = FALSE
                 WHERE id = $2
                 """,
                 password_hash,
@@ -217,3 +218,32 @@ async def logout(user: dict = Depends(get_current_user)):
     pool = await get_pool()
     await pool.execute('UPDATE users SET auth_version=auth_version+1 WHERE id=$1', user['id'])
     return {'ok': True}
+
+
+class SetupPasswordIn(BaseModel):
+    new_password: str = Field(min_length=12, max_length=1024)
+    confirmation: str = Field(max_length=1024)
+
+
+@router.post("/setup-password")
+async def setup_password(data: SetupPasswordIn, request: Request, user: dict = Depends(get_current_user)):
+    await check_rate_limit('setup-ip:' + client_key(request), 30, 300)
+    await check_rate_limit('setup-user:' + str(user['id']), 10, 300)
+    if data.new_password != data.confirmation:
+        raise HTTPException(422, "Құпиясөздер сәйкес келмейді")
+    if data.new_password.casefold() in {"password1234", "123456789012", "qwerty123456", "1234567890123456"}:
+        raise HTTPException(422, "Бұл құпиясөз тым қарапайым")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            current = await conn.fetchrow('SELECT * FROM users WHERE id=$1 FOR UPDATE', user['id'])
+            if not current or current['is_blocked'] or current['auth_version'] != user['auth_version']:
+                raise HTTPException(401, "Сессия жарамсыз. Қайта кіріңіз")
+            if not current['must_change_password']:
+                raise HTTPException(409, "Құпиясөз бұрын орнатылған")
+            if await verify_password_async(data.new_password, current['password_hash']):
+                raise HTTPException(422, "Жаңа құпиясөз уақытша құпиясөзден өзгеше болуы керек")
+            password_hash = await hash_personal_password(data.new_password)
+            updated = await conn.fetchrow("UPDATE users SET password_hash=$1, must_change_password=FALSE, auth_version=auth_version+1 WHERE id=$2 RETURNING *", password_hash, user['id'])
+            await conn.execute('UPDATE password_reset_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL', user['id'])
+    return {"token": create_access_token(updated['id'], updated['role'], updated['auth_version']), "user": public_user(updated)}
