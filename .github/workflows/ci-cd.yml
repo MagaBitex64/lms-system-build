@@ -1,0 +1,166 @@
+name: LMS CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lms-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  backend-tests:
+    name: Backend tests on disposable PostgreSQL
+    runs-on: ubuntu-latest
+    container: python:3.12
+    services:
+      auditdb:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: auditdb
+          POSTGRES_USER: audit
+          POSTGRES_PASSWORD: audit
+        options: >-
+          --health-cmd "pg_isready -U audit -d auditdb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://audit:audit@auditdb:5432/auditdb
+      RUN_RELEASE_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --no-cache-dir -r requirements.lock
+      - name: Run backend test suite
+        working-directory: backend
+        run: python -m unittest discover -s tests -v
+
+  frontend-tests:
+    name: Frontend tests and production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Run frontend tests
+        working-directory: frontend
+        run: node --test tests/*.cjs
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://ci.invalid/api
+        run: pnpm build
+
+  production-config:
+    name: Read current public API address
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_PRODUCTION_DEPLOY == 'true' }}
+    needs: [backend-tests, frontend-tests]
+    runs-on: ubuntu-latest
+    outputs:
+      api_base_url: ${{ steps.read.outputs.api_base_url }}
+    steps:
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$DEPLOY_SSH_KEY" && test -n "$DEPLOY_KNOWN_HOSTS"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Read API URL from the running frontend container
+        id: read
+        run: |
+          value=$(ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes root@93.170.73.162 \
+            "docker inspect app-frontend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^NEXT_PUBLIC_API_BASE_URL=//p' | head -n 1")
+          printf 'api_base_url=%s\n' "$value" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Build and publish immutable images
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_PRODUCTION_DEPLOY == 'true' }}
+    needs: [backend-tests, frontend-tests, production-config]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: ghcr.io/magabitex64/lms-system-build-backend:sha-${{ github.sha }}
+      - name: Build and publish frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=${{ needs.production-config.outputs.api_base_url }}
+          tags: ghcr.io/magabitex64/lms-system-build-frontend:sha-${{ github.sha }}
+
+  deploy:
+    name: Back up and deploy production
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_PRODUCTION_DEPLOY == 'true' }}
+    needs: [publish, production-config]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Copy deployment files
+        run: |
+          scp -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes docker-compose.deploy.yml deploy/release.sh root@93.170.73.162:/opt/lms/app/
+      - name: Back up, pull and deploy
+        env:
+          API_BASE_URL: ${{ needs.production-config.outputs.api_base_url }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          printf 'BACKEND_IMAGE=%s\nFRONTEND_IMAGE=%s\nNEXT_PUBLIC_API_BASE_URL=%s\n' \
+            "ghcr.io/magabitex64/lms-system-build-backend:sha-$SHA" \
+            "ghcr.io/magabitex64/lms-system-build-frontend:sha-$SHA" \
+            "$API_BASE_URL" > .deploy.env
+          scp -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes .deploy.env root@93.170.73.162:/opt/lms/app/.deploy.env.next
+          printf '%s' "$GHCR_TOKEN" | ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes root@93.170.73.162 \
+            "docker login ghcr.io --username '$GHCR_USER' --password-stdin && cd /opt/lms/app && mv .deploy.env.next .deploy.env && BACKUP_DIR=/opt/lms/backups sh deploy/release.sh; result=\$?; docker logout ghcr.io >/dev/null 2>&1 || true; exit \$result"

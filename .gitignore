@@ -23,3 +23,8 @@ __pycache__/
 
 backend/uploads/
 .secrets/
+
+# CI deployment state
+.deploy.env
+.deploy.env.next
+.rollback.env
