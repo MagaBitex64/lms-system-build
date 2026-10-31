@@ -1,0 +1,39 @@
+name: Production connection check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Read-only VPS and Compose check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$DEPLOY_SSH_KEY" && test -n "$DEPLOY_KNOWN_HOSTS"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Check running app services (read only)
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes root@93.170.73.162 bash -s <<'REMOTE'
+          set -eu
+          cd /opt/lms/app
+          docker compose -p app --env-file .env -f docker-compose.yml config --quiet
+          for service in backend frontend db; do
+            container=$(docker compose -p app --env-file .env -f docker-compose.yml ps -q "$service")
+            test -n "$container"
+            state=$(docker inspect --format '{{.State.Status}}' "$container")
+            test "$state" = running
+            printf '%s: %s\n' "$service" "$state"
+          done
+          REMOTE
