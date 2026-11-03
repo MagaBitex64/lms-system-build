@@ -36,4 +36,53 @@ jobs:
             test "$state" = running
             printf '%s: %s\n' "$service" "$state"
           done
+          echo 'EXAM_STATUS_READ_ONLY_V1'
+          for sample in 1 2; do
+            echo "SAMPLE=$sample"
+            docker compose -p app --env-file .env -f docker-compose.yml exec -T db sh -c 'export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=10000 -c lock_timeout=1000"; exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At' <<'SQL'
+          BEGIN READ ONLY;
+          WITH e AS (
+            SELECT t.id,t.status,t.started_at,t.activated_at,t.deadline_at,t.submitted_at,
+              t.proctor_status,t.proctor_last_seen_at,t.response_revision,
+              GREATEST(t.proctor_last_seen_at,(SELECT max(p.created_at) FROM ent_proctor_events p WHERE p.attempt_id=t.id)) activity_at
+            FROM ent_trial_attempts t
+          ), q AS (
+            SELECT s.quiz_id,s.student_id,s.attempt_number,s.started_at,s.deadline_at,s.response_revision,
+              EXISTS(SELECT 1 FROM quiz_attempts a WHERE a.quiz_id=s.quiz_id AND a.student_id=s.student_id AND a.attempt_number=s.attempt_number) completed
+            FROM quiz_starts s
+          )
+          SELECT json_build_object(
+            'observed_at',now(),
+            'ent', (SELECT json_build_object(
+              'total',count(*),'completed',count(*) FILTER(WHERE status='submitted'),
+              'in_progress',count(*) FILTER(WHERE status='in_progress'),
+              'guard_blockers',count(*) FILTER(WHERE status='in_progress' AND (deadline_at IS NULL OR deadline_at>now())),
+              'valid_lease_heartbeat_45s',count(*) FILTER(WHERE status='in_progress' AND deadline_at>now() AND proctor_last_seen_at>now()-interval '45 seconds' AND proctor_status='active'),
+              'recent_activity_5m',count(*) FILTER(WHERE status='in_progress' AND (deadline_at IS NULL OR deadline_at>now()) AND activity_at>now()-interval '5 minutes'),
+              'expired_unsubmitted',count(*) FILTER(WHERE status='in_progress' AND deadline_at<=now()),
+              'no_deadline',count(*) FILTER(WHERE status='in_progress' AND deadline_at IS NULL),
+              'latest_pending_deadline',max(deadline_at) FILTER(WHERE status='in_progress'),
+              'latest_pending_activity',max(activity_at) FILTER(WHERE status='in_progress')) FROM e),
+            'quiz', (SELECT json_build_object(
+              'starts',count(*),'completed_starts',count(*) FILTER(WHERE completed),
+              'completed_results',(SELECT count(*) FROM quiz_attempts),
+              'guard_blockers',count(*) FILTER(WHERE NOT completed AND (deadline_at IS NULL OR deadline_at>now())),
+              'expired_unsubmitted',count(*) FILTER(WHERE NOT completed AND deadline_at<=now()),
+              'no_deadline',count(*) FILTER(WHERE NOT completed AND deadline_at IS NULL),
+              'latest_pending_deadline',max(deadline_at) FILTER(WHERE NOT completed),
+              'activity_timestamp_columns',(SELECT COALESCE(json_agg(column_name),'[]') FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='quiz_starts' AND column_name IN ('updated_at','last_activity_at','last_saved_at','last_seen_at'))) FROM q),
+            'pending_ent', (SELECT COALESCE(json_agg(row_to_json(x)),'[]') FROM (SELECT * FROM e WHERE status='in_progress' ORDER BY id LIMIT 100) x),
+            'pending_quiz', (SELECT COALESCE(json_agg(row_to_json(x)),'[]') FROM (
+              SELECT md5(quiz_id::text||':'||student_id::text||':'||attempt_number::text) attempt_ref,
+                started_at,deadline_at,response_revision FROM q WHERE NOT completed ORDER BY started_at LIMIT 100) x)
+          );
+          COMMIT;
+          SQL
+            if test "$sample" = 1; then sleep 60; fi
+          done
+          for service in backend frontend; do
+            container=$(docker compose -p app --env-file .env -f docker-compose.yml ps -q "$service")
+            printf '%s image: ' "$service"
+            docker inspect --format '{{.Config.Image}}' "$container"
+          done
           REMOTE
