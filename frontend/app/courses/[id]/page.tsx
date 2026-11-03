@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useState, useRef, type FormEvent, type ReactNode } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import useSWR from 'swr'
+import useSWR, { useSWRConfig } from 'swr'
 import {
   ArrowLeft,
   ArrowRight,
@@ -132,6 +132,12 @@ export default function CoursePage() {
   const id = params.id as string
   const { data: course, error, isLoading, mutate } = useSWR<Course>(id ? `/courses/${id}` : null, fetcher)
 
+  const { mutate: refreshCache } = useSWRConfig()
+  const [publicationOpen, setPublicationOpen] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const publicationBusy = useRef(false)
+  const [publicationError, setPublicationError] = useState<string | null>(null)
+  const [publicationSuccess, setPublicationSuccess] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [itemType, setItemType] = useState<ItemType>('lesson')
   const [itemTitle, setItemTitle] = useState('')
@@ -171,6 +177,37 @@ export default function CoursePage() {
   const isOwner = !!course.is_owner
   const courseId = course.id
   const currentEntSubject = course.ent_subject || ''
+
+  async function togglePublication() {
+    if (!course || !isOwner || publicationBusy.current) return
+    publicationBusy.current = true
+    setPublishing(true)
+    setPublicationError(null)
+    setPublicationSuccess(null)
+    try {
+      const updated = await api<Course>(`/courses/${course.id}`, {
+        method: 'PUT',
+        body: {
+          title: course.title,
+          description: course.description,
+          announcement: course.announcement ?? '',
+          is_published: !course.is_published,
+        },
+      })
+      await mutate({ ...course, is_published: updated.is_published }, { revalidate: false })
+      setPublicationOpen(false)
+      setPublicationSuccess(updated.is_published ? 'Курс жарияланды.' : 'Курс жариялаудан алынды.')
+      // Refresh catalog, dashboard and course caches without repeating the mutation.
+      void refreshCache(key => typeof key === 'string' &&
+        (key.startsWith('/courses') || key.startsWith('/dashboard') || key.startsWith('/teacher'))
+      ).catch(() => {})
+    } catch (err) {
+      setPublicationError((err as Error).message || 'Курс күйін өзгерту мүмкін болмады. Қайта көріңіз.')
+    } finally {
+      publicationBusy.current = false
+      setPublishing(false)
+    }
+  }
 
   async function saveEntSubject() {
     const subject = entSubjectDraft || currentEntSubject
@@ -331,7 +368,7 @@ export default function CoursePage() {
             {isOwner && <div className={styles.heroActions}>
               <div className={styles.menuAnchor}>
                 <button type="button" className={styles.menuTrigger} aria-label={t('courseOptions')} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreVertical size={18} /></button>
-                <DropdownMenu open={menuOpen} onClose={() => setMenuOpen(false)} items={[...(user?.role === 'admin' ? [{label:'Курс параметрлері',icon:<Settings2 size={16} />,onClick:()=>{setEntSubjectDraft(currentEntSubject);setSubjectConfirmed(false);setEntSubjectError(null);setSubjectSettingsOpen(true)}}] : []),{label:t('deleteCourse'),icon:<Trash size={16} />,destructive:true,onClick:()=>setDeleteModalOpen(true)}]} />
+                <DropdownMenu open={menuOpen} onClose={() => setMenuOpen(false)} items={[{label:course.is_published ? 'Жариялаудан алып тастау' : 'Жариялау',icon:course.is_published ? <EyeOff size={16} /> : <Eye size={16} />,onClick:()=>{setPublicationError(null);setPublicationOpen(true)}},...(user?.role === 'admin' ? [{label:'Курс параметрлері',icon:<Settings2 size={16} />,onClick:()=>{setEntSubjectDraft(currentEntSubject);setSubjectConfirmed(false);setEntSubjectError(null);setSubjectSettingsOpen(true)}}] : []),{label:t('deleteCourse'),icon:<Trash size={16} />,destructive:true,onClick:()=>setDeleteModalOpen(true)}]} />
               </div>
               <Button asChild variant="outline"><Link href={`/teacher/courses/${courseId}/gradebook`}>{t('gradebook')}</Link></Button>
               <Button onClick={() => setAddOpen(true)}><PlusCircle size={16} />{t('addItem')}</Button>
@@ -345,6 +382,17 @@ export default function CoursePage() {
         </div>
       </header>
 
+      {publicationSuccess && <p role="status" className="rounded-lg border border-primary/20 bg-primary-soft p-3 text-sm text-primary">{publicationSuccess}</p>}
+      <Modal open={publicationOpen} onClose={() => { if (!publicationBusy.current) setPublicationOpen(false) }} closeDisabled={publishing} title={course.is_published ? 'Курсты жариялаудан алып тастау' : 'Курсты жариялау'}>
+        <p className="text-sm leading-relaxed text-muted">{course.is_published
+          ? 'Курс жарияланған курстар каталогынан алынады. Оқу материалдары, топтар, тіркелімдер мен нәтижелер сақталады. Қолданыстағы ереже бойынша оқушылар курс материалдарын қайта жарияланғанға дейін аша алмайды.'
+          : 'Курс жарияланған күйге өтіп, курстар каталогында көрсетіледі. Оқушылар автоматты түрде тіркелмейді.'}</p>
+        {publicationError && <p role="alert" className="mt-3 text-sm text-red-700">{publicationError}</p>}
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" disabled={publishing} onClick={() => setPublicationOpen(false)}>Бас тарту</Button>
+          <Button disabled={publishing} onClick={() => void togglePublication()}>{publishing ? 'Сақталуда…' : course.is_published ? 'Жариялаудан алып тастау' : 'Жариялау'}</Button>
+        </div>
+      </Modal>
       {actionError && <ErrorState message={actionError} />}
 
       {course.announcement && (
