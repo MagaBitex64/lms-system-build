@@ -1,20 +1,21 @@
 'use client'
 
 import {useMemo, useRef, useState, type FormEvent, type ReactNode} from 'react'
-import {ArrowDown, ArrowUp, ChevronDown, ChevronRight, Folder, FolderInput, MoreVertical, Pencil, PlusCircle, Trash2} from 'lucide-react'
+import {ArrowDown, ArrowUp, ChevronDown, ChevronRight, Folder, FolderInput, MoreVertical, Pencil, PlusCircle, Trash2, Users} from 'lucide-react'
 import {api} from '@/lib/api'
 import {groupCourseMaterials, type CourseSection, type SectionMaterial} from '@/lib/course-sections'
 import {Button, DropdownMenu, ErrorState, Field, Input, Modal, Select} from './ui'
 
 export type MaterialMoveAction = {label: string; icon?: ReactNode; onClick: () => void}
 
-export default function CourseContentSections<T extends SectionMaterial>({courseId, sections, items, isOwner, reload, onAdd, renderItem}: {
+export default function CourseContentSections<T extends SectionMaterial>({courseId, sections, items, isOwner, reload, onAdd, onAccess, renderItem}: {
   courseId: number
   sections: CourseSection[]
   items: T[]
   isOwner: boolean
   reload: () => Promise<unknown>
   onAdd: (sectionId: number | null) => void
+  onAccess?: (section: CourseSection) => void
   renderItem: (item: T, actions: MaterialMoveAction[]) => ReactNode
 }) {
   const groups = useMemo(() => groupCourseMaterials(sections, items), [sections, items])
@@ -88,6 +89,7 @@ export default function CourseContentSections<T extends SectionMaterial>({course
               <div className="relative">
                 <Button size="sm" variant="ghost" disabled={busy} aria-label={`${group.title}: бөлім әрекеттері`} aria-haspopup="menu" aria-expanded={menuId === group.id} onClick={() => setMenuId(menuId === group.id ? null : group.id)}><MoreVertical size={15} /></Button>
                 <DropdownMenu open={menuId === group.id} onClose={() => setMenuId(null)} items={[
+                  ...(onAccess ? [{label:'Бөлімге қолжетімділік',icon:<Users size={15}/>,onClick:()=>onAccess(group)}] : []),
                   {label: 'Атауын өзгерту', icon: <Pencil size={15} />, onClick: () => {setError(null);setEditing({id: group.id, title: group.title})}},
                   {label: 'Бөлімді өшіру', icon: <Trash2 size={15} />, destructive: true, onClick: () => {void perform(() => api(`/courses/${courseId}/sections/${group.id}`, {method: 'DELETE'}))}},
                 ]} />

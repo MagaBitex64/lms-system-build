@@ -31,6 +31,7 @@ import { api, fetcher } from '@/lib/api'
 import { SUBJECT_NAMES } from '@/lib/ent'
 import CourseEntVariants from '@/components/course-ent-variants'
 import CourseContentSections from '@/components/course-content-sections'
+import ContentAccessModal, {type AccessTarget} from '@/components/content-access-modal'
 import {CourseEnrollmentManagement} from '@/components/enrollment-management'
 import type {CourseSection} from '@/lib/course-sections'
 import {
@@ -71,6 +72,7 @@ type Item = {
   close_at?: string | null
   time_limit_minutes?: number | null
   topic_open?: boolean
+  access_configured?: boolean
   access_group_ids?: number[]
   access_student_ids?: number[]
   quiz_access_rules?: Array<{target_type:string;target_id:number;max_attempts:number;deadline_at:string|null}>
@@ -147,14 +149,7 @@ export default function CoursePage() {
   const [itemSectionId, setItemSectionId] = useState<number | null>(null)
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [accessItem, setAccessItem] = useState<Item | null>(null)
-  const [accessGroupIds, setAccessGroupIds] = useState<number[]>([])
-  const [accessStudentIds, setAccessStudentIds] = useState<number[]>([])
-  const [accessAttempts,setAccessAttempts]=useState('1')
-  const [accessDeadline,setAccessDeadline]=useState('')
-  const [accessRulesDirty,setAccessRulesDirty]=useState(false)
-  const [mixedAccessRules,setMixedAccessRules]=useState(false)
-  const [expandedGroupIds, setExpandedGroupIds] = useState<number[]>([])
+  const [accessTarget, setAccessTarget] = useState<AccessTarget | null>(null)
   const [contentExpanded, setContentExpanded] = useState(true)
   const [entExpanded, setEntExpanded] = useState(true)
   const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false)
@@ -271,54 +266,7 @@ export default function CoursePage() {
     setAddOpen(true)
   }
 
-  function openAccessModal(item: Item) {
-    setAccessItem(item)
-    setAccessGroupIds(item.access_group_ids ?? [])
-    setAccessStudentIds(item.access_student_ids ?? [])
-    setExpandedGroupIds(item.access_group_ids ?? [])
-    const rules=item.type === 'quiz' ? item.quiz_access_rules ?? [] : []
-    const mixed=new Set(rules.map(r=>`${r.max_attempts}:${r.deadline_at??''}`)).size>1
-    setMixedAccessRules(mixed);setAccessRulesDirty(false)
-    setAccessAttempts(String(!mixed&&rules[0]?rules[0].max_attempts:1))
-    const deadline=!mixed?rules[0]?.deadline_at:null
-    if(deadline){const d=new Date(deadline);setAccessDeadline(new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16))}else setAccessDeadline('')
-  }
-
-  function toggleNumber(list: number[], value: number) {
-    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value]
-  }
-
-  function studentsInGroup(groupId: number) {
-    return (course?.students ?? []).filter((student) => student.groups.some((group) => group.id === groupId))
-  }
-
-  function setGroupAccess(groupId: number, checked: boolean) {
-    setAccessGroupIds((current) => checked ? [...new Set([...current, groupId])] : current.filter((id) => id !== groupId))
-    if (checked) {
-      const groupStudentIds = studentsInGroup(groupId).map((student) => student.id)
-      setAccessStudentIds((current) => current.filter((id) => !groupStudentIds.includes(id)))
-    }
-  }
-
-  async function saveAccess(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!accessItem) return
-    setWorking(true)
-    setActionError(null)
-    try {
-      await api(`/courses/items/${accessItem.id}/access`, {
-        method: 'PUT',
-        body: { group_ids: accessGroupIds, student_ids: accessStudentIds,
-          ...(accessItem.type==='quiz' && (!mixedAccessRules||accessRulesDirty)?{quiz_rules:{max_attempts:Number(accessAttempts),deadline_at:!accessRulesDirty&&!mixedAccessRules&&accessItem.quiz_access_rules?.[0]?accessItem.quiz_access_rules[0].deadline_at:accessDeadline?new Date(accessDeadline).toISOString():null}}:{}) },
-      })
-      setAccessItem(null)
-      await mutate()
-    } catch (err) {
-      setActionError((err as Error).message || t('errorOccurred'))
-    } finally {
-      setWorking(false)
-    }
-  }
+  function openAccessModal(item: Item) { setAccessTarget({...item, kind:'item'}) }
 
   async function deleteCourse() {
     setIsDeleting(true)
@@ -434,7 +382,7 @@ export default function CoursePage() {
             hint={t('lockedHint')}
           />
         ) : items.length || course.sections?.length || isOwner ? (
-          <CourseContentSections key={courseId} courseId={courseId} sections={course.sections ?? []} items={items} isOwner={isOwner} reload={mutate} onAdd={openAddItem}
+          <CourseContentSections key={courseId} courseId={courseId} sections={course.sections ?? []} items={items} isOwner={isOwner} reload={mutate} onAdd={openAddItem} onAccess={section=>setAccessTarget({...section,kind:'section'})}
             renderItem={(item, moveActions) => {
               const locked = item.locked
               const deadline = fmtDate(item.deadline_at)
@@ -591,92 +539,7 @@ export default function CoursePage() {
         </form>
       </Modal>
 
-      <Modal open={!!accessItem} onClose={() => setAccessItem(null)} title={t('topicAccess')}>
-        <form onSubmit={saveAccess} className="space-y-5">
-          <div>
-            <p className="text-sm font-semibold text-foreground">{accessItem?.title}</p>
-            <p className="mt-1 text-sm text-muted">{t('topicAccessHint')}</p>
-          </div>
-
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold">{t('openToGroups')}</h3>
-            {course.groups?.length ? (
-              <div className="max-h-96 space-y-2 overflow-y-auto rounded-lg border border-border p-2">
-                {course.groups.map((group) => {
-                  const expanded = expandedGroupIds.includes(group.id)
-                  const wholeGroup = accessGroupIds.includes(group.id)
-                  const groupStudents = studentsInGroup(group.id)
-                  return (
-                    <div key={group.id} className="rounded-lg border border-border bg-surface-muted">
-                      <div className="flex items-center gap-3 p-3">
-                        <button
-                          type="button"
-                          onClick={() => setExpandedGroupIds((current) => toggleNumber(current, group.id))}
-                          className="flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-surface"
-                          aria-label={expanded ? t('collapse') : t('expand')}
-                        >
-                          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                        </button>
-                        <label className="flex min-w-0 flex-1 items-center gap-3 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={wholeGroup}
-                            onChange={(event) => setGroupAccess(group.id, event.target.checked)}
-                          />
-                          <span className="min-w-0">
-                            <span className="block truncate font-semibold">{group.code} - {group.title}</span>
-                            <span className="block text-xs text-muted">{group.student_count}/{group.capacity} {t('studentsCount')}</span>
-                          </span>
-                        </label>
-                        <Badge tone={wholeGroup ? 'primary' : 'neutral'}>{wholeGroup ? t('wholeGroup') : t('selectGroup')}</Badge>
-                      </div>
-
-                      {expanded && (
-                        <div className="border-t border-border bg-surface px-3 py-2">
-                          {wholeGroup && <p className="mb-2 text-xs text-muted">{t('wholeGroupSelected')}</p>}
-                          {groupStudents.length ? (
-                            <div className="space-y-1">
-                              {groupStudents.map((student) => (
-                                <label key={student.id} className="flex items-start gap-3 rounded-md p-2 text-sm hover:bg-surface-muted">
-                                  <input
-                                    className="mt-1"
-                                    type="checkbox"
-                                    disabled={wholeGroup}
-                                    checked={wholeGroup || accessStudentIds.includes(student.id)}
-                                    onChange={() => setAccessStudentIds((current) => toggleNumber(current, student.id))}
-                                  />
-                                  <span className="min-w-0">
-                                    <span className="block truncate font-medium">{student.full_name}</span>
-                                    <span className="block truncate text-xs text-muted">{student.email}</span>
-                                  </span>
-                                </label>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="py-2 text-sm text-muted">{t('noData')}</p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <p className="text-sm text-muted">{t('noGroups')}</p>
-            )}
-          </div>
-
-          {accessItem?.type==='quiz'&&<div className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2"><Field label="Тапсыру саны"><Input type="number" required min={1} max={100} step={1} value={accessAttempts} onChange={e=>{setAccessAttempts(e.target.value);setAccessRulesDirty(true)}}/></Field><Field label="Тапсыру мерзімі"><Input type="datetime-local" value={accessDeadline} onChange={e=>{setAccessDeadline(e.target.value);setAccessRulesDirty(true)}}/></Field></div>
-            <p className="text-xs text-muted">Мерзім жергілікті уақытпен көрсетіледі. Қабаттасатын рұқсаттарда ең қатаң шектеу қолданылады. Басталған әрекеттің таймері өзгермейді.</p>
-            {mixedAccessRules&&!accessRulesDirty&&<p role="status" className="text-xs text-muted">Таңдалған рұқсаттардың шектеулері әртүрлі. Өрістерді өзгертпесеңіз, бұрынғы шектеулер сақталады; жаңа рұқсатқа 1 әрекет және мерзімсіз қолжетімділік беріледі.</p>}
-          </div>}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setAccessItem(null)}>{t('cancel')}</Button>
-            <Button type="submit" disabled={working}>{working ? t('loading') : t('save')}</Button>
-          </div>
-        </form>
-      </Modal>
+      {accessTarget && <ContentAccessModal key={`${accessTarget.kind}-${accessTarget.id}`} courseId={courseId} target={accessTarget} students={course.students ?? []} groups={course.groups ?? []} parent={accessTarget.kind==='item' ? (course.sections ?? []).find(s=>s.id===accessTarget.section_id) : undefined} onClose={()=>setAccessTarget(null)} onSaved={mutate} />}
 
       {/* Delete Course Modal */}
       <DeletionConfirmModal

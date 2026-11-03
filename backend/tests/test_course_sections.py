@@ -125,10 +125,13 @@ class CourseSectionTests(unittest.IsolatedAsyncioTestCase):
         legacy = await self.item('lesson', 7)
         await self.pool.execute('ALTER TABLE course_items DROP CONSTRAINT course_items_section_course_fkey')
         await self.pool.execute('ALTER TABLE course_items DROP COLUMN section_id')
+        # Remove only disposable fixture tables to simulate the pre-folder schema.
+        await self.pool.execute('DROP TABLE section_student_access, section_group_access')
         await self.pool.execute('DROP TABLE course_sections')
         from scripts.course_section_migrations import COURSE_SECTION_MIGRATIONS
+        from scripts.section_access_migrations import SECTION_ACCESS_MIGRATIONS
         import hashlib
-        for sql in COURSE_SECTION_MIGRATIONS:
+        for sql in COURSE_SECTION_MIGRATIONS + SECTION_ACCESS_MIGRATIONS:
             await self.pool.execute('DELETE FROM schema_migrations WHERE id=$1', hashlib.sha256(sql.encode()).hexdigest())
         real_connect = asyncpg.connect
         async def connect(*args, **kwargs):

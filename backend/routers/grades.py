@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from core.access import ensure_course_owner, ensure_course_access
 from core.db import get_pool
+from core.content_access import topic_sql
 from core.deps import get_current_user, require_teacher
 
 router = APIRouter(prefix="/grades", tags=["grades"])
@@ -9,7 +10,7 @@ router = APIRouter(prefix="/grades", tags=["grades"])
 
 async def compute_student_course_grades(pool, course_ids: list[int], student_ids: list[int]) -> dict[tuple[int, int], dict]:
     gradables = await pool.fetch(
-        """
+        f"""
         SELECT ci.id, ci.course_id, students.student_id, ci.type, ci.title,
                CASE WHEN q.scoring_mode='points' THEN (SELECT COALESCE(sum(points),0) FROM quiz_questions WHERE quiz_id=ci.id)
                     ELSE COALESCE(q.max_score,h.max_score) END AS max_score,
@@ -21,19 +22,7 @@ async def compute_student_course_grades(pool, course_ids: list[int], student_ids
         LEFT JOIN homework h ON h.item_id = ci.id
                 WHERE ci.course_id = ANY($1::bigint[])
                     AND (ci.type IN ('quiz','homework') OR q.item_id IS NOT NULL) AND ci.is_visible
-          AND (
-            EXISTS (
-              SELECT 1 FROM item_student_access isa
-              WHERE isa.item_id = ci.id AND isa.student_id = students.student_id
-            )
-            OR EXISTS (
-              SELECT 1
-              FROM item_group_access iga
-              JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = students.student_id
-              JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
-              WHERE iga.item_id = ci.id
-            )
-          )
+          AND {topic_sql(student='students.student_id')}
         ORDER BY students.student_id, ci.course_id, ci.position
         """,
         course_ids,

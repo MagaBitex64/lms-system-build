@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-import datetime
 from pydantic import BaseModel, Field
 
 from core.access import (
@@ -7,11 +6,12 @@ from core.access import (
     ensure_course_owner,
     ensure_item_access,
     get_item_or_404,
-    has_item_topic_access,
     is_enrolled,
     is_item_unlocked,
 )
 from core.db import get_pool
+from core.content_access import topic_sql
+from core.access_management import AccessIn as ItemAccessIn, QuizAccessRulesIn, validate_targets, write_grants
 from core.course_sections import lock_course, normalize_item_order, require_same_ids, validate_section
 from core.deps import get_current_user, require_admin, require_teacher
 from core.ent_rules import SUBJECT_LABELS
@@ -56,18 +56,6 @@ class ReorderIn(BaseModel):
     section_id: int | None = Field(default=None, gt=0)
 
 
-class ItemAccessIn(BaseModel):
-    group_ids: list[int] = []
-    student_ids: list[int] = []
-    quiz_rules: 'QuizAccessRulesIn | None' = None
-
-
-class QuizAccessRulesIn(BaseModel):
-    max_attempts: int = Field(strict=True, ge=1, le=100)
-    deadline_at: datetime.datetime | None = None
-
-
-ItemAccessIn.model_rebuild()
 
 
 class LessonIn(BaseModel):
@@ -319,11 +307,9 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
     first_incomplete_position = None
     if user['role'] == 'student' and item_ids:
         rows = await pool.fetch(
-            """SELECT ci.id,ci.position,ci.is_visible,ci.type,q.item_id quiz_id,
+            f"""SELECT ci.id,ci.position,ci.is_visible,ci.type,q.item_id quiz_id,
             qa.id attempt_id,qa.auto_score,qa.manual_score,hs.id submission_id,hs.grade,
-            (EXISTS(SELECT 1 FROM item_student_access isa WHERE isa.item_id=ci.id AND isa.student_id=$2)
-             OR EXISTS(SELECT 1 FROM item_group_access iga JOIN group_students gs ON gs.group_id=iga.group_id AND gs.student_id=$2
-                JOIN course_groups cg ON cg.group_id=iga.group_id AND cg.course_id=ci.course_id WHERE iga.item_id=ci.id)) topic_open
+            {topic_sql()} topic_open
             FROM course_items ci LEFT JOIN quizzes q ON q.item_id=ci.id
             LEFT JOIN LATERAL (SELECT * FROM quiz_attempts a WHERE a.quiz_id=ci.id AND a.student_id=$2
                 ORDER BY (a.auto_score+COALESCE(a.manual_score,0))/NULLIF(COALESCE(a.max_score_snapshot,q.max_score),0) DESC,a.attempt_number DESC LIMIT 1) qa ON true
@@ -352,6 +338,7 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
             "position": r["position"],
             "section_id": r["section_id"],
             "is_visible": r["is_visible"],
+            "access_configured": r["access_configured"],
             "sequential_unlock": r["sequential_unlock"],
             "note": r["note"],
             "open_at": str(r["quiz_open_at"] or r["hw_open_at"]) if (r["quiz_open_at"] or r["hw_open_at"]) else None,
@@ -426,7 +413,20 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         for student in student_rows:
             students.append(dict(student) | {"groups": groups_by_student.get(student["id"], [])})
 
-    sections = await pool.fetch('SELECT id,title,position FROM course_sections WHERE course_id=$1 ORDER BY position,id', course_id)
+    sections = await pool.fetch('SELECT id,title,position,access_restricted FROM course_sections WHERE course_id=$1 ORDER BY position,id', course_id)
+    section_data = [dict(s) for s in sections]
+    if is_owner:
+        for section in section_data:
+            section['access_group_ids'] = []
+            section['access_student_ids'] = []
+            section['quiz_access_rules'] = []
+        by_id = {s['id']: s for s in section_data}
+        for target in ('group','student'):
+            grants = await pool.fetch(f'SELECT a.* FROM section_{target}_access a JOIN course_sections s ON s.id=a.section_id WHERE s.course_id=$1', course_id)
+            for grant in grants:
+                sec = by_id[grant['section_id']]
+                sec[f'access_{target}_ids'].append(grant[f'{target}_id'])
+                sec['quiz_access_rules'].append({'target_type':target,'target_id':grant[f'{target}_id'],'max_attempts':grant['max_attempts'],'deadline_at':str(grant['deadline_at']) if grant['deadline_at'] else None})
     return {
         "id": course["id"],
         "title": course["title"],
@@ -439,7 +439,7 @@ async def course_detail(course_id: int, user: dict = Depends(get_current_user)):
         "ent_subject": course["ent_subject"] if is_owner else None,
         "enrollment_status": "approved" if enrolled else None,
         "items": items,
-        "sections": [dict(section) for section in sections],
+        "sections": section_data,
         "groups": groups,
         "students": students,
     }
@@ -510,50 +510,15 @@ async def update_item(item_id: int, data: ItemUpdate, user: dict = Depends(requi
 async def update_item_access(item_id: int, data: ItemAccessIn, user: dict = Depends(require_teacher)):
     item = await get_item_or_404(item_id)
     await ensure_course_owner(user, item["course_id"])
-    group_ids = sorted(set(data.group_ids))
-    student_ids = sorted(set(data.student_ids))
-    pool = await get_pool()
     if data.quiz_rules is not None and item['type'] != 'quiz':
         raise HTTPException(422, 'Attempt rules are only supported for topical tests')
-    if group_ids:
-        valid_group_count = await pool.fetchval(
-            """
-            SELECT COUNT(*) FROM course_groups
-            WHERE course_id = $1 AND group_id = ANY($2::bigint[])
-            """,
-            item["course_id"],
-            group_ids,
-        )
-        if valid_group_count != len(group_ids):
-            raise HTTPException(status_code=422, detail="Some groups are not linked to this course")
-    if student_ids:
-        valid_student_count = await pool.fetchval(
-            """
-            SELECT COUNT(*) FROM enrollments
-            WHERE course_id = $1 AND student_id = ANY($2::bigint[]) AND status = 'approved'
-            """,
-            item["course_id"],
-            student_ids,
-        )
-        if valid_student_count != len(student_ids):
-            raise HTTPException(status_code=422, detail="Some students are not enrolled in this course")
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            # Serialize permission updates with starts; retain existing row settings unless explicitly edited.
-            await conn.fetchrow('SELECT item_id FROM quizzes WHERE item_id=$1 FOR UPDATE', item_id)
-            for table, key, ids in [('item_group_access','group_id',group_ids),('item_student_access','student_id',student_ids)]:
-                for target_id in ids:
-                    old = await conn.fetchrow(f'SELECT max_attempts,deadline_at FROM {table} WHERE item_id=$1 AND {key}=$2',item_id,target_id)
-                    rules = data.quiz_rules
-                    if rules is not None:
-                        deadline = rules.deadline_at
-                        if deadline and (deadline.tzinfo is None or ((not old or deadline != old['deadline_at'] or rules.max_attempts != old['max_attempts']) and deadline <= datetime.datetime.now(datetime.timezone.utc))):
-                            raise HTTPException(422, 'Deadline must include timezone and be in the future')
-                        await conn.execute(f'''INSERT INTO {table}(item_id,{key},max_attempts,deadline_at) VALUES($1,$2,$3,$4)
-                            ON CONFLICT(item_id,{key}) DO UPDATE SET max_attempts=EXCLUDED.max_attempts,deadline_at=EXCLUDED.deadline_at''',item_id,target_id,rules.max_attempts,deadline)
-                    else:
-                        await conn.execute(f'INSERT INTO {table}(item_id,{key}) VALUES($1,$2) ON CONFLICT DO NOTHING',item_id,target_id)
-                await conn.execute(f'DELETE FROM {table} WHERE item_id=$1 AND NOT ({key}=ANY($2::bigint[]))',item_id,ids)
+    pool = await get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        await lock_course(conn, item['course_id'])
+        await conn.fetchrow('SELECT item_id FROM quizzes WHERE item_id=$1 FOR UPDATE', item_id)
+        group_ids, student_ids = await validate_targets(conn, item['course_id'], data)
+        await write_grants(conn, 'item', item_id, group_ids, student_ids, data.quiz_rules)
+        await conn.execute('UPDATE course_items SET access_configured=true WHERE id=$1',item_id)
     return {"ok": True, "group_ids": group_ids, "student_ids": student_ids}
 
 

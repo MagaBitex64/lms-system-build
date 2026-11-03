@@ -1,0 +1,90 @@
+// Synthetic browser regression: never targets production or the development DB.
+const {chromium,request}=require(process.env.PLAYWRIGHT_MODULE||'playwright')
+const fs=require('node:fs'),assert=require('node:assert/strict')
+const credentials=JSON.parse(fs.readFileSync(process.env.E2E_CREDENTIALS_FILE,'utf8'))
+const base='http://localhost:3102',apiBase='http://localhost:8102'
+;(async()=>{
+ const client=await request.newContext(),tokens={},users={}
+ const api=async(role,path,data,method)=>{const response=await client.fetch(apiBase+path,{method:method||(data?'POST':'GET'),headers:tokens[role]?{Authorization:'Bearer '+tokens[role]}:{},...(data?{data}:{})});assert(response.ok(),`${path}: ${response.status()} ${await response.text()}`);return response.json()}
+ for(const role of ['admin','teacher','student']){const login=await api(role,'/auth/login',credentials[role]);tokens[role]=login.token;users[role]=login.user}
+ const course=await api('teacher','/courses',{title:'Synthetic content access '+Date.now(),is_published:true,ent_subject:'informatics'})
+ const title='Күрделі тақырыптарды жүйелі түрде қайталау және бекіту бөлімі'
+ const section=await api('teacher',`/courses/${course.id}/sections`,{title})
+ const lesson=await api('teacher',`/courses/${course.id}/items`,{title:'Synthetic lesson',type:'lesson',section_id:section.id})
+ await api('teacher',`/courses/lessons/${lesson.id}`,{content:'Synthetic authorized material',youtube_url:''},'PUT')
+ await api('admin',`/admin/courses/${course.id}/students`,{student_id:users.student.id})
+ const group=await api('admin','/admin/groups',{code:'CA'+Date.now(),title:'Synthetic group',capacity:20})
+ await api('admin',`/admin/courses/${course.id}/groups`,{group_id:group.id})
+ const browser=await chromium.launch({headless:true,executablePath:process.env.E2E_CHROME||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'})
+ const errors=[]
+ const output=process.env.E2E_OUTPUT||'/tmp/fenomen-content-access-proof';fs.mkdirSync(output,{recursive:true})
+ try{
+  const page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'})
+  page.on('pageerror',e=>errors.push(e.message))
+  for(const role of ['admin','teacher']){
+   await page.goto(base+'/login')
+   await page.getByRole('textbox',{name:'Электрондық пошта',exact:true}).fill(credentials[role].email)
+   await page.getByRole('textbox',{name:'Құпиясөз',exact:true}).fill(credentials[role].password)
+   await page.getByRole('button',{name:'Жүйеге кіру',exact:true}).click();await page.waitForURL('**/dashboard')
+   await page.goto(`${base}/courses/${course.id}`)
+   await page.getByRole('button',{name:`${title}: бөлім әрекеттері`,exact:true}).click()
+   await page.getByRole('menuitem',{name:'Бөлімге қолжетімділік',exact:true}).click()
+   let dialog=page.getByRole('dialog')
+   await dialog.getByRole('tab',{name:/Оқушылар/}).press('ArrowRight')
+   await dialog.getByRole('tab',{name:/Топтар/}).press('ArrowLeft')
+   assert.equal(await dialog.getByRole('tab',{name:/Оқушылар/}).getAttribute('aria-selected'),'true')
+   await dialog.getByRole('checkbox',{name:/Access student/}).check()
+   const confirm=dialog.getByRole('checkbox',{name:/Қолжетімділіктің шектелетінін/})
+   if(await confirm.count())await confirm.check()
+   await dialog.getByRole('button',{name:'Сақтау',exact:true}).click();await dialog.waitFor({state:'hidden'})
+   const studentView=await api('student',`/courses/lessons/${lesson.id}`)
+   assert.equal(studentView.content,'Synthetic authorized material')
+   if(role==='admin')await api('admin',`/admin/groups/${group.id}/students`,{student_id:users.student.id})
+   await page.reload()
+   await page.getByRole('button',{name:`${title}: бөлім әрекеттері`,exact:true}).waitFor()
+   // Both roles use the same two-tab modal. Direct and group grants coexist.
+   await page.getByRole('button',{name:`${title}: бөлім әрекеттері`,exact:true}).click()
+   await page.getByRole('menuitem',{name:'Бөлімге қолжетімділік',exact:true}).click()
+   dialog=page.getByRole('dialog')
+   await dialog.getByRole('tab',{name:/Топтар/}).click()
+   await dialog.getByRole('checkbox',{name:/Synthetic group/}).check()
+   await dialog.getByRole('button',{name:'Сақтау',exact:true}).click();await dialog.waitFor({state:'hidden'})
+   await page.getByRole('button',{name:`${title} 1 материал`,exact:true}).click()
+   await page.getByRole('button',{name:'«Synthetic lesson» әрекеттері',exact:true}).click()
+   await page.getByRole('menuitem',{name:'Тақырыпқа қолжетімділік',exact:true}).click()
+   dialog=page.getByRole('dialog')
+   assert.equal(await dialog.getByText('Тапсыру саны',{exact:true}).count(),0)
+   await dialog.getByRole('checkbox',{name:/Access student/}).check()
+   for(const [width,height] of [[1440,900],[1366,768],[768,1024],[390,844],[375,812]]){
+    await page.setViewportSize({width,height})
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Horizontal overflow')
+    assert.equal(await dialog.count(),1,'Only one access modal must exist')
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
+    const box=await dialog.boundingBox();assert(box.x>=0&&box.x+box.width<=width+1,'Modal overflow')
+    await page.screenshot({path:`${output}/${role}-${width}x${height}.png`,animations:'disabled'})
+   }
+   await dialog.getByRole('button',{name:'Сақтау',exact:true}).click();await dialog.waitFor({state:'hidden'})
+   await page.reload()
+   await page.getByRole('button',{name:`${title}: бөлім әрекеттері`,exact:true}).waitFor()
+   const state=await api('teacher',`/courses/${course.id}`)
+   assert(state.sections[0].access_student_ids.includes(users.student.id))
+   assert(state.sections[0].access_group_ids.includes(group.id))
+   assert(state.items[0].access_student_ids.includes(users.student.id))
+   console.log(`PASS ${role}: individual and group section grants, individual lesson access, refresh, five viewport sizes`)
+   // Sign out in this disposable browser only.
+   await page.evaluate(()=>{sessionStorage.removeItem('lms_token');localStorage.removeItem('lms_token')})
+  }
+  assert.deepEqual(errors,[])
+  // Student browser read-only section and actual lesson navigation.
+  await page.goto(base+'/login')
+  await page.getByRole('textbox',{name:'Электрондық пошта',exact:true}).fill(credentials.student.email)
+  await page.getByRole('textbox',{name:'Құпиясөз',exact:true}).fill(credentials.student.password)
+  await page.getByRole('button',{name:'Жүйеге кіру',exact:true}).click();await page.waitForURL('**/dashboard')
+  await page.goto(`${base}/courses/${course.id}`)
+  assert.equal(await page.getByRole('button',{name:`${title}: бөлім әрекеттері`,exact:true}).count(),0)
+  await page.getByRole('button',{name:`${title} 1 материал`,exact:true}).click()
+  await page.getByRole('link').filter({hasText:'Synthetic lesson'}).click()
+  await page.getByText('Synthetic authorized material',{exact:true}).waitFor()
+  console.log('PASS student: read-only section, authorized lesson opens')
+ }finally{await browser.close();await client.dispose()}
+})().catch(error=>{console.error(error);process.exitCode=1})

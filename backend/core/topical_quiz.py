@@ -1,16 +1,30 @@
 """Topical quiz rules. Overlapping grants intersect; attempts are never added together."""
 from fastapi import HTTPException
+from core.content_access import topic_sql, require_live_student_access
 
 
 async def access_rules(conn, item_id, student_id):
-    rows = await conn.fetch('''
+    await require_live_student_access(conn, item_id, student_id)
+    rows = await conn.fetch(f'''
         SELECT max_attempts,deadline_at FROM item_student_access WHERE item_id=$1 AND student_id=$2
         UNION ALL
         SELECT a.max_attempts,a.deadline_at FROM item_group_access a
         JOIN group_students gs ON gs.group_id=a.group_id AND gs.student_id=$2
         JOIN course_groups cg ON cg.group_id=a.group_id
         JOIN course_items ci ON ci.id=a.item_id AND ci.course_id=cg.course_id
-        WHERE a.item_id=$1''', item_id, student_id)
+        WHERE a.item_id=$1
+        UNION ALL
+        SELECT a.max_attempts,a.deadline_at FROM section_student_access a
+        JOIN course_items ci ON ci.section_id=a.section_id
+        JOIN course_sections s ON s.id=ci.section_id AND s.access_restricted
+        WHERE ci.id=$1 AND a.student_id=$2 AND {topic_sql()}
+        UNION ALL
+        SELECT a.max_attempts,a.deadline_at FROM section_group_access a
+        JOIN course_items ci ON ci.section_id=a.section_id
+        JOIN course_sections s ON s.id=ci.section_id AND s.access_restricted
+        JOIN course_groups cg ON cg.group_id=a.group_id AND cg.course_id=ci.course_id
+        JOIN group_students gs ON gs.group_id=a.group_id AND gs.student_id=$2
+        WHERE ci.id=$1 AND {topic_sql()}''', item_id, student_id)
     if not rows:
         raise HTTPException(403, 'This topic is not open yet')
     deadlines = [r['deadline_at'] for r in rows if r['deadline_at']]

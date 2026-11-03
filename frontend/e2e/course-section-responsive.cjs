@@ -8,24 +8,28 @@ const output = process.env.E2E_OUTPUT || '/tmp/fenomen-bug001'
 fs.mkdirSync(output, {recursive:true})
 const credentials = JSON.parse(fs.readFileSync(process.env.E2E_CREDENTIALS_FILE, 'utf8'))
 const names = ['Synthetic Folder','Қысқа','Күрделі тақырыптарды жүйелі түрде қайталау және бекіту бөлімі','Раздел для повторения сложных тем и самостоятельной подготовки','Long English folder title for revision and independent learning','Тест']
+const base=process.env.E2E_BASE_URL || 'http://localhost:3101'
+const apiBase=process.env.E2E_API_URL || 'http://localhost:8101'
+assert(['http://localhost:3101','http://localhost:3102'].includes(base))
+assert(['http://localhost:8101','http://localhost:8102'].includes(apiBase))
 const results=[]
 ;(async()=>{
  const browser=await chromium.launch({executablePath:process.env.E2E_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true})
  try {
  const page=await browser.newPage({viewport:{width:1440,height:900}})
  page.setDefaultTimeout(10000)
- await page.goto('http://localhost:3101/login')
+ await page.goto(`${base}/login`)
  await page.getByRole('textbox',{name:'Электрондық пошта',exact:true}).fill(credentials.email)
  await page.getByRole('textbox',{name:'Құпиясөз',exact:true}).fill(credentials.password)
  await page.getByRole('button',{name:'Жүйеге кіру',exact:true}).click()
  await page.waitForURL('**/dashboard')
  const token=await page.evaluate(()=>sessionStorage.getItem('lms_token'))
- async function api(path,data,method){const r=await page.request.fetch('http://localhost:8101'+path,{method:method|| (data?'POST':'GET'),headers:{Authorization:'Bearer '+token},...(data?{data}:{})});assert(r.ok(),`${path}: ${r.status()}`);return r.json()}
+ async function api(path,data,method){const r=await page.request.fetch(apiBase+path,{method:method|| (data?'POST':'GET'),headers:{Authorization:'Bearer '+token},...(data?{data}:{})});assert(r.ok(),`${path}: ${r.status()}`);return r.json()}
  const course=await api('/courses',{title:'BUG-001 responsive fixture '+Date.now(),is_published:true,ent_subject:'informatics'})
  const sections=[]
  for(const title of names)sections.push(await api(`/courses/${course.id}/sections`,{title}))
  const item=await api(`/courses/${course.id}/items`,{type:'lesson',title:'Regression material',is_visible:true,section_id:sections[0].id})
- await page.goto(`http://localhost:3101/courses/${course.id}`)
+ await page.goto(`${base}/courses/${course.id}`)
  await page.getByRole('button',{name:`${names[0]}: бөлім әрекеттері`,exact:true}).waitFor()
  for(const [width,height] of [[375,812],[390,844],[768,1024],[1366,768],[1440,900]]){
   await page.setViewportSize({width,height})
@@ -84,14 +88,14 @@ const results=[]
  const student=await api('/admin/users',{email:`bug001-${Date.now()}@e2e.example.com`,full_name:'Synthetic readonly student',role:'student'})
  await api(`/admin/courses/${course.id}/students`,{student_id:student.id})
  await api(`/courses/items/${item.id}/access`,{group_ids:[],student_ids:[student.id]},'PUT')
- const login=await page.request.post('http://localhost:8101/auth/login',{data:{email:student.email,password:student.temporary_password}})
+ const login=await page.request.post(`${apiBase}/auth/login`,{data:{email:student.email,password:student.temporary_password}})
  const initial=(await login.json()).token
  const pass=crypto.randomBytes(24).toString('base64url')
- const setup=await page.request.post('http://localhost:8101/auth/setup-password',{headers:{Authorization:'Bearer '+initial},data:{new_password:pass,confirmation:pass}})
+ const setup=await page.request.post(`${apiBase}/auth/setup-password`,{headers:{Authorization:'Bearer '+initial},data:{new_password:pass,confirmation:pass}})
  assert(setup.ok());const studentToken=(await setup.json()).token
  const context=await browser.newContext({viewport:{width:375,height:812}})
  await context.addInitScript(token=>sessionStorage.setItem('lms_token',token),studentToken)
- const readonly=await context.newPage();await readonly.goto(`http://localhost:3101/courses/${course.id}`)
+ const readonly=await context.newPage();await readonly.goto(`${base}/courses/${course.id}`)
  await readonly.locator(`button[aria-controls="course-${course.id}-section-${sections[1].id}"]`).waitFor()
  assert.equal(await readonly.getByRole('button',{name:'Бөлім қосу',exact:true}).count(),0)
  assert.equal(await readonly.getByRole('button',{name:/бөлім әрекеттері/}).count(),0)

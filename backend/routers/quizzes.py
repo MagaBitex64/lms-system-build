@@ -20,6 +20,7 @@ from core.access import ensure_course_owner, ensure_item_access, get_item_or_404
 from core.db import get_pool
 from core.quiz_attempts import quiz_state, complete_quiz, normalized_answers, decoded, utcnow
 from core.topical_quiz import access_rules, readiness
+from core.content_access import require_live_student_access
 from core.deps import get_current_user, require_student, require_teacher
 from storage.local import FileValidationError, storage
 
@@ -662,6 +663,7 @@ async def start_quiz(item_id: int, user: dict = Depends(require_student)):
         quiz = await conn.fetchrow('SELECT * FROM quizzes WHERE item_id=$1 FOR NO KEY UPDATE', item_id)
         if quiz is None:
             raise HTTPException(404,'Quiz not found')
+        await require_live_student_access(conn, item_id, user['id'])
         previous = await conn.fetchrow('SELECT * FROM quiz_starts WHERE quiz_id=$1 AND student_id=$2 ORDER BY attempt_number DESC LIMIT 1 FOR UPDATE', item_id,user['id'])
         if previous:
             completed = await conn.fetchval('SELECT id FROM quiz_attempts WHERE quiz_id=$1 AND student_id=$2 AND attempt_number=$3',item_id,user['id'],previous['attempt_number'])
@@ -698,6 +700,8 @@ async def save_quiz_answers(item_id, data, user, submit=False):
     await ensure_item_access(user, item_id)
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
+        await conn.fetchrow('SELECT item_id FROM quizzes WHERE item_id=$1 FOR NO KEY UPDATE', item_id)
+        await require_live_student_access(conn, item_id, user['id'])
         start = await conn.fetchrow('SELECT * FROM quiz_starts WHERE quiz_id=$1 AND student_id=$2 ORDER BY attempt_number DESC LIMIT 1 FOR UPDATE',item_id,user['id'])
         if start is None:
             raise HTTPException(403,'Start the quiz first')

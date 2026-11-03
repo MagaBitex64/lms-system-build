@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from core.db import get_pool
 from core.deps import get_current_user
 from core.access import ensure_item_access
+from core.content_access import topic_sql
 from fastapi import HTTPException
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -42,26 +43,14 @@ async def search(
 
     if user["role"] == "student":
         lessons = await pool.fetch(
-            """
+            f"""
             SELECT ci.id, ci.title, ci.course_id, c.title AS course_title
             FROM course_items ci
             JOIN courses c ON c.id = ci.course_id
             JOIN enrollments e ON e.course_id = c.id AND e.student_id = $2 AND e.status = 'approved'
             LEFT JOIN lessons l ON l.item_id = ci.id
             WHERE c.is_published AND ci.is_visible AND (ci.title ILIKE $1 OR l.content ILIKE $1)
-              AND (
-                EXISTS (
-                  SELECT 1 FROM item_student_access isa
-                  WHERE isa.item_id = ci.id AND isa.student_id = $2
-                )
-                OR EXISTS (
-                  SELECT 1
-                  FROM item_group_access iga
-                  JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
-                  JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
-                  WHERE iga.item_id = ci.id
-                )
-              )
+              AND {topic_sql()}
             ORDER BY ci.title,ci.id LIMIT $3 OFFSET $4
             """,
             like,
@@ -70,7 +59,7 @@ async def search(
             offset,
         )
         materials = await pool.fetch(
-            """
+            f"""
             SELECT lm.id, lm.label, lm.kind, ci.id AS lesson_id, ci.title AS lesson_title,
                    c.id AS course_id, c.title AS course_title
             FROM lesson_materials lm
@@ -78,19 +67,7 @@ async def search(
             JOIN courses c ON c.id = ci.course_id
             JOIN enrollments e ON e.course_id = c.id AND e.student_id = $2 AND e.status = 'approved'
             WHERE c.is_published AND ci.is_visible AND lm.label ILIKE $1
-              AND (
-                EXISTS (
-                  SELECT 1 FROM item_student_access isa
-                  WHERE isa.item_id = ci.id AND isa.student_id = $2
-                )
-                OR EXISTS (
-                  SELECT 1
-                  FROM item_group_access iga
-                  JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
-                  JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = ci.course_id
-                  WHERE iga.item_id = ci.id
-                )
-              )
+              AND {topic_sql()}
             ORDER BY lm.label,lm.id LIMIT $3 OFFSET $4
             """,
             like,
@@ -100,7 +77,7 @@ async def search(
         )
     elif user["role"] in ("teacher", "admin"):
         lessons = await pool.fetch(
-            """
+            f"""
             SELECT ci.id, ci.title, ci.course_id, c.title AS course_title
             FROM course_items ci
             JOIN courses c ON c.id = ci.course_id
@@ -116,7 +93,7 @@ async def search(
             offset,
         )
         materials = await pool.fetch(
-            """
+            f"""
             SELECT lm.id, lm.label, lm.kind, ci.id AS lesson_id, ci.title AS lesson_title,
                    c.id AS course_id, c.title AS course_title
             FROM lesson_materials lm

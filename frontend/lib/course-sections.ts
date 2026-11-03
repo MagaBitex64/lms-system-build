@@ -1,4 +1,4 @@
-export type CourseSection = {id: number; title: string; position: number}
+export type CourseSection = {id: number; title: string; position: number; access_restricted?: boolean; access_student_ids?: number[]; access_group_ids?: number[]; quiz_access_rules?: Array<{target_type:string;target_id:number;max_attempts:number;deadline_at:string|null}>}
 export type SectionMaterial = {id: number; title: string; position: number; section_id?: number | null}
 
 export function groupCourseMaterials<T extends SectionMaterial>(sections: CourseSection[], items: T[]) {

@@ -3,6 +3,7 @@
 from fastapi import HTTPException
 
 from core.db import get_pool
+from core.content_access import topic_sql
 
 
 async def get_course_or_404(course_id: int) -> dict:
@@ -68,44 +69,21 @@ async def ensure_item_access(user: dict, item_id: int) -> tuple[dict, dict]:
 
 
 async def has_item_topic_access(student_id: int, item: dict) -> bool:
-    """Manual topic access: direct student access or access through a linked course group."""
     pool = await get_pool()
-    row = await pool.fetchrow(
-        """
-        SELECT 1
-        WHERE EXISTS (
-            SELECT 1 FROM item_student_access isa
-            WHERE isa.item_id = $1 AND isa.student_id = $2
-        )
-        OR EXISTS (
-            SELECT 1
-            FROM item_group_access iga
-            JOIN group_students gs ON gs.group_id = iga.group_id AND gs.student_id = $2
-            JOIN course_groups cg ON cg.group_id = iga.group_id AND cg.course_id = $3
-            WHERE iga.item_id = $1
-        )
-        """,
-        item["id"],
-        student_id,
-        item["course_id"],
-    )
-    return row is not None
+    return bool(await pool.fetchval(
+        f"SELECT {topic_sql()} FROM course_items ci WHERE ci.id=$1", item['id'], student_id))
 
 
 async def is_item_unlocked(student_id: int, item: dict) -> bool:
     pool = await get_pool()
     return await pool.fetchval(
-        """SELECT NOT EXISTS (
+        f"""SELECT NOT EXISTS (
         SELECT 1 FROM course_items ci
         LEFT JOIN quizzes q ON q.item_id=ci.id
         LEFT JOIN quiz_attempts qa ON qa.quiz_id=ci.id AND qa.student_id=$3
         LEFT JOIN homework_submissions hs ON hs.homework_id=ci.id AND hs.student_id=$3
         WHERE ci.course_id=$1 AND ci.position<$2 AND ci.is_visible
           AND (ci.type IN ('quiz','homework') OR q.item_id IS NOT NULL)
-          AND (EXISTS(SELECT 1 FROM item_student_access isa WHERE isa.item_id=ci.id AND isa.student_id=$3)
-            OR EXISTS(SELECT 1 FROM item_group_access iga
-                JOIN group_students gs ON gs.group_id=iga.group_id AND gs.student_id=$3
-                JOIN course_groups cg ON cg.group_id=iga.group_id AND cg.course_id=ci.course_id
-                WHERE iga.item_id=ci.id))
+          AND {topic_sql(student='$3')}
           AND CASE WHEN q.item_id IS NOT NULL THEN qa.id IS NULL ELSE hs.id IS NULL END
         )""",item['course_id'],item['position'],student_id)

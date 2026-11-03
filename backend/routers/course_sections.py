@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, field_validator
 from core.access import ensure_course_owner, get_item_or_404
 from core.course_sections import lock_course, normalize_item_order, require_same_ids, validate_section
 from core.db import get_pool
+from core.access_management import SectionAccessIn, validate_targets, write_grants
 from core.deps import require_teacher
 
 router = APIRouter()
@@ -89,4 +90,18 @@ async def move_item(item_id: int, data: ItemSectionIn, user: dict = Depends(requ
             WHERE id=$1 AND section_id IS DISTINCT FROM $2 RETURNING id''', item_id, data.section_id, item['course_id'])
         if row:
             await normalize_item_order(conn, item['course_id'])
+    return {'ok': True}
+
+
+@router.put('/{course_id}/sections/{section_id}/access')
+async def update_section_access(course_id: int, section_id: int, data: SectionAccessIn, user: dict = Depends(require_teacher)):
+    await ensure_course_owner(user, course_id)
+    pool = await get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        await lock_course(conn, course_id)
+        await validate_section(conn, course_id, section_id)
+        await conn.fetch('SELECT q.item_id FROM quizzes q JOIN course_items ci ON ci.id=q.item_id WHERE ci.section_id=$1 ORDER BY q.item_id FOR UPDATE OF q', section_id)
+        groups, students = await validate_targets(conn, course_id, data)
+        await write_grants(conn, 'section', section_id, groups, students, data.quiz_rules)
+        await conn.execute('UPDATE course_sections SET access_restricted=$2 WHERE id=$1',section_id,data.access_restricted)
     return {'ok': True}
