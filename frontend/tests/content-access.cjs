@@ -23,9 +23,13 @@ test('quiz overlapping rules display the strictest max attempts and section gate
  assert.match(html,/1 әрекет/);assert.match(html,/Тапсыру саны/)
  assert.match(render(target,{parent:{id:1,title:'Closed',kind:'section',access_restricted:true}}),/Бөлім рұқсаты жоқ/)
 })
-test('section access is explicit and confirmation is required before introducing restriction',()=>{
- const html=render({id:4,title:'Section',kind:'section',access_restricted:false})
- assert.match(html,/Бөлімге қолжетімділік/);assert.match(html,/Бөлімді таңдалған/);assert.match(html,/Тапсыру мерзімі/)
- const restricted=render({id:4,title:'Section',kind:'section',access_student_ids:[7]})
- assert.match(restricted,/Қолжетімділіктің шектелетінін растаймын/)
+test('section access manages recipients only, preserving individual quiz settings',()=>{
+ for(const access_restricted of [false,true]){
+  const html=render({id:4,title:'Section',kind:'section',access_restricted,access_student_ids:[7],quiz_access_rules:[{target_type:'student',target_id:7,max_attempts:3,deadline_at:'2030-01-01T00:00:00Z'}]})
+  assert.match(html,/Бөлімге қолжетімділік/);assert.match(html,/Бөлімді таңдалған/)
+  assert.match(html,/Оқушылар/);assert.match(html,/Топтар/);assert.match(html,/Сақтау/)
+  assert.doesNotMatch(html,/Тапсыру саны|Тапсыру мерзімі|Бөлімнен рұқсат|растаймын|3 әрекет/)
+ }
+ const quiz=render({id:2,title:'Quiz',kind:'item',type:'quiz'})
+ assert.match(quiz,/Тапсыру саны/);assert.match(quiz,/Тапсыру мерзімі/)
 })

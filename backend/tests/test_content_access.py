@@ -163,6 +163,11 @@ class ContentAccessTests(unittest.IsolatedAsyncioTestCase):
         later=early+dt.timedelta(days=1)
         await self.grant_section(sid,student_ids=[student],group_ids=[g1,g2],quiz_rules={'max_attempts':4,'deadline_at':later.isoformat()})
         await self.pool.execute('UPDATE section_group_access SET max_attempts=2,deadline_at=$2 WHERE group_id=$1',g1,early)
+        before=[dict(r) for r in await self.pool.fetch('SELECT * FROM section_group_access WHERE section_id=$1 ORDER BY group_id',sid)]
+        # The simplified modal sends recipients only; legacy limits are untouched.
+        await self.grant_section(sid,student_ids=[student],group_ids=[g1,g2])
+        after=[dict(r) for r in await self.pool.fetch('SELECT * FROM section_group_access WHERE section_id=$1 ORDER BY group_id',sid)]
+        self.assertEqual(before,after)
         view=(await self.request('GET',f'/quizzes/{iid}')).json()
         self.assertEqual(view['max_attempts'],2)
         self.assertEqual(dt.datetime.fromisoformat(view['access_deadline_at']),early)
