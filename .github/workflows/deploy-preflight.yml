@@ -107,6 +107,7 @@ jobs:
           'ent',(SELECT json_object_agg(state,n) FROM (SELECT state,count(*) n FROM ent GROUP BY state) x),
           'quiz',(SELECT json_object_agg(state,n) FROM (SELECT state,count(*) n FROM quiz GROUP BY state) x),
           'latest_deadline',(SELECT max(deadline_at) FROM ent_trial_attempts WHERE status='in_progress'));
+          SELECT json_build_object('timer_metadata_columns',count(*)) FROM information_schema.columns WHERE table_schema=current_schema() AND column_name='completion_reason' AND table_name IN ('ent_trial_attempts','quiz_attempts');
           COMMIT;
           SQL
             if test "$sample" = 1; then sleep 5; fi
@@ -116,4 +117,7 @@ jobs:
             printf '%s image: ' "$service"
             docker inspect --format '{{.Config.Image}}' "$container"
           done
+          backend=$(docker compose -p app --env-file .env -f docker-compose.yml ps -q backend)
+          errors=$(docker logs --since 10m "$backend" 2>&1 | grep -Ec 'ERROR|Traceback' || true)
+          printf 'backend_recent_error_count=%s\n' "$errors"
           REMOTE
