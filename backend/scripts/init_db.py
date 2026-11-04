@@ -553,7 +553,8 @@ async def main() -> None:
             from scripts.enrollment_migrations import ENROLLMENT_MIGRATIONS
             from scripts.onboarding_migrations import ONBOARDING_MIGRATIONS
             from scripts.proctor_migrations import PROCTOR_MIGRATIONS
-            for migration in PROCTOR_MIGRATIONS + ONBOARDING_MIGRATIONS + ENT_MIGRATIONS + RELEASE_MIGRATIONS + TOPICAL_MIGRATIONS + COURSE_SECTION_MIGRATIONS + SECTION_ACCESS_MIGRATIONS + ENROLLMENT_MIGRATIONS:
+            from scripts.exam_timer_migrations import EXAM_TIMER_MIGRATIONS
+            for migration in PROCTOR_MIGRATIONS + ONBOARDING_MIGRATIONS + ENT_MIGRATIONS + RELEASE_MIGRATIONS + TOPICAL_MIGRATIONS + COURSE_SECTION_MIGRATIONS + SECTION_ACCESS_MIGRATIONS + ENROLLMENT_MIGRATIONS + EXAM_TIMER_MIGRATIONS:
                 key = hashlib.sha256(migration.encode()).hexdigest()
                 if not await conn.fetchval('SELECT 1 FROM schema_migrations WHERE id=$1', key):
                     await conn.execute(migration)

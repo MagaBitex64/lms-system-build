@@ -1,7 +1,19 @@
 #!/bin/sh
 set -eu
 restore_id=''
+gate_dir=''
+gate_pid=''
+release_gate() {
+  if test -n "$gate_pid"; then
+    printf '%s\n' 'ROLLBACK;' '\q' >&3 || true
+    wait "$gate_pid" || true
+    exec 3>&-
+    gate_pid=''
+  fi
+}
 cleanup() {
+  release_gate
+  if test -n "$gate_dir"; then rm -rf "$gate_dir"; fi
   if test -n "$restore_id"; then docker rm -f "$restore_id" >/dev/null 2>&1 || true; fi
   docker logout ghcr.io >/dev/null 2>&1 || true
 }
@@ -29,17 +41,13 @@ old_backend=$(docker inspect --format '{{.Config.Image}}' "$backend_id")
 old_frontend=$(docker inspect --format '{{.Config.Image}}' "$frontend_id")
 old_api=$(docker exec "$frontend_id" printenv NEXT_PUBLIC_API_BASE_URL 2>/dev/null || true)
 
-# Refuse to interrupt running UNT or topical tests. Fail closed if SQL fails.
+# Read-only classification: never-activated records are not running timers.
+# Unknown/inconsistent records and unfinished untimed quizzes remain blockers.
 check_exam_window() {
-  active=$(dc_old exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"' sh "
-    SELECT (SELECT count(*) FROM ent_trial_attempts
-      WHERE status='in_progress' AND (deadline_at IS NULL OR deadline_at>now()))
-    + (SELECT count(*) FROM quiz_starts s
-      WHERE (s.deadline_at IS NULL OR s.deadline_at>now())
-      AND NOT EXISTS(SELECT 1 FROM quiz_attempts a WHERE a.quiz_id=s.quiz_id
-        AND a.student_id=s.student_id AND a.attempt_number=s.attempt_number));")
-  test "$active" = 0 || { echo 'Active examinations detected; deployment stopped before service changes' >&2; exit 1; }
+  active=$(dc_old exec -T db sh -c 'exec psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At' < deploy/exam-window.sql)
+  test "$active" = 0 || { echo 'Active or ambiguous examinations detected; deployment stopped before service changes' >&2; exit 1; }
 }
+
 check_exam_window
 
 umask 077
@@ -83,7 +91,43 @@ EOF
 
 dc_new pull backend frontend
 check_exam_window
-if ! dc_new up -d --no-build --wait --wait-timeout 120 backend frontend; then
+# Close the start/activation race using PostgreSQL table locks, including for
+# the OLD backend which does not know about deployment gates. No row is changed.
+# SHARE conflicts with INSERT/UPDATE, but allows read-only classification.
+# Release only AFTER the old backend has stopped, so new initialization can run.
+umask 077
+gate_dir=$(mktemp -d)
+mkfifo "$gate_dir/input"
+exec 3<>"$gate_dir/input"
+dc_old exec -T db sh -c 'exec psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < "$gate_dir/input" > "$gate_dir/output" 2> "$gate_dir/error" &
+gate_pid=$!
+printf '%s\n' 'BEGIN;' "SET LOCAL lock_timeout='3s';" 'LOCK TABLE ent_trial_attempts, quiz_starts IN SHARE MODE;' '\echo EXAM_GATE_READY' >&3
+tries=0
+until grep -q '^EXAM_GATE_READY$' "$gate_dir/output"; do
+  kill -0 "$gate_pid" 2>/dev/null || { echo 'Exam activation lock failed; refusing deployment' >&2; exit 1; }
+  tries=$((tries+1))
+  test "$tries" -lt 10 || { echo 'Exam activation lock timed out; refusing deployment' >&2; exit 1; }
+  sleep 1
+done
+check_exam_window
+kill -0 "$gate_pid" 2>/dev/null || exit 1
+rollout() {
+  dc_new up -d --no-build backend frontend > "$gate_dir/rollout" 2>&1 &
+  rollout_pid=$!
+  tries=0
+  while test "$(docker inspect --format '{{.State.Running}}' "$backend_id" 2>/dev/null || true)" = true; do
+    kill -0 "$gate_pid" 2>/dev/null || { kill "$rollout_pid" 2>/dev/null || true; wait "$rollout_pid" || true; return 1; }
+    kill -0 "$rollout_pid" 2>/dev/null || { wait "$rollout_pid"; return 1; }
+    tries=$((tries+1))
+    if test "$tries" -ge 60; then kill "$rollout_pid" 2>/dev/null || true; wait "$rollout_pid" || true; return 1; fi
+    sleep 1
+  done
+  release_gate
+  wait "$rollout_pid" || return 1
+  dc_new up -d --no-build --wait --wait-timeout 120 backend frontend
+}
+if ! rollout; then
+  release_gate
   echo 'New containers failed health checks; restoring previous images' >&2
   dc_new --env-file .rollback.env up -d --no-build --wait --wait-timeout 120 backend frontend || true
   exit 1

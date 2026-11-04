@@ -44,7 +44,8 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.conn.execute(f'SET LOCAL search_path TO "{name}"')
         await self.conn.execute(SCHEMA)
         from scripts.proctor_migrations import PROCTOR_MIGRATIONS
-        for migration in ENT_MIGRATIONS + PROCTOR_MIGRATIONS:
+        from scripts.exam_timer_migrations import EXAM_TIMER_MIGRATIONS
+        for migration in ENT_MIGRATIONS + PROCTOR_MIGRATIONS + EXAM_TIMER_MIGRATIONS:
             await self.conn.execute(migration)
         self.users = {}
         for role in ("admin", "student", "teacher"):

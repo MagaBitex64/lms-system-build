@@ -1,5 +1,7 @@
 'use client'
 
+import { serverCountdown } from '@/lib/exam-clock'
+
 import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -80,6 +82,8 @@ type QuizAttempt = {
 }
 
 type ItemDetail = {
+  server_time?: string
+  lifecycle?: string
   type?: ItemType
   is_owner?: boolean
   is_topical?: boolean
@@ -1170,12 +1174,12 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
 
   useEffect(() => {
     if (!data.attempt_deadline_at || data.attempt || !data.quiz_started) return
-    const end = performance.now() + (data.remaining_seconds ?? 0) * 1000
-    const tick = () => setSecondsLeft(Math.max(0, Math.ceil((end - performance.now()) / 1000)))
+    const remaining = serverCountdown(data.attempt_deadline_at, data.server_time, () => performance.now())
+    const tick = () => setSecondsLeft(remaining())
     tick()
     const timer = window.setInterval(tick, 1000)
     return () => window.clearInterval(timer)
-  }, [data.attempt_deadline_at, data.remaining_seconds, data.attempt, data.quiz_started])
+  }, [data.attempt_deadline_at, data.server_time, data.remaining_seconds, data.attempt, data.quiz_started])
 
   function answerPayload() {
     return questions.map(q => ({ question_id: q.id, selected_option_ids: latest.current[q.id]?.selected_option_ids ?? [], text_answer: latest.current[q.id]?.text_answer ?? '' }))
@@ -1197,7 +1201,7 @@ function StudentQuiz({ data, reload }: { data: ItemDetail; reload: () => Promise
     const job = (async () => {
       try {
         const result = await flushAnswers()
-        setSaveMessage('Жауаптар сақталды')
+        setSaveMessage(dirty.current === saved.current ? 'Жауаптар сақталды' : 'Сақталуда…')
         if (result.submitted) await reload()
       } catch (err) { if (err instanceof ApiError && err.status === 409) setConflicted(true); setError((err as Error).message); setSaveMessage('Сақтау орындалмады') }
     })()

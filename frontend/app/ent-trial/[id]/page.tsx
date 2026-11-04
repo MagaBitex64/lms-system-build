@@ -10,6 +10,7 @@ import { Clock, Flag, ChevronLeft, ChevronRight } from 'lucide-react'
 import EntExamTools from '@/components/ent-exam-tools'
 import AuthImage from '@/components/auth-image'
 import LatexText from '@/components/latex-text'
+import { serverCountdown } from '@/lib/exam-clock'
 
 type Answer = { selected_option_id: number | null; selected_option_ids: number[]; matching_answer: Record<string, number | string> }
 type Question = Answer & { question_id: number; position: number; prompt: string; question_type: string; context_text: string; image_url: string; image_file_id: number | null; image_placement: 'before' | 'after' | 'marker'; image_width: number; image_alt: string; max_points: number; options: { id: number; text: string }[]; matching_pairs: { id: number; left_text: string }[] }
@@ -93,11 +94,21 @@ export default function EntTestPage() {
   useEffect(() => {
     if (data?.status === 'submitted') router.replace(`/ent-trial/${id}/result`)
     if (!data || data.remaining_seconds === null) { setTimeLeft(null); return }
-    const end = performance.now() + data.remaining_seconds * 1000
-    const tick = () => setTimeLeft(Math.max(0, Math.ceil((end - performance.now()) / 1000)))
+    const remaining = serverCountdown(data.deadline_at, data.server_time, () => performance.now())
+    const tick = () => setTimeLeft(remaining())
     tick(); const interval = window.setInterval(tick, 1000)
     return () => window.clearInterval(interval)
   }, [data, id, router])
+
+  // Laptop sleep can suspend the monotonic clock. Resynchronize on return;
+  // saved server answers/deadline remain authoritative, local unsaved edits stay dirty.
+  useEffect(() => {
+    const sync = () => { if (document.visibilityState === 'visible') void mutate() }
+    window.addEventListener('online', sync)
+    window.addEventListener('focus', sync)
+    document.addEventListener('visibilitychange', sync)
+    return () => { window.removeEventListener('online', sync); window.removeEventListener('focus', sync); document.removeEventListener('visibilitychange', sync) }
+  }, [mutate])
 
   const reportProctor = useCallback(async (event_type: string, details: Record<string, unknown> = {}) => {
     if (!sessionId.current) return
@@ -232,7 +243,9 @@ export default function EntTestPage() {
     const request = (async () => {
       try {
         const res = await api<SaveResult>(`/ent-trial/attempts/${id}/answers`, { method: 'PATCH', body: { session_id: sessionId.current, proctor_token: proctorToken.current, revision: revision.current, answers: payload() } })
-        revision.current = res.revision; savedSequence.current = current
+        revision.current = res.revision
+        if (res.status === 'submitted') { router.replace(`/ent-trial/${id}/result`); return }
+        savedSequence.current = current
         setSaveStatus(sequence.current === current ? 'Барлық жауап сақталды' : 'Сақталуда…')
         if (res.status === 'submitted') router.replace(`/ent-trial/${id}/result`)
       } catch (e) {

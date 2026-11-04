@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from core.access import ensure_course_owner
 from core.db import get_pool
+from core.exam_lifecycle import lifecycle, timing
 from core.ent_review import answer_review
 from core.deps import get_current_user, require_admin, require_student, require_teacher
 from core.ent_rules import (COMBINATIONS, DURATION_SECONDS, RULES_VERSION, SUBJECT_LABELS,
@@ -794,8 +795,9 @@ async def activate_proctor(attempt_id: int, data: ProctorActivateIn, user: dict 
         raise HTTPException(422, "Қосылмаған: " + ", ".join(missing))
     async with pool.acquire() as conn, conn.transaction():
         attempt = await owned_attempt(conn, attempt_id, user["id"])
-        if attempt["status"] == "submitted":
-            return {"ok": True, "status": "submitted"}
+        if attempt["status"] == "submitted" or (attempt["deadline_at"] and attempt["deadline_at"] <= now()):
+            attempt = await finish(conn, attempt)
+            return {"ok": True, "status": "submitted", "lifecycle": lifecycle(True, attempt["deadline_at"], now(), attempt.get("completion_reason")), **timing(attempt["activated_at"], attempt["deadline_at"], now())}
         if attempt["deadline_at"] is None:
             snapshot = decoded(attempt["snapshot"])
             duration = int(snapshot.get("duration_seconds", DURATION_SECONDS))
@@ -815,7 +817,7 @@ async def activate_proctor(attempt_id: int, data: ProctorActivateIn, user: dict 
         lease = secrets.token_urlsafe(32)
         await conn.execute("UPDATE ent_trial_attempts SET proctor_session_id=$2,proctor_lease_hash=$3,proctor_last_seen_at=now() WHERE id=$1", attempt_id, data.session_id, hashlib.sha256(lease.encode()).hexdigest())
     return {"proctor_token": lease, "expires_in": 45, "ok": True, "status": attempt["status"], "deadline_at": attempt["deadline_at"],
-            "violations": attempt["proctor_violations"]}
+            "violations": attempt["proctor_violations"], "lifecycle": "active", **timing(attempt["activated_at"], attempt["deadline_at"], now())}
 
 
 @router.post("/attempts/{attempt_id}/proctor/events")
@@ -828,7 +830,8 @@ async def proctor_event(attempt_id: int, data: ProctorEventIn, user: dict = Depe
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
         attempt = await owned_attempt(conn, attempt_id, user["id"])
-        if attempt["status"] == "submitted":
+        if attempt["status"] == "submitted" or (attempt["deadline_at"] and attempt["deadline_at"] <= now()):
+            attempt = await finish(conn, attempt)
             return {"ok": True, "status": "submitted", "violations": attempt["proctor_violations"]}
         require_proctor_lease(attempt, data.session_id, data.proctor_token)
         loss = data.event_type in {"absence_start", "fullscreen_exit", "screen_share_stopped"} or (data.event_type == "camera_stopped" and decoded(attempt["snapshot"]).get("camera_required", True))
@@ -931,12 +934,13 @@ async def finish(conn, attempt):
         scores[q["subject"]] = scores.get(q["subject"], 0) + awarded
         question_scores[str(q['question_id'])] = {'awarded': awarded, 'maximum': q.get('max_points')}
     s1, s2 = COMBINATIONS[attempt["combination"]]
-    return dict(await conn.fetchrow("""UPDATE ent_trial_attempts SET status='submitted',submitted_at=LEAST(clock_timestamp(),deadline_at),
+    reason = "expired" if attempt["deadline_at"] and attempt["deadline_at"] <= now() else "submitted"
+    return dict(await conn.fetchrow("""UPDATE ent_trial_attempts SET status='submitted',submitted_at=LEAST(clock_timestamp(),deadline_at),completion_reason=$10,
         kaz_history_score=$2,reading_score=$3,math_score=$4,subject1_score=$5,subject2_score=$6,total_score=$7,
         scores_by_subject=$8::jsonb,question_scores=$9::jsonb,proctor_status=CASE WHEN proctor_status='terminated' THEN 'terminated' ELSE 'finished' END
         WHERE id=$1 RETURNING *""", attempt["id"], scores.get("kaz_history", 0), scores.get("reading", 0),
         scores.get("math_literacy", 0), scores.get(s1, 0), scores.get(s2, 0), sum(scores.values()), json.dumps(scores),
-        json.dumps({'version': 1, 'rules_version': snapshot.get('version'), 'points': question_scores})))
+        json.dumps({'version': 1, 'rules_version': snapshot.get('version'), 'points': question_scores}), reason))
 
 
 async def finalize_expired(student_id=None):
@@ -945,7 +949,12 @@ async def finalize_expired(student_id=None):
         rows = await conn.fetch("""SELECT * FROM ent_trial_attempts WHERE status='in_progress' AND deadline_at<=now()
             AND ($1::bigint IS NULL OR student_id=$1) ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED""", student_id)
         for row in rows:
-            await finish(conn, await ensure_snapshot(conn, row))
+            try:
+                async with conn.transaction():
+                    await finish(conn, await ensure_snapshot(conn, row))
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("Expired ENT finalization failed for attempt %s", row["id"])
 
 
 async def owned_attempt(conn, attempt_id, student_id):
@@ -1003,10 +1012,14 @@ def public_attempt(attempt):
             "max_score": subject_max_score,
             "percentage": round(subject_score / subject_max_score * 100, 2) if subject_max_score else 0,
         })
-    return {"id": attempt["id"], "status": attempt["status"], "combination": attempt["combination"],
+    current = now()
+    return {"id": attempt["id"], "status": attempt["status"],
+            "lifecycle": lifecycle(submitted, deadline, current, attempt.get("completion_reason"), started=deadline is not None),
+            "completion_reason": attempt.get("completion_reason"),
+            **timing(attempt.get("activated_at") or (attempt["started_at"] if deadline else None), deadline, current),
+            "combination": attempt["combination"],
             "variant_id": attempt["variant_id"], "rules_version": snapshot["version"], "title": snapshot["title"],
-            "started_at": attempt["started_at"], "deadline_at": attempt["deadline_at"], "server_time": now(),
-            "remaining_seconds": max(0, int((deadline - now()).total_seconds())) if deadline else None,
+            "deadline_at": deadline,
             "submitted_at": attempt["submitted_at"], "revision": attempt["response_revision"],
             "requires_proctor_setup": attempt["status"] == "in_progress" and deadline is None,
             "camera_required": snapshot.get("camera_required", True),

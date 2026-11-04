@@ -45,6 +45,9 @@ async def complete_quiz(conn, start):
         VALUES($1,$2,$3,$4,LEAST(clock_timestamp(),COALESCE($5,clock_timestamp())),$6,$7) RETURNING *""",
         start['quiz_id'],start['student_id'],round(auto_points/points*maximum,2),
         'pending_review' if manual else 'graded',start['deadline_at'],number,start.get('max_score_snapshot'))
+    reason = 'expired' if start['deadline_at'] and start['deadline_at'] <= utcnow() else 'submitted'
+    await conn.execute('UPDATE quiz_attempts SET completion_reason=$2 WHERE id=$1', result['id'], reason)
+    result = dict(result) | {'completion_reason': reason}
     await conn.executemany('INSERT INTO attempt_answers(attempt_id,question_id,selected_option_ids,text_answer,awarded_points) VALUES($1,$2,$3,$4,$5)',
         [(result['id'], *answer) for answer in answers])
     return result
@@ -83,4 +86,9 @@ async def finalize_expired_quizzes(pool):
             AND NOT EXISTS(SELECT 1 FROM quiz_attempts a WHERE a.quiz_id=s.quiz_id AND a.student_id=s.student_id AND a.attempt_number=s.attempt_number)
             ORDER BY s.deadline_at LIMIT 100 FOR UPDATE OF s SKIP LOCKED""")
         for row in rows:
-            await complete_quiz(conn,row)
+            try:
+                async with conn.transaction():
+                    await complete_quiz(conn,row)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("Expired quiz finalization failed for quiz %s attempt %s", row["quiz_id"], row["attempt_number"])

@@ -21,17 +21,22 @@ from routers import admin, audit, auth, courses, enrollments, ent_trial, files, 
 logger = logging.getLogger(__name__)
 
 
+async def expire_exam_attempts_once():
+    # The same durable SQL scan runs on startup and every cycle; no in-memory timers.
+    try:
+        await ent_trial.finalize_expired()
+    except Exception:
+        logger.exception("Failed to finalize expired ENT attempts")
+    try:
+        pool = await get_pool()
+        await finalize_expired_quizzes(pool)
+    except Exception:
+        logger.exception("Failed to finalize expired LMS quizzes")
+
+
 async def expire_ent_attempts():
     while True:
-        try:
-            await ent_trial.finalize_expired()
-        except Exception:
-            logger.exception("Failed to finalize expired ENT attempts")
-        try:
-            pool = await get_pool()
-            await finalize_expired_quizzes(pool)
-        except Exception:
-            logger.exception("Failed to finalize expired LMS quizzes")
+        await expire_exam_attempts_once()
         try:
             pool = await get_pool()
             await pool.execute("DELETE FROM request_limits WHERE window_start < now()-interval '1 day'")

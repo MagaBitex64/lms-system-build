@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from core.access import ensure_course_owner, ensure_item_access, get_item_or_404
 from core.db import get_pool
+from core.exam_lifecycle import lifecycle, timing
 from core.quiz_attempts import quiz_state, complete_quiz, normalized_answers, decoded, utcnow
 from core.topical_quiz import access_rules, readiness
 from core.content_access import require_live_student_access
@@ -622,7 +623,8 @@ async def get_quiz(item_id: int, attempt_number: int | None = Query(default=None
         "total_points": total_points,
         "question_count": question_count,
         "quiz_started": started,
-        "server_time": utcnow().isoformat(),
+        **timing(state["started_at"] if state else None, state["deadline_at"] if state else None, utcnow()),
+        "lifecycle": lifecycle(attempt is not None, state["deadline_at"] if state else None, utcnow(), attempt.get("completion_reason") if attempt else None, started=state is not None),
         "attempt_deadline_at": str(state['deadline_at']) if state and state['deadline_at'] else None,
         "remaining_seconds": max(0,int((state['deadline_at']-utcnow()).total_seconds())) if state and state['deadline_at'] else None,
         "revision": state['response_revision'] if state else 0,

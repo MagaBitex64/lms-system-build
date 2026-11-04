@@ -23,7 +23,7 @@ function render(data, role = 'admin', archive = false) {
     '@/lib/auth': {useAuth: () => ({user: {role}})},
     '@/lib/i18n': {useI18n: () => ({t: key => key})},
     '@/components/ui': ui,
-    '@/lib/api': {}, '@/lib/quiz-answer-save': {},
+    '@/lib/exam-clock': {}, '@/lib/api': {}, '@/lib/quiz-answer-save': {},
     '@/components/auth-image': {default: () => null},
     '@/components/latex-text': {default: ({text}) => React.createElement('span', {}, text)},
   }
