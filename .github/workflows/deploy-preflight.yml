@@ -147,7 +147,7 @@ jobs:
            before=await c.fetchval("SELECT md5(coalesce(string_agg(row_to_json(t)::text,',' ORDER BY t.id),'')) FROM ent_trial_attempts t")
            async with httpx.AsyncClient(base_url='http://127.0.0.1:8000',timeout=30) as api:
             header={'Authorization':'Bearer '+create_access_token(admin['id'],'admin',admin['auth_version'])}
-            email='qa-unt-audience-'+uuid.uuid4().hex+'@example.invalid'
+            email='qa-unt-audience-'+uuid.uuid4().hex+'@example.com'
             r=await api.post('/admin/users',headers=header,json={'email':email,'full_name':'QA UNT audience verification','role':'student'});assert r.status_code==200,r.status_code;account=r.json()
             r=await api.post('/auth/login',json={'email':email,'password':account['temporary_password']});assert r.status_code==200,r.status_code
             token=r.json()['token'];password=secrets.token_urlsafe(32)
