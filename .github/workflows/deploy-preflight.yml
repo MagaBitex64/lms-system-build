@@ -2,6 +2,11 @@ name: Production connection check
 
 on:
   workflow_dispatch:
+    inputs:
+      verify_audience:
+        type: boolean
+        default: false
+        description: Create one dedicated student to verify deployed audience authorization
 
 permissions:
   contents: read
@@ -121,4 +126,44 @@ jobs:
           backend=$(docker compose -p app --env-file .env -f docker-compose.yml ps -q backend)
           errors=$(docker logs --since 10m "$backend" 2>&1 | grep -Ec 'ERROR|Traceback' || true)
           printf 'backend_recent_error_count=%s\n' "$errors"
+          REMOTE
+
+      - name: Verify deployed audience with dedicated student
+        if: ${{ inputs.verify_audience }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes root@93.170.73.162 bash -s <<'REMOTE'
+          set -eu
+          cd /opt/lms/app
+          backend=$(docker compose -p app --env-file .env -f docker-compose.yml ps -q backend)
+          docker exec -i "$backend" python <<'PYTHON'
+          import asyncio,json,secrets,uuid,asyncpg,httpx
+          from core.config import DATABASE_URL
+          from core.security import create_access_token
+          async def main():
+           c=await asyncpg.connect(DATABASE_URL)
+           assert await c.fetchval("SELECT count(*) FROM information_schema.columns WHERE table_name='ent_trial_accesses' AND column_name='audience_mode'")==1
+           admin=await c.fetchrow("SELECT id,role,auth_version FROM users WHERE role='admin' AND NOT is_blocked ORDER BY id LIMIT 1")
+           assert admin
+           before=await c.fetchval("SELECT md5(coalesce(string_agg(row_to_json(t)::text,',' ORDER BY t.id),'')) FROM ent_trial_attempts t")
+           async with httpx.AsyncClient(base_url='http://127.0.0.1:8000',timeout=30) as api:
+            header={'Authorization':'Bearer '+create_access_token(admin['id'],'admin',admin['auth_version'])}
+            email='qa-unt-audience-'+uuid.uuid4().hex+'@example.invalid'
+            r=await api.post('/admin/users',headers=header,json={'email':email,'full_name':'QA UNT audience verification','role':'student'});assert r.status_code==200,r.status_code;account=r.json()
+            r=await api.post('/auth/login',json={'email':email,'password':account['temporary_password']});assert r.status_code==200,r.status_code
+            token=r.json()['token'];password=secrets.token_urlsafe(32)
+            r=await api.post('/auth/setup-password',headers={'Authorization':'Bearer '+token},json={'new_password':password,'confirmation':password});assert r.status_code==200,r.status_code
+            r=await api.post('/auth/login',json={'email':email,'password':password});assert r.status_code==200,r.status_code;sh={'Authorization':'Bearer '+r.json()['token']}
+            r=await api.get('/ent-trial/my-accesses',headers=sh);assert r.status_code==200,r.status_code;items=r.json()['items']
+            snapshot_ids=set(await c.fetchval("SELECT coalesce(array_agg(id),'{}'::bigint[]) FROM ent_trial_accesses WHERE audience_mode='current_students'"))
+            assert not snapshot_ids.intersection(x['id'] for x in items)
+            assert await c.fetchval('SELECT count(*) FROM ent_trial_attempts WHERE student_id=$1',account['id'])==0
+            denied=await c.fetchval("SELECT id FROM ent_trial_accesses WHERE revoked_at IS NOT NULL OR expires_at<=now() ORDER BY id LIMIT 1")
+            if denied:
+             r=await api.post(f'/ent-trial/accesses/{denied}/start',headers=sh);assert r.status_code==403,r.status_code
+            after=await c.fetchval("SELECT md5(coalesce(string_agg(row_to_json(t)::text,',' ORDER BY t.id),'')) FROM ent_trial_attempts t")
+            assert before==after,'Concurrent historical attempt change requires investigation'
+            print(json.dumps({'production_audience_smoke':'passed','student_id':account['id'],'email':email,'snapshot_grants_checked':len(snapshot_ids),'visible_legacy_or_explicit_global':len(items),'denied_expired_start':denied is not None,'historical_attempts_unchanged':True,'created_attempts':0}))
+           await c.close()
+          asyncio.run(main())
+          PYTHON
           REMOTE
