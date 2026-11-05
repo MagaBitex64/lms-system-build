@@ -108,7 +108,7 @@ jobs:
           'quiz',(SELECT json_object_agg(state,n) FROM (SELECT state,count(*) n FROM quiz GROUP BY state) x),
           'latest_deadline',(SELECT max(deadline_at) FROM ent_trial_attempts WHERE status='in_progress'));
           SELECT json_build_object('timer_metadata_columns',count(*)) FROM information_schema.columns WHERE table_schema=current_schema() AND column_name='completion_reason' AND table_name IN ('ent_trial_attempts','quiz_attempts');
-          SELECT json_build_object('legacy_all_grants',(SELECT count(*) FROM ent_trial_accesses WHERE target_type='all' AND revoked_at IS NULL),'grant_audit',(SELECT coalesce(json_agg(x),'[]') FROM (SELECT id,variant_id,created_at,expires_at FROM ent_trial_accesses WHERE target_type='all' AND revoked_at IS NULL ORDER BY id) x));
+          SELECT json_build_object('legacy_all_grants',(SELECT count(*) FROM ent_trial_accesses WHERE target_type='all' AND revoked_at IS NULL),'grant_audit',(SELECT coalesce(json_agg(x),'[]') FROM (SELECT a.id,a.variant_id,a.created_at,a.expires_at,(a.expires_at IS NULL OR a.expires_at>now()) unexpired,a.max_attempts,a.camera_required,(SELECT count(*) FROM ent_trial_attempts t WHERE t.access_id=a.id) attempts,(SELECT count(*) FROM ent_trial_attempts t WHERE t.access_id=a.id AND t.status='submitted') completed,(SELECT coalesce(sum(t.total_score),0) FROM ent_trial_attempts t WHERE t.access_id=a.id AND t.status='submitted') total_saved_score FROM ent_trial_accesses a WHERE target_type='all' AND revoked_at IS NULL ORDER BY id) x));
           COMMIT;
           SQL
             if test "$sample" = 1; then sleep 5; fi
