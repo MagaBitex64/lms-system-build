@@ -162,7 +162,8 @@ jobs:
              r=await api.post(f'/ent-trial/accesses/{denied}/start',headers=sh);assert r.status_code==403,r.status_code
             after=await c.fetchval("SELECT md5(coalesce(string_agg(row_to_json(t)::text,',' ORDER BY t.id),'')) FROM ent_trial_attempts t")
             assert before==after,'Concurrent historical attempt change requires investigation'
-            print(json.dumps({'production_audience_smoke':'passed','student_id':account['id'],'email':email,'snapshot_grants_checked':len(snapshot_ids),'visible_legacy_or_explicit_global':len(items),'denied_expired_start':denied is not None,'historical_attempts_unchanged':True,'created_attempts':0}))
+            cleanup=await api.post(f"/admin/users/{account['id']}/block",headers=header,json={'is_blocked':True});assert cleanup.status_code==200,cleanup.status_code
+            print(json.dumps({'production_audience_smoke':'passed','test_account_blocked_after_check':True,'student_id':account['id'],'email':email,'snapshot_grants_checked':len(snapshot_ids),'visible_legacy_or_explicit_global':len(items),'denied_expired_start':denied is not None,'historical_attempts_unchanged':True,'created_attempts':0}))
            await c.close()
           asyncio.run(main())
           PYTHON
