@@ -71,14 +71,14 @@ restore_id=$(docker run -d --network none --tmpfs /var/lib/postgresql/data \
   -e POSTGRES_HOST_AUTH_METHOD=trust \
   --mount "type=bind,src=$backup/database.dump,dst=/backup/database.dump,readonly" "$db_image")
 tries=0
-until docker exec "$restore_id" pg_isready -U postgres >/dev/null 2>&1; do
+until docker exec "$restore_id" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; do
   tries=$((tries + 1))
   test "$tries" -lt 30 || { echo 'Backup verification DB did not become ready' >&2; exit 1; }
   sleep 1
 done
 # --clean applies only to the disposable verifier, never to production.
 docker exec "$restore_id" pg_restore --exit-on-error --clean --if-exists --no-owner --no-privileges \
-  -U postgres -d postgres /backup/database.dump
+  -h 127.0.0.1 -U postgres -d postgres /backup/database.dump
 docker rm -f "$restore_id" >/dev/null
 restore_id=''
 echo 'Backup restore verification succeeded'
