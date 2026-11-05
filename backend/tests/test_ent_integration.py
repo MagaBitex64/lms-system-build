@@ -45,7 +45,8 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.conn.execute(SCHEMA)
         from scripts.proctor_migrations import PROCTOR_MIGRATIONS
         from scripts.exam_timer_migrations import EXAM_TIMER_MIGRATIONS
-        for migration in ENT_MIGRATIONS + PROCTOR_MIGRATIONS + EXAM_TIMER_MIGRATIONS:
+        from scripts.ent_audience_migrations import ENT_AUDIENCE_MIGRATIONS
+        for migration in ENT_MIGRATIONS + PROCTOR_MIGRATIONS + EXAM_TIMER_MIGRATIONS + ENT_AUDIENCE_MIGRATIONS:
             await self.conn.execute(migration)
         self.users = {}
         for role in ("admin", "student", "teacher"):
@@ -104,7 +105,7 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 200, response.text)
 
     async def start(self, vid):
-        response = await self.client.post("/ent-trial/admin/accesses", json={"variant_id": vid, "target_type": "all"})
+        response = await self.client.post("/ent-trial/admin/accesses", json={"variant_id": vid, "target_type": "global"})
         self.assertEqual(response.status_code, 200, response.text)
         aid = response.json()["id"]
         self.actor = self.users["student"]
@@ -125,7 +126,7 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_full_exam_snapshots_autosave_permissions_and_140_score(self):
         vid = await self.create_variant()
         for _ in range(2):  # Incomplete variants cannot be assigned.
-            response = await self.client.post("/ent-trial/admin/accesses", json={"variant_id": vid, "target_type": "all"})
+            response = await self.client.post("/ent-trial/admin/accesses", json={"variant_id": vid, "target_type": "global"})
             self.assertEqual(response.status_code, 409)
         qs = await self.fill_variant(vid)
         contextual = copy.deepcopy(qs[10]); contextual.update({"context_mode": "addendum", "context_override": "Жеке қосымша", "variant_id": vid})
@@ -331,7 +332,7 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
         })
 
         invalid_limit = await self.client.post("/ent-trial/admin/accesses", json={
-            "variant_id": variant_id, "target_type": "all", "max_attempts": 0,
+            "variant_id": variant_id, "target_type": "global", "max_attempts": 0,
         })
         self.assertEqual(invalid_limit.status_code, 422, invalid_limit.text)
 
@@ -427,7 +428,7 @@ class EntIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_extra_time_is_individual_and_fixed_at_start(self):
         vid = await self.create_variant()
         await self.fill_variant(vid)
-        response = await self.client.post("/ent-trial/admin/accesses", json={"variant_id": vid, "target_type": "all", "extra_time_minutes": 40})
+        response = await self.client.post("/ent-trial/admin/accesses", json={"variant_id": vid, "target_type": "global", "extra_time_minutes": 40})
         self.assertEqual(response.status_code, 422)
         response = await self.client.post("/ent-trial/admin/accesses", json={"variant_id": vid, "target_type": "student", "student_id": self.users["student"]["id"], "extra_time_minutes": 40})
         self.assertEqual(response.status_code, 200, response.text)

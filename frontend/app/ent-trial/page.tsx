@@ -54,7 +54,7 @@ export default function EntTrialListPage() {
   // Form states for granting access
   const [accessVarId, setAccessVarId] = useState<number | ''>('')
   const [accessCombo, setAccessCombo] = useState('infmat')
-  const [accessTarget, setAccessTarget] = useState<'all' | 'group' | 'student'>('all')
+  const [accessTarget, setAccessTarget] = useState<'current_students' | 'global' | 'group' | 'student'>('current_students')
   const [accessGroupId, setAccessGroupId] = useState<number | ''>('')
   const [accessStudentIds, setAccessStudentIds] = useState<number[]>([])
   const [studentFilter, setStudentFilter] = useState('')
@@ -405,18 +405,20 @@ export default function EntTrialListPage() {
                 <div>
                   <label htmlFor="ent-field-7" className="block text-sm font-medium mb-1">Кімге</label>
                   <select id="ent-field-7" value={accessTarget} onChange={(e) => {
-                    const target = e.target.value as 'all' | 'group' | 'student'
+                    const target = e.target.value as 'current_students' | 'global' | 'group' | 'student'
                     setAccessTarget(target)
                     if (target !== 'group') setAccessGroupId('')
                     if (target !== 'student') { setAccessStudentIds([]); setStudentFilter('') }
                   }}
                     className="w-full rounded-lg border border-border p-2.5 bg-surface text-foreground">
-                    <option value="all">Барлық студенттерге</option>
+                    <option value="current_students">Қазіргі барлық оқушылар</option>
+                    <option value="global">Барлық оқушыларға, оның ішінде жаңаларына</option>
                     <option value="group">Топқа</option>
                     <option value="student">Таңдалған студенттерге</option>
                   </select>
                 </div>
 
+                {(accessTarget === 'current_students' || accessTarget === 'global') && <p className="text-sm text-muted">{accessTarget === 'current_students' ? 'Қазір тіркелген, бұғатталмаған оқушыларға ғана беріледі. Кейін тіркелгендерге берілмейді.' : 'Жаңа тіркелетін оқушыларға да автоматты түрде рұқсат беріледі.'}</p>}
                 {accessTarget === 'group' && (
                   <div>
                     <label htmlFor="ent-field-8" className="block text-sm font-medium mb-1">Топ</label>
@@ -515,7 +517,7 @@ export default function EntTrialListPage() {
                       >
                         <p className="font-bold">{a.variant_title || 'ҰБТ нұсқасы'}</p>
                         <p className="text-xs text-muted">
-                          {a.target_type === 'all' ? 'Барлық студенттерге' : a.target_type === 'group' ? `Топ: ${a.group_title || a.group_code}` : `Студент: ${a.student_name}`}
+                          {a.target_type === 'all' ? (a.audience_mode === 'global' ? 'Барлық оқушыларға, оның ішінде жаңаларына' : 'Бұрынғы жалпы рұқсат — ағымдағы және жаңа оқушыларға. Әкімші жіктеуі қажет.') : a.target_type === 'group' ? `Топ: ${a.group_title || a.group_code}` : `Студент: ${a.student_name}`}
                         </p>
                         <p className="text-xs text-muted">{a.exam_mode === 'single' ? `Пән: ${rulesData?.subject_labels[a.single_subject] || a.single_subject}` : `Комбинация: ${COMBO_LABELS[a.combination] || a.combination}`}</p>
                         <p className="text-xs text-muted">

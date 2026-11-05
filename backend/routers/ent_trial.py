@@ -76,7 +76,7 @@ class ContextIn(BaseModel):
 
 class AccessIn(BaseModel):
     variant_id: int
-    target_type: Literal["all", "group", "student"]
+    target_type: Literal["current_students", "global", "group", "student"]
     group_id: int | None = None
     student_id: int | None = None
     student_ids: list[int] = Field(default_factory=list)
@@ -540,16 +540,22 @@ async def grant_ent_access(data: AccessIn, user: dict = Depends(require_admin)):
                     WHERE id=ANY($1::bigint[]) AND role='student' AND NOT is_blocked""", student_ids)
             if {row["id"] for row in members} != set(student_ids):
                 raise HTTPException(422, "Таңдалған оқушы топта жоқ немесе бұғатталған")
-        targets = student_ids if data.target_type == "student" else [None]
+        if data.target_type == "current_students":
+            student_ids = [r["id"] for r in await conn.fetch("SELECT id FROM users WHERE role='student' AND NOT is_blocked ORDER BY id")]
+            if not student_ids:
+                raise HTTPException(422, "Қазіргі тіркелген оқушылар жоқ")
+        stored_target = "student" if data.target_type == "current_students" else "all" if data.target_type == "global" else data.target_type
+        audience_mode = data.target_type if data.target_type in {"current_students", "global"} else None
+        targets = student_ids if stored_target == "student" else [None]
         access_ids = []
         for student_id in targets:
             access_ids.append(await conn.fetchval("""INSERT INTO ent_trial_accesses(
                 granted_by_id,variant_id,combination,target_type,group_id,student_id,expires_at,
-                extra_time_minutes,camera_required,max_attempts
-            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id""",
-                user["id"], data.variant_id, v["combination"], data.target_type,
+                extra_time_minutes,camera_required,max_attempts,audience_mode
+            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id""",
+                user["id"], data.variant_id, v["combination"], stored_target,
                 data.group_id if data.target_type == "group" else None,
-                student_id, data.expires_at, data.extra_time_minutes, data.camera_required, data.max_attempts))
+                student_id, data.expires_at, data.extra_time_minutes, data.camera_required, data.max_attempts, audience_mode))
     return {"ok": True, "id": access_ids[0], "ids": access_ids, "count": len(access_ids)}
 
 

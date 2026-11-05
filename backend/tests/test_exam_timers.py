@@ -23,7 +23,7 @@ class EntTimerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status_code,200,r.text)
         vid=r.json()['id']
         await self.fill_single_variant(vid,'informatics')
-        r=await self.client.post('/ent-trial/admin/accesses',json={'variant_id':vid,'target_type':'all'})
+        r=await self.client.post('/ent-trial/admin/accesses',json={'variant_id':vid,'target_type':'global'})
         self.assertEqual(r.status_code,200,r.text)
         access=r.json()['id']
         self.actor=self.users['student']
